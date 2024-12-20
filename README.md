@@ -40,7 +40,7 @@ This fork is a hobby, it adds new features and other tweaks, and removes some ot
     User File Accessibility: Prefs, session data, and data folders are now outside _internal
     Core Utilization: Automatically utilizes available CPU cores.
     Fixed Bugs: That appeared in the original
-    Logging: Added logging for better debugging.
+    
 
 # Warnings #
 
@@ -55,7 +55,7 @@ This fork is a hobby, it adds new features and other tweaks, and removes some ot
 1. Install Python: Ensure you have Python installed.
 2. Install Dependencies: Use pip to install the required dependencies:
 
-       pip install pyvips tkinter-tooltip pillow pyinstaller
+       pip install pyvips tkinter-tooltip pillow pyinstaller (more now check install.bat, also need vlc.exe 64bit)
          or if you built yourself from the latest source (mp4, webm animation and audio support) "pip install pyvips tkinter-tooltip pillow pyinstaller opencv-python audioop-lts imageio imageio[ffmpeg] pydub pygame simpleaudio"
 
 4. Required DLLs: Obtain the following DLLs from a compiled copy in the _internal folder:
