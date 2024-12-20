@@ -1,55 +1,47 @@
 import os
 import sys
-import time
-import shutil
+from time import time
+from random import seed
+from shutil import rmtree, move as shutilmove
+import json
 import tkinter as tk
 from tkinter.messagebox import askokcancel
-import json
-import random
 from tkinter import filedialog as tkFileDialog
 import concurrent.futures as concurrent
-import logging
 from hashlib import md5
+from PIL import Image, ImageTk
+from imageio import get_reader
+import logging
+#get persistent selections working again.
+#get show next working again. show next.
+#is iamgeio[ffmpeg] required?
+if getattr(sys, 'frozen', False):  # Check if running as a bundled executable
+    base_path = sys._MEIPASS
+else:
+    base_path = os.path.dirname(os.path.abspath(__file__))
+vipsbin = os.path.join(base_path, "vips-dev-8.16", "bin")
+os.environ['PATH'] = os.pathsep.join((vipsbin, os.environ['PATH']))
+if os.path.exists(vipsbin):
+    os.add_dll_directory(vipsbin)
+
 import pyvips
 from gui import GUIManager, randomColor
-from PIL import Image, ImageTk
-import imageio
+from navigator import Navigator
 
 #interesting borderwidth adds padding but it is friendly.
 logger = logging.getLogger("Sortimages")
 logger.setLevel(logging.WARNING)  # Set to the lowest level you want to handle
-
 handler = logging.StreamHandler()
 handler.setLevel(logging.WARNING)
-
 formatter = logging.Formatter('%(message)s')
 handler.setFormatter(formatter)
-
 logger.addHandler(handler)
-
- # This can/should be commented if you build.
-
-import ctypes
-try:
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    dll_path1 = os.path.join(script_dir, 'libvips-cpp-42.dll')
-    dll_path2 = os.path.join(script_dir, 'libvips-42.dll')
-    dll_path3 = os.path.join(script_dir, 'libglib-2.0-0.dll')
-    dll_path4 = os.path.join(script_dir, 'libgobject-2.0-0.dll')
-except FileNotFoundError:
-    logger.error("The file was not found. (You are missing .dlls)")
-ctypes.CDLL(dll_path1)
-ctypes.CDLL(dll_path2)
-ctypes.CDLL(dll_path3)
-ctypes.CDLL(dll_path4)
-
 
 # The imagefile class. It holds all information about the image and the state its container is in.
 class Imagefile:
     path = ""
     dest = ""
     dupename=False
-
     def __init__(self, name, path) -> None:
         self.name = tk.StringVar()
         self.name.set(name)
@@ -70,7 +62,16 @@ class Imagefile:
         self.index = 0
         self.delay = 100 #Default delay
         self.id = None
-
+    
+    def setid(self, id):
+        self.id = id
+    def setguidata(self, data):
+        self.guidata = data
+    
+    def setdest(self, dest):
+        self.dest = dest["path"]
+        logger.info("Set destination of %s to %s",
+                      self.name.get(), self.dest)
     def move(self, x, assigned, moved, gui) -> str:
         destpath = self.dest
 
@@ -88,7 +89,7 @@ class Imagefile:
                 old_path = self.path
 
                 # Throws exception when image is open.
-                shutil.move(self.path, new_path)
+                shutilmove(self.path, new_path)
 
                 assigned.remove(x)
                 moved.append(x)
@@ -126,23 +127,10 @@ class Imagefile:
                     highlightbackground="red", highlightthickness=2)
                 return ("Error moving: %s . File: %s", e, self.name.get())
 
-    def setid(self, id):
-        self.id = id
-
-    def setguidata(self, data):
-        self.guidata = data
-
-    def setdest(self, dest):
-        self.dest = dest["path"]
-        logger.info("Set destination of %s to %s",
-                      self.name.get(), self.dest)
-
-
 class SortImages:
     imagelist = []
     destinations = []
     exclude = []
-
     def __init__(self) -> None:
         self.last_call_time = 0
         self.throttle_delay = 0.19
@@ -174,7 +162,7 @@ class SortImages:
 
                     # The size doesnt match what is wanted in prefs
                     if max(width, height) != self.gui.thumbnailsize:
-                        shutil.rmtree(data_dir)
+                        rmtree(data_dir)
                         logger.warning(f"Removing data folder, thumbnailsize changed")
                         os.mkdir(data_dir)
                         logger.warning(f"Re-created data folder.")
@@ -186,7 +174,6 @@ class SortImages:
             pass
         else:
             os.mkdir(data_dir)
-
     def loadprefs(self):
 
         # Figure out script and data directory locations
@@ -355,7 +342,6 @@ class SortImages:
                 self.gui.hotkeys = hotkeys
         except Exception as e:
             logger.error(f"Error loading prefs.json: {e}")
-
     def saveprefs(self, gui):
         if gui.middlepane_frame.winfo_width() == 1:
             pass
@@ -470,7 +456,111 @@ class SortImages:
                 self.savesession(False)
         except Exception as e:
             logger.warning(("Failed to save session:", e))
+    def savesession(self,asksavelocation):
 
+        print("Saving session, Goodbye!")
+        if asksavelocation:
+            filet=[("Javascript Object Notation","*.json")]
+            savelocation=tkFileDialog.asksaveasfilename(confirmoverwrite=True,defaultextension=filet,filetypes=filet,initialdir=os.getcwd(),initialfile=self.gui.sessionpathvar.get())
+        else:
+            savelocation = self.gui.sessionpathvar.get()
+
+        if len(self.imagelist) > 0:
+            imagesavedata = []
+
+            for obj in self.imagelist:
+                if hasattr(obj, 'thumbnail'):
+                    thumb = obj.thumbnail
+                else:
+                    thumb = ""
+                if hasattr(obj, 'video_thumb_path'):
+                    video_thumb_path = obj.video_thumb_path
+                else:
+                    video_thumb_path = ""
+                if hasattr(obj, 'isanimated'):
+                    if obj.isanimated:
+                        isanimated = True
+                    else:
+                        isanimated = False
+                imagesavedata.append({
+                    "name": obj.name.get(),
+                    "file_size": obj.file_size,
+                    "id": obj.id,
+                    "path": obj.path,
+                    "dest": obj.dest,
+                    "checked": obj.checked.get(),
+                    "moved": obj.moved,
+                    "thumbnail": thumb,
+                    "video_thumb_path": video_thumb_path,
+                    "dupename": obj.dupename,
+                    "isanimated": isanimated,
+                    })
+    
+            save = {"dest": self.ddp, "source": self.sdp,
+                    "imagelist": imagesavedata,"thumbnailsize":self.gui.thumbnailsize,'existingnames':list(self.existingnames)}
+            with open(savelocation, "w+") as savef:
+                json.dump(save, savef, indent=4)
+    def loadsession(self):
+        sessionpath = self.gui.sessionpathvar.get()
+
+        if os.path.exists(sessionpath) and os.path.isfile(sessionpath):
+            with open(sessionpath, "r") as savef:
+                sdata = savef.read()
+                savedata = json.loads(sdata)
+            gui = self.gui
+            self.sdp = savedata['source']
+            self.ddp = savedata['dest']
+            self.setup(savedata['dest'])
+            print("")
+            print(f'Using session:  "{sessionpath}"')
+            print(f'Source:   "{self.sdp}"')
+            print(f'Target:   "{self.ddp}"')
+
+            if 'existingnames' in savedata:
+                self.existingnames = set(savedata['existingnames'])
+            for line in savedata['imagelist']:
+                if os.path.exists(line['path']):
+                    obj = Imagefile(line['name'], line['path'])
+                    obj.thumbnail = line['thumbnail']
+                    obj.video_thumb_path = line['video_thumb_path']
+                    obj.dest=line['dest']
+                    obj.id=line['id']
+                    obj.file_size=line['file_size']
+                    obj.checked.set(line['checked'])
+                    obj.moved = line['moved']
+                    obj.dupename=line['dupename']
+
+                    try:
+                        obj.isanimated=line['isanimated']
+                    except Exception as e:
+                        logger.debug(f"No value isanimated: {e}")
+                    self.imagelist.append(obj)
+
+            self.gui.thumbnailsize=savedata['thumbnailsize']
+            listmax = min(gui.squaresperpage.get(), len(self.imagelist))
+            self.gui.initial_dock_setup()
+            gui.displaygrid(self.imagelist, range(0, min(gui.squaresperpage.get(),listmax)))
+            self.gui.images_left.set(len(self.imagelist))
+            self.gui.images_left_and_assigned.set(f"{len(self.gui.assigned_squarelist)}/{self.gui.images_left.get()}")
+            gui.guisetup(self.destinations)
+        else:
+            logger.warning("No Last Session!")
+    def get_current_list(self): # Communicates to setdestination what list is selected
+        if self.gui.show_unassigned.get():
+            unassign = self.gui.unassigned_squarelist
+            if self.gui.show_animated.get():
+                unassigned_animated = [item for item in unassign if item.obj.isanimated]
+                return unassigned_animated
+            else:
+                return unassign
+
+        elif self.gui.show_assigned.get():
+            assign = self.gui.assigned_squarelist
+            return assign
+
+        elif self.gui.show_moved.get():
+            moved = self.gui.moved_squarelist
+            return moved
     def moveall(self):
         loglist = []
 
@@ -482,7 +572,6 @@ class SortImages:
             self.gui.save_viewer_geometry()
             reopen = "window"
         elif hasattr(self.gui, "Image_frame"):
-            #self.gui.Image_frame.close_window()
             self.gui.after(0, self.gui.Image_frame.destroy)
             del self.gui.Image_frame
             reopen = "dock"
@@ -511,62 +600,8 @@ class SortImages:
         except Exception as e:
             logger.error(f"Failed to write filelog.txt: {e}")
 
-    def walk(self, src):
-        duplicates = self.duplicatenames
-        existing = self.existingnames
-        supported_formats = {"png", "gif", "jpg", "jpeg", "bmp", "pcx", "tiff", "webp", "psd", "jfif", "mp4", "webm"}
-        animation_support = {"gif", "webp", "mp4", "webm"} # For clarity
-        for root, dirs, files in os.walk(src, topdown=True):
-            dirs[:] = [d for d in dirs if d not in self.exclude]
-            for name in files:
-                ext = os.path.splitext(name)[1][1:].lower()
-                if ext in supported_formats:
-                    imgfile = Imagefile(name, os.path.join(root, name))
-                    if ext == "gif" or ext == "webp" or ext == "webm" or ext == "mp4":
-                        imgfile.isanimated = True
-                    if name in existing:
-                        duplicates.append(imgfile)
-                        imgfile.dupename=True
-                    else:
-                        existing.add(name)
-                    self.imagelist.append(imgfile)
-
-        # Sort by date modificated
-        if self.gui.sortbydatevar.get():
-            self.imagelist.sort(key=lambda img: os.path.getmtime(img.path), reverse=True)
-        return self.imagelist
-
-    def checkdupefilenames(self, imagelist):
-        duplicates: list[Imagefile] = []
-        existing: set[str] = set()
-
-        for item in imagelist:
-            if item.name.get() in existing:
-                duplicates.append(item)
-                item.dupename=True
-            else:
-                existing.add(item.name)
-        return duplicates
-
-    def get_current_list(self): # Communicates to setdestination what list is selected
-        if self.gui.show_unassigned.get():
-            unassign = self.gui.unassigned_squarelist
-            if self.gui.show_animated.get():
-                unassigned_animated = [item for item in unassign if item.obj.isanimated]
-                return unassigned_animated
-            else:
-                return unassign
-
-        elif self.gui.show_assigned.get():
-            assign = self.gui.assigned_squarelist
-            return assign
-
-        elif self.gui.show_moved.get():
-            moved = self.gui.moved_squarelist
-            return moved
-
     def setDestination(self, *args):
-        current_time = time.time()
+        current_time = time()
         if not self.gui.key_pressed:
             pass
         elif current_time - self.last_call_time >= self.throttle_delay: #and key pressed down... so you can tap as fast as you like.
@@ -574,20 +609,6 @@ class SortImages:
         else:
             #print("Victim of throttling")
             return
-        index_before_move = -1
-        # cant find displayedimag at index. remove frame colours.
-        if self.gui.current_selection in self.gui.displayedlist:
-            if self.gui.displayedlist.index(self.gui.current_selection) != self.gui.current_selection and not self.gui.show_next.get():
-                self.gui.current_selection.configure(highlightcolor=self.gui.imageborder_default_colour, highlightbackground = self.gui.imageborder_default_colour)
-                self.gui.current_selection.c.configure(style="Theme_square.TCheckbutton")
-                self.gui.current_selection.cf.configure(bg=self.gui.square_text_box_colour)
-
-                self.gui.current_selection.canvas.configure(highlightcolor=self.gui.imageborder_default_colour, highlightbackground = self.gui.imageborder_default_colour)
-            else:
-                # If we have something selected, and if that someting is not the same picture as the one displayed
-                # We know the frame colour must be updated.
-                index_before_move = self.gui.displayedlist.index(self.gui.current_selection)
-
 
         dest = args[0]
         marked = []
@@ -627,7 +648,7 @@ class SortImages:
                             if hasattr(self.gui, 'destwindow'): # if we have new assigned.
                                 if self.gui.dest == dest['path']: #the path is here because we only want to append when path is the same as current dest
                                     self.gui.filtered_images.append(x.obj)
-                                     #imageobject eventually
+                                    #imageobject eventually
                                     self.gui.queue.append(x)
 
                         # Stop animations
@@ -719,129 +740,20 @@ class SortImages:
         self.gui.images_left_and_assigned.set(f"{len(self.gui.assigned_squarelist)}/{int(self.gui.images_left.get())}")
         if hasattr(self.gui, 'destwindow'): #only refresh dest list if destwindow active.
             self.gui.refresh_destinations()
-        if index_before_move >= 0 and index_before_move+1 <= len(self.gui.displayedlist):
-            self.update_show_next(index_before_move)
+        self.navigator.update_navigator(self.gui.displayedlist)
+        self.navigator.select_next()
 
-    def update_show_next(self, index_before_move): # Current_selection was in index x, after setdestination, it might not be in that index. We want that index to be "selected", this handles that.
-
-        #check if moved from that index.
-        if self.gui.show_next.get() and self.gui.displayedlist[index_before_move] != self.gui.current_selection:
-
-            previous_selection = self.gui.current_selection # Restore old frame's frame.
-            previous_selection.configure(bg = self.gui.imagebox_default_colour, highlightcolor=self.gui.imageborder_default_colour, highlightbackground = self.gui.imageborder_default_colour)
-            previous_selection.canvas.configure(bg = self.gui.imagebox_default_colour, highlightcolor=self.gui.imageborder_default_colour, highlightbackground = self.gui.imageborder_default_colour)
-            previous_selection.cf.configure(bg=self.gui.square_text_box_colour)
-            previous_selection.c.configure(style="Theme_square.TCheckbutton")
-
-            #previous_selection.bar.configure(bg = self.gui.imageborder_selected_colour, highlightcolor = self.gui.imageborder_selected_colour)
-
-            #previous_selection.canvas.itemconfig(self.gui.current_selection.sqr, fill=self.gui.imageborder_default_colour)
-
-
-            self.gui.current_selection = self.gui.displayedlist[index_before_move] # Change new frame's frame
-            self.gui.current_selection.configure(bg = self.gui.imagebox_selection_colour, highlightbackground = self.gui.imageborder_selected_colour, highlightcolor = self.gui.imageborder_selected_colour)
-            self.gui.current_selection.canvas.configure(bg = self.gui.imagebox_selection_colour, highlightbackground = self.gui.imageborder_selected_colour, highlightcolor = self.gui.imageborder_selected_colour)
-            self.gui.current_selection.cf.configure(bg=self.gui.square_text_box_selection_colour)
-            self.gui.current_selection.c.configure(style="Theme_square2.TCheckbutton")
-            #self.gui.current_selection.bar.configure(bg = self.gui.imageborder_selected_colour, highlightcolor = self.gui.imageborder_selected_colour)
-
-            #self.gui.current_selection.canvas.itemconfig(self.gui.current_selection.sqr, fill=self.gui.imageborder_selected_colour)
-
-
-            self.gui.last_selection = self.gui.current_selection
-            self.gui.displayimage(self.gui.current_selection, False) # The flag solves a performance issue when auto loading images very very fast. I do not know why.
-
-    def savesession(self,asksavelocation):
-
-        print("Saving session, Goodbye!")
-        if asksavelocation:
-            filet=[("Javascript Object Notation","*.json")]
-            savelocation=tkFileDialog.asksaveasfilename(confirmoverwrite=True,defaultextension=filet,filetypes=filet,initialdir=os.getcwd(),initialfile=self.gui.sessionpathvar.get())
-        else:
-            savelocation = self.gui.sessionpathvar.get()
-
-        if len(self.imagelist) > 0:
-            imagesavedata = []
-
-            for obj in self.imagelist:
-                if hasattr(obj, 'thumbnail'):
-                    thumb = obj.thumbnail
-                else:
-                    thumb = ""
-                if hasattr(obj, 'video_thumb_path'):
-                    video_thumb_path = obj.video_thumb_path
-                else:
-                    video_thumb_path = ""
-                if hasattr(obj, 'isanimated'):
-                    if obj.isanimated:
-                        isanimated = True
-                    else:
-                        isanimated = False
-                imagesavedata.append({
-                    "name": obj.name.get(),
-                    "file_size": obj.file_size,
-                    "id": obj.id,
-                    "path": obj.path,
-                    "dest": obj.dest,
-                    "checked": obj.checked.get(),
-                    "moved": obj.moved,
-                    "thumbnail": thumb,
-                    "video_thumb_path": video_thumb_path,
-                    "dupename": obj.dupename,
-                    "isanimated": isanimated,
-                    })
     
-            save = {"dest": self.ddp, "source": self.sdp,
-                    "imagelist": imagesavedata,"thumbnailsize":self.gui.thumbnailsize,'existingnames':list(self.existingnames)}
-            with open(savelocation, "w+") as savef:
-                json.dump(save, savef, indent=4)
-
-    def loadsession(self):
-        sessionpath = self.gui.sessionpathvar.get()
-
-        if os.path.exists(sessionpath) and os.path.isfile(sessionpath):
-            with open(sessionpath, "r") as savef:
-                sdata = savef.read()
-                savedata = json.loads(sdata)
-            gui = self.gui
-            self.sdp = savedata['source']
-            self.ddp = savedata['dest']
-            self.setup(savedata['dest'])
-            print("")
-            print(f'Using session:  "{sessionpath}"')
-            print(f'Source:   "{self.sdp}"')
-            print(f'Target:   "{self.ddp}"')
-
-            if 'existingnames' in savedata:
-                self.existingnames = set(savedata['existingnames'])
-            for line in savedata['imagelist']:
-                if os.path.exists(line['path']):
-                    obj = Imagefile(line['name'], line['path'])
-                    obj.thumbnail = line['thumbnail']
-                    obj.video_thumb_path = line['video_thumb_path']
-                    obj.dest=line['dest']
-                    obj.id=line['id']
-                    obj.file_size=line['file_size']
-                    obj.checked.set(line['checked'])
-                    obj.moved = line['moved']
-                    obj.dupename=line['dupename']
-
-                    try:
-                        obj.isanimated=line['isanimated']
-                    except Exception as e:
-                        logger.debug(f"No value isanimated: {e}")
-                    self.imagelist.append(obj)
-
-            self.gui.thumbnailsize=savedata['thumbnailsize']
-            listmax = min(gui.squaresperpage.get(), len(self.imagelist))
-            self.gui.initial_dock_setup()
-            gui.displaygrid(self.imagelist, range(0, min(gui.squaresperpage.get(),listmax)))
-            self.gui.images_left.set(len(self.imagelist))
-            self.gui.images_left_and_assigned.set(f"{len(self.gui.assigned_squarelist)}/{self.gui.images_left.get()}")
-            gui.guisetup(self.destinations)
-        else:
-            logger.warning("No Last Session!")
-
+    def setup(self, dest): # scan the destination
+        self.destinations = []
+        self.destinationsraw = []
+        with os.scandir(dest) as it:
+            for entry in it:
+                if entry.is_dir():
+                    seed(entry.name)
+                    self.destinations.append(
+                        {'name': entry.name, 'path': entry.path, 'color': randomColor()})
+                    self.destinationsraw.append(entry.path)
     def validate(self, gui):
         self.sdp = self.gui.sdpEntry.get()
         self.ddp = self.gui.ddpEntry.get()
@@ -865,6 +777,7 @@ class SortImages:
             gui.displaygrid(self.imagelist, range(0, min(len(self.imagelist), gui.squaresperpage.get())))
             self.gui.images_left.set(len(self.imagelist))
             self.gui.images_left_and_assigned.set(f"{len(self.gui.assigned_squarelist)}/{self.gui.images_left.get()}")
+            self.navigator = Navigator(self, self.gui)
 
         elif samepath:
             self.gui.sdpEntry.delete(0, tk.END)
@@ -876,20 +789,10 @@ class SortImages:
             self.gui.ddpEntry.delete(0, tk.END)
             self.gui.sdpEntry.insert(0, "ERROR INVALID PATH")
             self.gui.ddpEntry.insert(0, "ERROR INVALID PATH")
-
-    def setup(self, dest): # scan the destination
-        self.destinations = []
-        self.destinationsraw = []
-        with os.scandir(dest) as it:
-            for entry in it:
-                if entry.is_dir():
-                    random.seed(entry.name)
-                    self.destinations.append(
-                        {'name': entry.name, 'path': entry.path, 'color': randomColor()})
-                    self.destinationsraw.append(entry.path)
+        
 
     def extract_video_thumbnail(self, imagefile, thumbpath, time='00:00:00'):
-        reader = imageio.get_reader(imagefile.path)
+        reader = get_reader(imagefile.path)
         tempn = thumbpath.rfind(".jpg")
         temp = thumbpath[:tempn] + '_video_thumb.jpg'
 
@@ -901,29 +804,30 @@ class SortImages:
             image.save(thumbpath)
             imagefile.thumbnail = thumbpath
             break
-        
-        #command = [
-        #    'ffmpeg',
-        #    '-i', imagefile.path,
-        #    '-ss', time,
-        #    '-vframes', '1',
-        #    '-vf', f'scale={self.gui.thumbnailsize}:-1:flags=bicubic',
-        #    thumbpath
-        #]
-        #subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE) # grid
-        #imagefile.thumbnail = thumbpath
-        #tempn = thumbpath.rfind(".jpg")
-        #temp = thumbpath[:tempn] + '_video_thumb.jpg'
-        #command = [
-        #    'ffmpeg',
-        #    '-i', imagefile.path,
-        #    '-ss', time,
-        #    '-vframes', '1',
-        #    temp
-        #]
-        #subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE) # viewer
-        #imagefile.video_thumb_path = temp
+    def walk(self, src):
+        duplicates = self.duplicatenames
+        existing = self.existingnames
+        supported_formats = {"png", "gif", "jpg", "jpeg", "bmp", "pcx", "tiff", "webp", "psd", "jfif", "mp4", "webm"}
+        animation_support = {"gif", "webp", "mp4", "webm"} # For clarity
+        for root, dirs, files in os.walk(src, topdown=True):
+            dirs[:] = [d for d in dirs if d not in self.exclude]
+            for name in files:
+                ext = os.path.splitext(name)[1][1:].lower()
+                if ext in supported_formats:
+                    imgfile = Imagefile(name, os.path.join(root, name))
+                    if ext == "gif" or ext == "webp" or ext == "webm" or ext == "mp4":
+                        imgfile.isanimated = True
+                    if name in existing:
+                        duplicates.append(imgfile)
+                        imgfile.dupename=True
+                    else:
+                        existing.add(name)
+                    self.imagelist.append(imgfile)
 
+        # Sort by date modificated
+        if self.gui.sortbydatevar.get():
+            self.imagelist.sort(key=lambda img: os.path.getmtime(img.path), reverse=True)
+        return self.imagelist
     def makethumb(self, imagefile):
             file_name1 = imagefile.path.replace('\\', '/').split('/')[-1]
             if not imagefile.file_size or not imagefile.mod_time:
@@ -963,19 +867,16 @@ class SortImages:
                 imagefile.thumbnail = thumbpath
             except Exception as e:
                 logger.error("Error in thumbnail generation: %s", e)
-
     def generatethumbnails(self, images):
         #logger.info("md5 hashing %s files", len(images))
         max_workers = max(1,self.threads)
         with concurrent.ThreadPoolExecutor(max_workers=max_workers) as executor:
             executor.map(self.makethumb, images)
-
     def load_frames(self, gridsquare): # Creates frames and frametimes for gifs and webps
-        if gridsquare.obj.path.lower().endswith(".mp4") or gridsquare.obj.path.lower().endswith(".webm"):
-            reader = imageio.get_reader(gridsquare.obj.path)
+        if gridsquare.obj.path.lower().endswith(".webm"):
+            reader = get_reader(gridsquare.obj.path)
             fps = (reader.get_meta_data().get('fps', 24))
             gridsquare.obj.delay = int(round((1 / fps)*1000))
-            print(fps, gridsquare.obj.delay)
             for frame in reader:
                 image = Image.fromarray(frame)
                 image.thumbnail((self.gui.thumbnailsize,self.gui.thumbnailsize))
@@ -984,7 +885,15 @@ class SortImages:
                 gridsquare.obj.framecount += 1
                 gridsquare.obj.frametimes.append(gridsquare.obj.delay)
             gridsquare.obj.lazy_loading = False     
-            print(len(gridsquare.obj.frametimes), gridsquare.obj.framecount)
+            return
+        elif gridsquare.obj.path.lower().endswith(".mp4"):
+            reader = get_reader(gridsquare.obj.path)
+            fps = (reader.get_meta_data().get('fps', 24))
+            gridsquare.obj.delay = int(round((1 / fps)*1000))
+            for frame in reader:
+                gridsquare.obj.framecount += 1
+                gridsquare.obj.frametimes.append(gridsquare.obj.delay)
+            gridsquare.obj.lazy_loading = False     
             return
         try:
             with Image.open(gridsquare.obj.path) as img:
@@ -993,7 +902,6 @@ class SortImages:
                 if gridsquare.obj.framecount == 1: #Only one frame, cannot animate
                     print(f"Found static gif/webp: {gridsquare.obj.name.get()[:30]}")
                     gridsquare.obj.isanimated = False
-                    print(gridsquare.obj.isanimated, gridsquare.obj.framecount)
                     return
                 
                 frame_frametime = img.info.get('duration',gridsquare.obj.delay)
@@ -1020,12 +928,22 @@ class SortImages:
                         gridsquare.obj.frametimes[i] = gridsquare.obj.delay
                     print(f"Bugged animation frametimes. Using default_delay. {gridsquare.obj.name.get()[:30]}")
                 gridsquare.obj.lazy_loading = False
-                print(f"frametimes {gridsquare.obj.frametimes}")
                 logger.info(f"All frames loaded for: {gridsquare.obj.name.get()[:30]}")
         except Exception as e: #fallback to static.
             logger.error(f"Error in load_frames: {e}")
             gridsquare.obj.isanimated = False
 
+    def checkdupefilenames(self, imagelist):
+        duplicates: list[Imagefile] = []
+        existing: set[str] = set()
+
+        for item in imagelist:
+            if item.name.get() in existing:
+                duplicates.append(item)
+                item.dupename=True
+            else:
+                existing.add(item.name)
+        return duplicates
     def clear(self, *args):
         if askokcancel("Confirm", "Really clear your selection?"):
             for x in self.imagelist:
