@@ -1,9 +1,9 @@
-import os
-import time
+from os import path, getcwd
+from time import time, sleep
 import pyvips
 import tkinter as tk
 import logging
-import random
+from random import random, seed, randint
 from math import floor,sqrt,ceil
 from PIL import Image, ImageTk
 from canvasimage import CanvasImage
@@ -16,20 +16,19 @@ from tktooltip import ToolTip
 from tkinter import filedialog as tkFileDialog
 from operator import indexOf
 from functools import partial
-import threading
-
+from threading import Thread
+import vlc
+#Do navigator
 logger = logging.getLogger("GUI")
 logger.setLevel(logging.WARNING)  # Set to the lowest level you want to handle
-
 handler = logging.StreamHandler()
 handler.setLevel(logging.WARNING)
-
 formatter = logging.Formatter('%(message)s')
 handler.setFormatter(formatter)
-
 logger.addHandler(handler)
 
 throttle_time = None
+"Colour stuff"
 def luminance(hexin):
     color = tuple(int(hexin.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
     r = color[0]
@@ -44,17 +43,12 @@ def luminance(hexin):
         return 'light'
     else:
         return 'dark'
-
-def disable_event():
-    pass
-
 def randomColor():
     color = '#'
     hexletters = '0123456789ABCDEF'
     for i in range(0, 6):
-        color += hexletters[floor(random.random()*16)]
+        color += hexletters[floor(random()*16)]
     return color
-
 def darken_color(color, factor=0.5): #Darken a given color by a specified factor
         # Convert hex color to RGB
         r = int(color[1:3], 16)
@@ -71,6 +65,7 @@ def darken_color(color, factor=0.5): #Darken a given color by a specified factor
         return f'#{r:02x}{g:02x}{b:02x}'
 
 class GUIManager(tk.Tk):
+    "Initialization"
     def __init__(self, fileManager) -> None:
         super().__init__()
         self.fileManager = fileManager
@@ -216,7 +211,6 @@ class GUIManager(tk.Tk):
 
         self.actual_gridsquare_width = self.thumbnailsize + self.gridsquare_padx + self.square_border_size*2 + self.whole_box_size*2
         self.actual_gridsquare_height = self.thumbnailsize + self.gridsquare_pady + self.square_border_size*2 + self.whole_box_size*2 + self.checkbox_height
-
     def initialize(self): #Initializating GUI
         global throttle_time
         throttle_time = self.throttle_time
@@ -228,10 +222,6 @@ class GUIManager(tk.Tk):
         style = ttk.Style()
         self.style = style
         style.configure('Theme_dividers.TPanedwindow', background=self.pane_divider_colour)  # Panedwindow, the divider colour.
-        style.configure("Theme_square.TCheckbutton", background=self.square_text_box_colour, foreground=self.square_text_colour) # Theme for Square
-        style.configure("Theme_square2.TCheckbutton", background=self.square_text_box_selection_colour, foreground=self.square_text_colour) # Theme for Square (selected)
-        style.configure("Theme_square3.TCheckbutton", background=self.square_text_box_locked_colour, foreground=self.square_text_colour) # Theme for Square (locked)
-
         style.configure("Theme_checkbox.TCheckbutton", background=self.main_colour, foreground=self.text_colour, highlightthickness = 0) # Theme for checkbox
 
         # Paned window that holds the almost top level stuff.
@@ -257,14 +247,8 @@ class GUIManager(tk.Tk):
         self.imagegrid = tk.Text(imagegridframe, wrap='word', borderwidth=0,
                                  highlightthickness=0, state="normal", background=self.grid_background_colour)
 
-        self.op = ["#585CCE", "#888BF8", "black", "#303276"]
-        self.switch_counter = 0
-
         self.imagegrid.bind("<Up>", lambda e: "break")
         self.imagegrid.bind("<Down>", lambda e: "break")
-        self.imagegrid.bind("<KeyPress>", lambda event: (self.imagegrid.after_idle(self.navigator, event), self.navigation_key_pressed_toggle(False)))
-        self.imagegrid.bind("<KeyRelease>", lambda event: (self.imagegrid.after_idle(self.navigator, event), self.navigation_key_pressed_toggle(True)))
-        self.imagegrid.bind('<KeyPress-Control_L>', lambda event: self.switch_bg_colour(event))
 
         vbar = tk.Scrollbar(imagegridframe, orient='vertical',command=lambda *args: throttled_yview(self.imagegrid, self.page_mode, *args))
         self.vbar = vbar
@@ -294,7 +278,7 @@ class GUIManager(tk.Tk):
 
         self.protocol("WM_DELETE_WINDOW", self.closeprogram)
         self.winfo_toplevel().title("Simple Image Sorter: QOL")
-
+        #self.vlc_instance = vlc.Instance('--quiet')
     def first_page_buttons(self):
         self.panel = tk.Label(self.leftui, wraplength=350, justify="left", bg=self.main_colour,fg=self.text_colour, text="""
 
@@ -450,7 +434,6 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
 
             self.loadpathentry.bind("<FocusIn>", lambda e: self.loadpathentry.config(bg=self.text_field_activated_colour, fg=self.text_field_activated_text_colour))
             self.loadpathentry.bind("<FocusOut>", lambda e: self.loadpathentry.config(bg=self.text_field_colour, fg=self.text_field_text_colour))
-
     def initial_dock_setup(self):
         #Left
         self.toppane.forget(self.imagegridframe)
@@ -492,460 +475,6 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
         if not self.force_scrollbar:
             self.vbar.grid(row=0, column=1, sticky='ns')
             self.vbar.grid_forget()
-
-    def closeprogram(self):
-        if len(self.assigned_squarelist) != 0:
-            if askokcancel("Designated but Un-Moved files, really quit?","You have destination designated, but unmoved files. (Simply cancel and Move All if you want)"):
-                self.save_viewer_geometry()
-                self.close_destination_window()
-                self.fileManager.saveprefs(self)
-                self.destroy()
-        else:
-            self.save_viewer_geometry()
-            self.close_destination_window()
-            self.fileManager.saveprefs(self)
-            self.destroy()
-
-    def excludeshow(self):
-        excludewindow = tk.Toplevel()
-        excludewindow.winfo_toplevel().title(
-            "Folder names to ignore, one per line. This will ignore sub-folders too.")
-        excludetext = tkst.ScrolledText(excludewindow, bg=self.main_colour, fg=self.text_colour)
-        for x in self.fileManager.exclude:
-            excludetext.insert("1.0", x+"\n")
-        excludetext.pack()
-        excludewindow.protocol("WM_DELETE_WINDOW", partial(
-            self.excludesave, text=excludetext, toplevelwin=excludewindow))
-
-    def switch_bg_colour(self, event):
-        if self.switch_counter == len(self.op)-1:
-            for x in self.displayedlist:
-                x.canvas.configure(background=self.op[len(self.op)-1])
-            print(len(self.op), self.op[len(self.op)-1])
-            self.switch_counter = 0
-        else:
-            print(self.switch_counter + 1, self.op[self.switch_counter])
-            for x in self.displayedlist:
-                x.canvas.configure(background=self.op[self.switch_counter])
-            self.switch_counter += 1
-
-        self.configure(background=self.op[self.switch_counter])
-    def excludesave(self, text, toplevelwin):
-        text = text.get('1.0', tk.END).splitlines()
-        exclude = []
-        for line in text:
-            if line != "":
-                exclude.append(line)
-        self.fileManager.exclude = exclude
-        try:
-            toplevelwin.destroy()
-        except Exception as e:
-            logger.error(f"Error in excludesave: {e}")
-
-    def tooltiptext(self,imageobject):
-        text=""
-        if imageobject.dupename:
-            text += "Image has Duplicate Filename!\n"
-        text += "Leftclick to select this for assignment. Rightclick to open full view"
-        return text
-
-    def makegridsquare(self, parent, imageobj, setguidata, dest):
-        #CHANGE1
-        frame = tk.Frame(parent, borderwidth=0,
-                         highlightthickness = self.whole_box_size, highlightcolor=self.imageborder_default_colour,highlightbackground=self.imageborder_default_colour, padx = 0, pady = 0) 
-
-        frame.obj = imageobj
-        truncated_filename = self.truncate_text(imageobj)
-        truncated_name_var = tk.StringVar(frame, value=truncated_filename)
-        frame.obj2 = truncated_name_var # This is needed or it is garbage collected I guess
-        frame.grid_propagate(True)
-
-        try:
-            if setguidata:
-                if not os.path.exists(imageobj.thumbnail):
-                    self.fileManager.makethumb(imageobj)
-                try:
-                    #this is faster
-                    img = ImageTk.PhotoImage(Image.open(imageobj.thumbnail))
-
-                except:  # Pyvips fallback
-                    buffer = pyvips.Image.new_from_file(imageobj.thumbnail)
-                    img = ImageTk.PhotoImage(Image.frombuffer(
-                        "RGB", [buffer.width, buffer.height], buffer.write_to_memory()))
-            else:
-                img = imageobj.guidata['img']
-
-            canvas = tk.Canvas(frame, width=self.thumbnailsize,
-                               height=self.thumbnailsize,bg=self.square_colour, highlightthickness=self.square_border_size, highlightcolor=self.imageborder_default_colour, highlightbackground = self.imageborder_default_colour) #The gridbox color.
-            canvas.grid(column=0, row=0, sticky="NSEW")
-            #tooltiptext=tk.StringVar(frame,self.tooltiptext(imageobj)) #CHECK PROFILE
-            #ToolTip(canvas,msg=tooltiptext.get,delay=1) #CHECK PROFILE
-
-            canvas.image = img
-            frame.canvas = canvas
-
-            frame.rowconfigure(0, weight=4)
-            frame.rowconfigure(1, weight=1)
-
-            #Added reference for animation support. We use this to refresh the frame 1/20, 2/20..
-            canvas_image_id = canvas.create_image(
-                self.thumbnailsize/2+self.square_border_size, self.thumbnailsize/2+self.square_border_size, anchor="center", image=img) #If you use gridboxes, you must +1 to thumbnailsize/2, so it counteracts the highlighthickness.
-            frame.canvas_image_id = canvas_image_id
-
-            # Create a frame for the Checkbutton to control its height
-            #sqr = canvas.create_rectangle((0, 0, self.thumbnailsize, 3), width=0)
-            #frame.sqr = sqr
-
-            check_frame = tk.Frame(frame, height=self.checkbox_height, padx= 2, bg=self.square_text_box_colour)
-            check_frame.grid_propagate(False)
-            check_frame.grid(column=0, row=1, sticky="EW")  # Place the frame in the grid
-            
-            frame.cf = check_frame
-            #bar = tk.Frame(frame, width=self.thumbnailsize, height = 3, bg=self.grid_background_colour)
-            #bar.grid_propagate(False)
-            #bar.grid(column=0, row=1, sticky="EW")
-            #frame.bar = bar
-
-            
-
-            #Create different dest for destinations to control view better. These also call a command to cancel the viewer image from being moved by keypresses, if we interact with other gridsquares first.
-            if not dest:
-                check = ttk.Checkbutton(check_frame, textvariable=truncated_name_var, variable=imageobj.checked, onvalue=True, offvalue=False, command=lambda: (self.uncheck_show_next()), style="Theme_square.TCheckbutton")
-            else:
-                check = ttk.Checkbutton(check_frame, textvariable=truncated_name_var, variable=imageobj.destchecked, onvalue=True, offvalue=False, command=lambda: (self.uncheck_show_next()), style="Theme_square.TCheckbutton")
-            check.grid(sticky="NSEW")
-
-            if(setguidata):  # save the data to the image obj to both store a reference and for later manipulation
-                imageobj.setguidata(
-                    {"img": img, "frame": frame, "canvas": canvas, "check": check, "show": True}) #"tooltip":tooltiptext
-            frame.c = check
-            # anything other than rightclicking toggles the checkbox, as we want.
-            canvas.bind("<Button-1>", partial(bindhandler, check, "invoke"))
-            canvas.bind(
-                "<Button-3>", lambda e: (self.displayimage(frame)))
-            check.bind("<Button-3>", lambda e: (self.displayimage(frame)))
-
-            #make blue if only one that is blue, must remove other blue ones. blue ones are stored the gridsquare in a global list.
-            canvas.bind("<MouseWheel>", partial(
-                bindhandler, parent, "scroll"))
-            frame.bind("<MouseWheel>", partial(
-                bindhandler, self.imagegrid, "scroll"))
-
-            check.bind("<MouseWheel>", partial(
-                bindhandler, self.imagegrid, "scroll"))
-            canvas.bind('<KeyPress>', lambda event: (canvas.after_idle(self.navigator, event), self.navigation_key_pressed_toggle(True)))
-            frame.bind('<KeyPress>', lambda event: (frame.after_idle(self.navigator, event), self.navigation_key_pressed_toggle(True)))
-            check.bind('<KeyPress>', lambda event: (check.after_idle(self.navigator, event), self.navigation_key_pressed_toggle(True)))
-            canvas.bind('<KeyRelease>', lambda event: self.navigation_key_pressed_toggle(False))
-            frame.bind('<KeyRelease>', lambda event: self.navigation_key_pressed_toggle(False))
-            check.bind('<KeyRelease>', lambda event: self.navigation_key_pressed_toggle(False))
-
-            if imageobj.moved:
-                frame.configure(
-                    highlightbackground="green", highlightthickness=2)
-                if os.path.dirname(imageobj.path) in self.fileManager.destinationsraw:
-                    color = self.fileManager.destinations[indexOf(
-                        self.fileManager.destinationsraw,os.path.dirname(imageobj.path))]['color']
-                    frame['background'] = color
-                    canvas['background'] = color
-            #if imageobj.dupename:
-            #    frame.configure(
-            #        highlightbackground="brown", highlightthickness=2)
-        except Exception as e:
-            logger.error(e)
-        return frame
-
-    def navigation_key_pressed_toggle(self, state):
-        # IF locked, but we click away anyway.
-        self.navigation_key_pressed = state
-
-    def navigator(self, event): # Scrolling with the keyboard #might need to disable wasd.
-        if event.keysym == "Return":
-            self.enter_toggle = not self.enter_toggle
-        if self.enter_toggle:
-            self.Image_frame.focus_canvasimage()
-            self.current_selection.configure(highlightbackground = self.imageborder_locked_colour, highlightcolor = self.imageborder_locked_colour)
-            self.current_selection.canvas.configure(highlightbackground = self.imageborder_locked_colour, highlightcolor = self.imageborder_locked_colour) # Change new frame's frame
-            self.current_selection.c.configure(style="Theme_square3.TCheckbutton")
-            self.current_selection.cf.configure(bg=self.square_text_box_locked_colour)
-            #self.current_selection.bar.configure(bg = self.imageborder_locked_colour, highlightcolor = self.imageborder_locked_colour) # Change new frame's frame
-
-            #self.current_selection.canvas.itemconfig(self.current_selection.sqr, fill=self.imageborder_locked_colour)
-
-        # Independent from the language of the keyboard, CapsLock, <Ctrl>+<key>, etc.
-        """Throttling"""
-        if not self.show_next.get():
-            return
-        current_time = time.time()
-        if not self.navigation_key_pressed:
-            pass
-        elif current_time - self.last_call_time >= self.throttle_delay: #and key pressed down... so you can tap as fast as you like.
-            self.last_call_time = current_time
-        else:
-            #print("Victim of throttler")
-            return
-        """Throttling"""
-
-        if event.state - self.__previous_state == 4:  # means that the Control key is pressed
-            pass  # do nothing if Control key is pressed
-        elif self.current_selection:
-
-            self.__previous_state = event.state    # remember the last keystroke state
-            items_per_row = int(max(1, self.imagegrid.winfo_width() / self.actual_gridsquare_width))
-            items_per_rowy = int(max(1, self.imagegrid.winfo_height() / self.actual_gridsquare_height))
-            if self.current_selection in self.displayedlist:
-                current_index = self.displayedlist.index(self.current_selection)
-            else:
-                return
-            last_row = max(0,floor((current_index) / items_per_row))
-            list_length = len(self.displayedlist)
-
-            check = ["w","a","s","d"]
-            #wasd = 87,65,83,68
-            #updownleftright = 38,40,37,39
-            for x in check:
-                if x in self.hotkeys:
-                    disable_wasd = True
-                    break
-                else:
-                    disable_wasd = False
-                    break
-
-            if not event.keycode in [37,38,39,40] or (event.keycode in [65,68,83,87] and not disable_wasd):
-                return
-            if event.keycode == 68 and not disable_wasd or event.keycode == 39:    # scroll right, keys 'd' or 'Right' [D,RIGHT]
-                if not list_length > current_index+1:
-                    return
-                self.current_selection = self.displayedlist[current_index+1]
-            elif event.keycode == 65 and not disable_wasd or event.keycode == 37:    # scroll left, keys 'a' or 'Left' [A,LEFT]
-                if not list_length > current_index-1 or current_index == 0:
-                    return
-                self.current_selection = self.displayedlist[current_index-1]
-            elif event.keycode == 87 and not disable_wasd or event.keycode == 38:    # scroll up, keys 'w' or 'Up' [W,UP]
-                if not list_length > current_index-items_per_row or current_index-items_per_row < 0:
-                    return
-                self.current_selection = self.displayedlist[current_index-items_per_row]
-            elif event.keycode == 83 and not disable_wasd or event.keycode == 40:    # scroll down, keys 's' or 'Down' [S,DOWN]
-                if not list_length > current_index+items_per_row:
-                    return
-                self.current_selection = self.displayedlist[current_index+items_per_row]
-            
-            if not self.page_mode:
-                self.show_next_method(self.current_selection)
-            self.displayimage(self.current_selection)
-            current_index = self.displayedlist.index(self.current_selection)
-            current_row = max(0,floor((current_index) / items_per_row))
-            total_rows = list_length / items_per_row
-
-            # Calculate the index for the first and last visible items in the current bounding box
-            first_visible_index = self.imagegrid.yview()[0] * total_rows  # Index of the first visible item
-            last_visible_index = self.imagegrid.yview()[1] * total_rows  # Index of the last visible item
-            # Check if we're at the top or bottom of the visible area and scroll accordingly
-            
-            if self.page_mode:
-
-                if (event.keycode in [87, 38] or last_row < current_row) or current_row == 0:  # Up (W, Up)
-                    if current_row == 1: #
-                        self.imagegrid.yview_moveto(0)
-                        return
-
-                if current_row < floor(first_visible_index):  # If we're at the top of the visible area
-                    target_scroll = (current_row-items_per_rowy+1) / total_rows
-
-                    self.current_selection = self.displayedlist[current_index+items_per_row]
-                    self.show_next_method(self.current_selection)
-
-                    self.imagegrid.yview_moveto(target_scroll)
-
-                elif event.keycode in [83, 40] or last_row < current_row:  # Down (S, Down)
-                    if current_row >= list_length-items_per_rowy:
-                        self.imagegrid.yview_moveto(1)
-                        return
-
-                    if current_row > floor(last_visible_index):  # If we're at the bottom of the visible area
-                        target_scroll = (current_row-1) / total_rows
-
-                        self.current_selection = self.displayedlist[current_index-items_per_row]
-                        self.show_next_method(self.current_selection)
-                        self.imagegrid.yview_moveto(target_scroll)
-            else:
-                if event.keycode in [87, 38] or last_row < current_row:
-                    if current_row == 1: #
-                        self.imagegrid.yview_moveto(0)
-                        return
-
-                if current_row < floor(first_visible_index)+1:
-                    #self.imagegrid.yview_scroll(-1, "units")
-                    target_scroll = (current_row) / total_rows
-                    self.imagegrid.yview_moveto(target_scroll)
-
-                elif event.keycode in [83, 40] or last_row < current_row:
-                    if current_row >= list_length-items_per_rowy:
-                        self.imagegrid.yview_moveto(1)
-                        return
-                    #print(current_row+1, last_visible_index)
-                    if current_row > floor(last_visible_index):
-                        #print("act") #current row +1
-                        #self.imagegrid.yview_scroll(1, "units")  # Scroll down one unit # non page
-                        target_scroll = (current_row-items_per_rowy) / total_rows
-                        self.imagegrid.yview_moveto(target_scroll)
-
-    def uncheck_show_next(self):
-        self.focused_on_secondwindow = False
-
-    def truncate_text(self, imageobj): #max_length must be over 3+extension or negative indexes happen.
-        filename = imageobj.name.get()
-        base_name, ext = os.path.splitext(filename)
-        smallfont = self.smallfont
-        text_width = smallfont.measure(filename)
-
-        if text_width+24 <= self.thumbnailsize:
-
-            return filename # Return whole filename
-
-        ext = ".." + ext
-
-        while True: # Return filename that has been truncated.
-            test_text = base_name + ext # Test with one less character
-            text_width = smallfont.measure(test_text)
-            if text_width+24 < self.thumbnailsize:  # Reserve space for ellipsis
-                break
-            base_name = base_name[:-1]
-        return test_text
-
-    def displayimage(self, frame, flag=True): #Create secondary window for image viewing
-        self.enter_toggle = False
-        imageobj = frame.obj
-        items_per_row = int(max(1, self.imagegrid.winfo_width() / self.actual_gridsquare_width))
-        row, col = map(int, self.imagegrid.index(tk.INSERT).split('.'))
-        logger.debug(f"Row: {items_per_row}, Column: {col}, and {self.thumbnailsize} and {self.imagegrid.winfo_width()}")
-
-        # This makes sure the initial view is set up correctly
-        if self.middlepane_frame.winfo_width() != 1:
-                self.middlepane_width = self.middlepane_frame.winfo_width()
-
-        path = imageobj.path
-
-        # Close already open windows, IF: integrated viewer option is on, BUT KEEP OPEN IF show next is on. (Calls not made by user)
-        if hasattr(self, 'second_window') and self.second_window and not self.show_next.get(): # Call not made by user, but sortimages
-            self.save_viewer_geometry()
-        elif hasattr(self, 'second_window') and self.second_window and self.dock_view.get():
-            self.save_viewer_geometry()
-
-        if self.dock_view.get(): # This handles the middlepane viewer. Runs, IF second window is closed.
-
-            geometry = str(self.middlepane_width) + "x" + str(self.winfo_height())
-            self.Image_frame = CanvasImage(self.middlepane_frame, geometry, self.canvasimage_background, imageobj, self)
-            self.Image_frame.grid(row = 0, column = 0, sticky = "NSEW")
-            self.Image_frame.default_delay.set(self.default_delay.get()) #tell imageframe if animating, what delays to use
-            self.Image_frame.rescale(min(self.middlepane_width / self.Image_frame.imwidth, self.winfo_height() / self.Image_frame.imheight))  # Scales to the window
-            self.Image_frame.center_image()
-            logger.debug("Rescaled and Centered")
-
-            self.focused_on_secondwindow = True
-
-            # Logic for show next
-            if flag:
-                self.show_next_method(frame)
-            self.old_img_frame.append(self.Image_frame)
-            if self.flicker_free_dock_view and self.dock_view.get():
-                try:
-                    if len(self.old_img_frame) > 1 and self.old_img_frame[0]:
-                        self.old_img_frame[0].close_window()
-                        self.old_img_frame.pop(0)
-                        self.update_idletasks()
-                except Exception as e:
-                    pass
-            #if self.dock_view:
-            #    print("attemtping")
-
-
-            self.enter_toggle = False
-            self.Image_frame.canvas.focus_set()
-            return
-
-        # Standalone image viewer
-        if not hasattr(self, 'second_window') or not self.second_window or not self.second_window.winfo_exists():
-            self.old_img_frame.clear()
-            # No window exists, create one
-            self.second_window = tk.Toplevel() #create a new window
-            second_window = self.second_window
-            second_window.configure(background=self.main_colour)
-            second_window.rowconfigure(0, weight=1)
-            second_window.columnconfigure(0, weight=1)
-            second_window.title("Image: " + path)
-            second_window.geometry(self.viewer_geometry)
-            second_window.bind("<Button-3>", self.save_viewer_geometry)
-            second_window.protocol("WM_DELETE_WINDOW", self.save_viewer_geometry)
-            second_window.obj = imageobj
-            second_window.transient(self)
-
-        elif self.show_next.get():
-            self.second_window.title("Image: " + path)
-
-        geometry = self.viewer_geometry.split('+')[0]
-        self.Image_frame = CanvasImage(self.second_window, geometry, self.canvasimage_background, imageobj, self)
-        self.Image_frame.default_delay.set(self.default_delay.get()) #tell imageframe if animating, what delays to use
-        self.Image_frame.grid(row = 0, column = 0, sticky = "NSEW")  # Initialize Frame grid statement in canvasimage, Add to main window grid
-        self.Image_frame.rescale(min(self.second_window.winfo_width() / self.Image_frame.imwidth, self.second_window.winfo_height() / self.Image_frame.imheight))  # Scales to the window
-        self.Image_frame.center_image()
-
-        logger.debug("Rescaled and Centered")
-        self.focused_on_secondwindow = True
-        if flag:
-            self.show_next_method(frame)
-
-        if not self.show_next.get():
-            self.second_window.after(0, lambda: self.Image_frame.canvas.focus_set())
-        else:
-            self.second_window.after(0, lambda: self.Image_frame.canvas.focus_set())
-
-    def show_next_method(self, frame): # Record current and last gridsquares that have been "selected". Change their colours.
-        self.current_selection = frame # Update current_selection
-        self.current_displayed = frame
-        if self.last_selection and self.last_selection != self.current_selection and not hasattr(self, 'destwindow'): # Restore old frame's frame.
-            self.last_selection.configure(highlightcolor = self.imageborder_default_colour,  highlightbackground = self.imageborder_default_colour)
-            self.last_selection.canvas.configure(bg=self.imagebox_default_colour, highlightcolor=self.imageborder_default_colour, highlightbackground = self.imageborder_default_colour)
-            self.last_selection.c.configure(style="Theme_square.TCheckbutton")
-            self.last_selection.cf.configure(bg=self.square_text_box_colour)
-            #self.last_selection.bar.configure(bg = self.imagebox_default_colour, highlightcolor = self.imagebox_default_colour)
-            #self.last_selection.canvas.itemconfig(self.current_selection.sqr, fill=self.imageborder_default_colour)
-        if not hasattr(self, 'destwindow'):
-            self.current_selection.configure(highlightcolor = self.imageborder_selected_colour, highlightbackground = self.imageborder_selected_colour)
-            self.current_selection.canvas.configure(bg=self.imagebox_selection_colour, highlightbackground = self.imageborder_selected_colour, highlightcolor = self.imageborder_selected_colour) # Change new frame's frame
-            self.current_selection.c.configure(style="Theme_square2.TCheckbutton")
-            self.current_selection.cf.configure(bg=self.square_text_box_selection_colour)
-            #self.current_selection.bar.configure(bg = self.imageborder_selected_colour, highlightcolor = self.imageborder_selected_colour)
-            #self.current_selection.canvas.itemconfig(self.current_selection.sqr, fill=self.imageborder_selected_colour)
-            self.last_selection = self.current_selection # Update last_selection
-
-    def save_viewer_geometry(self, event=None):
-        if hasattr(self, 'second_window') and self.second_window and self.second_window.winfo_exists():
-            self.viewer_geometry = self.second_window.winfo_geometry()
-            #self.checkdupename(self.second_window.obj)
-            if hasattr(self, 'Image_frame'):
-                self.Image_frame.close_window()
-                self.after(0, self.Image_frame.destroy)
-                del self.Image_frame
-            self.second_window.destroy()
-            del self.second_window
-        elif hasattr(self, 'Image_frame'):
-            self.Image_frame.close_window()
-            self.after(0, self.Image_frame.destroy) # Gives it time to close
-            del self.Image_frame
-        #if the viewer is closed when show next is on, disable show next.
-
-    def filedialogselect(self, target, type):
-        if type == "d":
-            path = tkFileDialog.askdirectory()
-        elif type == "f":
-            d = tkFileDialog.askopenfile(initialdir=os.getcwd(
-            ), title="Select Session Data File", filetypes=(("JavaScript Object Notation", "*.json"),))
-            path = d.name
-        if isinstance(target, tk.Entry):
-            target.delete(0, tk.END)
-            target.insert(0, path)
-
     def guisetup(self, destinations):
         self.sortbydate_button.destroy() # Hide sortbydate button after it is no longer needed
         sdpEntry = self.sdpEntry
@@ -980,7 +509,7 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                 if(itern < len(hotkeys)):
                     newbut = tk.Button(buttonframe, text=hotkeys[itern] + ": " + x['name'], command=partial(
                         self.fileManager.setDestination, x, {"widget": None}), anchor="w", wraplength=(self.leftui.winfo_width()/columns)-1)
-                    random.seed(x['name'])
+                    seed(x['name'])
                     self.bind_all(f"<KeyPress-{self.hotkeys[itern]}>", partial(
                         self.handle_setdestination_call, True, x))
                     self.bind_all(f"<KeyRelease-{hotkeys[itern]}>", partial(
@@ -1086,7 +615,6 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
         custom_buttons_frame.columnconfigure(3, weight = 1)
         custom_buttons_frame.columnconfigure(4, weight = 1)
 
-        self.default_delay_button = ttk.Checkbutton(custom_buttons_frame, text="Default speed", variable=self.default_delay, onvalue=True, offvalue=False, command=lambda: (self.switch_to_default_delay(), self.default_delay))
         self.show_next_button = ttk.Checkbutton(custom_buttons_frame, text="Show next", variable=self.show_next, onvalue=True, offvalue=False, command=lambda: (self.focus_helper(self.show_next)))
         self.dock_view_button = ttk.Checkbutton(custom_buttons_frame, text="Dock view", variable=self.dock_view, onvalue=True, offvalue=False, command=lambda: (self.change_viewer(), self.focus_helper(self.dock_view)))
         self.dock_side_button = ttk.Checkbutton(custom_buttons_frame, text="Dock side", variable=self.dock_side, onvalue=True, offvalue=False, command=lambda: (self.change_dock_side(), self.focus_helper(self.dock_side)))
@@ -1096,12 +624,10 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
         else:
             self.dock_side_button.state(['disabled'])
 
-        self.default_delay_button.grid(row=0, column=0, sticky="ew", padx=5)
         self.show_next_button.grid(row=0, column=1, sticky="ew")
         self.dock_view_button.grid(row=0, column=2, sticky="ew")
         self.dock_side_button.grid(row=0, column=3, sticky="ew")
 
-        self.default_delay_button.configure(style="Theme_checkbox.TCheckbutton")
         self.show_next_button.configure(style="Theme_checkbox.TCheckbutton")
         self.dock_view_button.configure(style="Theme_checkbox.TCheckbutton")
         self.dock_side_button.configure(style="Theme_checkbox.TCheckbutton")
@@ -1138,24 +664,35 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                 centering_preference.set("No centering")
 
         self.bind_all("<Button-1>", self.setfocus)
-
-    def focus_helper(self, target):
-        if target.get() and self.current_selection and self.show_next.get(): #except for side change.
-            self.current_selection.focus_set()
-        elif self.current_selection and hasattr(self, "Image_frame"):
-            self.Image_frame.canvas.focus_set()
-        elif self.current_selection:
-            self.current_selection.focus_set()
-
     def handle_setdestination_call(self, state, x=None, event=None):
         if x:
             self.fileManager.setDestination(x, event)
-        self.key_pressed = state
-
-    def switch_to_default_delay(self):
-        if hasattr(self, 'Image_frame'):
-            self.Image_frame.default_delay.set(self.default_delay.get())
-
+    "Exclude window"
+    def excludeshow(self):
+        excludewindow = tk.Toplevel()
+        excludewindow.winfo_toplevel().title(
+            "Folder names to ignore, one per line. This will ignore sub-folders too.")
+        excludetext = tkst.ScrolledText(excludewindow, bg=self.main_colour, fg=self.text_colour)
+        for x in self.fileManager.exclude:
+            excludetext.insert("1.0", x+"\n")
+        excludetext.pack()
+        excludewindow.protocol("WM_DELETE_WINDOW", partial(
+            self.excludesave, text=excludetext, toplevelwin=excludewindow))
+    def excludesave(self, text, toplevelwin):
+        text = text.get('1.0', tk.END).splitlines()
+        exclude = []
+        for line in text:
+            if line != "":
+                exclude.append(line)
+        self.fileManager.exclude = exclude
+        try:
+            toplevelwin.destroy()
+        except Exception as e:
+            logger.error(f"Error in excludesave: {e}")
+    
+    "Navigation / options"
+    def uncheck_show_next(self):
+        self.focused_on_secondwindow = False
     def change_viewer(self):
         other_viewer_is_open = hasattr(self, 'second_window') and self.second_window and self.second_window.winfo_exists()
         if self.middlepane_frame.winfo_width() != 1:
@@ -1191,14 +728,13 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                 self.toppane.forget(self.middlepane_frame)
                 if hasattr(self, 'Image_frame'):
                     if self.Image_frame:
-                        self.Image_frame.close_window()
+                        self.Image_frame.destroy()
                         self.after(0, self.Image_frame.destroy)
                         del self.Image_frame
                         self.displayimage(self.current_selection) # If something was displayed, we want to display it in standalone viewer.
             except Exception as e:
                 pass
         bindhandler_1(self.imagegrid)
-
     def change_dock_side(self):
         if self.middlepane_frame.winfo_width() == 1:
             return
@@ -1232,7 +768,6 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
 
                 self.toppane.add(self.imagegridframe, weight = 1) #readd imagegrid
                 self.toppane.add(self.middlepane_frame, weight = 0) #readd the middpane
-
     def change_centering(self, selected_option): # "Center", "Only x centering", "Only y centering", "No centering"
         if selected_option == "Center":
             self.viewer_x_centering = True
@@ -1249,52 +784,153 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
         if self.current_selection and hasattr(self, "Image_frame"):
             self.displayimage(self.current_selection)
 
-    def on_option_selected(self, selected_option):
-        if selected_option == "Show Unassigned":
-            self.show_unassigned.set(False)
-            self.clicked_show_unassigned()
-        elif selected_option == "Show Assigned":
-            self.clicked_show_assigned()
-        elif selected_option == "Show Moved":
-            self.clicked_show_moved()
-        elif selected_option == "Show Animated":
-            self.clicked_show_animated()
-        if self.show_next.get() and len(self.displayedlist) >= 1 and hasattr(self, "Image_frame"):
-            if not self.current_selection and self.displayedlist[0]:
-                self.current_selection == self.displayedlist[0]
-            self.displayimage(self.displayedlist[0])
+
 
     def setfocus(self, event):
         event.widget.focus_set()
+    """
+    def switch_bg_colour(self, event):
+        if self.switch_counter == len(self.op)-1:
+            for x in self.displayedlist:
+                x.canvas.configure(background=self.op[len(self.op)-1])
+            print(len(self.op), self.op[len(self.op)-1])
+            self.switch_counter = 0
+        else:
+            print(self.switch_counter + 1, self.op[self.switch_counter])
+            for x in self.displayedlist:
+                x.canvas.configure(background=self.op[self.switch_counter])
+            self.switch_counter += 1
 
-    def displaygrid(self, imagelist, range): #dummy to handle sortimages calls for now...
-        number_of_animated = 0 #Just to tell user how many gifs and webps are being attempted to load
-        for i in range:
-            gridsquare = self.makegridsquare(self.imagegrid, imagelist[i], True, False)
-            self.gridsquarelist.append(gridsquare)
-            if not gridsquare.obj.moved:
-                self.unassigned_squarelist.append(gridsquare)
-                gridsquare.obj.isvisible = True
+        self.configure(background=self.op[self.switch_counter])
+    """
+    "CanvasImage"
+    def displayimage(self, frame, flag=True): #Create secondary window for image viewing
+        imageobj = frame.obj
+        items_per_row = int(max(1, self.imagegrid.winfo_width() / self.actual_gridsquare_width))
+        row, col = map(int, self.imagegrid.index(tk.INSERT).split('.'))
+        logger.debug(f"Row: {items_per_row}, Column: {col}, and {self.thumbnailsize} and {self.imagegrid.winfo_width()}")
+        self.fileManager.navigator.highlight_click(frame, "selected", "default")
 
-            elif gridsquare.obj.moved:
-                self.moved_squarelist.append(gridsquare)
-                gridsquare.obj.isvisible = False
+        if hasattr(self, "Image_frame"):
+            if hasattr(self.Image_frame, "player"):
+                if self.Image_frame.player.is_playing():
+                    self.Image_frame.player.stop()
+                self.Image_frame.player.release()
 
-            if gridsquare.obj.isanimated: # If the imageobj is a gif or webp, we render the square
-                # Static fallback image in case we fail to animate.
-                gridsquare.canvas_window = self.imagegrid.window_create("insert", window=gridsquare, padx=self.gridsquare_padx, pady=self.gridsquare_pady)
-                self.displayedlist.append(gridsquare)
-                threading.Thread(target=self.fileManager.load_frames, args=(gridsquare,)).start()
-                number_of_animated += 1
+        # This makes sure the initial view is set up correctly
+        if self.middlepane_frame.winfo_width() != 1:
+                self.middlepane_width = self.middlepane_frame.winfo_width()
 
-            else: # Normal image
-                gridsquare.canvas_window = self.imagegrid.window_create("insert", window=gridsquare, padx=self.gridsquare_padx, pady=self.gridsquare_pady)
-                self.displayedlist.append(gridsquare)
+        path = imageobj.path
 
-        logger.debug(f"Trying to animate {number_of_animated} pictures.")
-        self.refresh_rendered_list()
-        self.start_gifs()
+        # Close already open windows, IF: integrated viewer option is on, BUT KEEP OPEN IF show next is on. (Calls not made by user)
+        if hasattr(self, 'second_window') and self.second_window and not self.show_next.get(): # Call not made by user, but sortimages
+            self.save_viewer_geometry()
+        elif hasattr(self, 'second_window') and self.second_window and self.dock_view.get():
+            self.save_viewer_geometry()
 
+        if self.dock_view.get(): # This handles the middlepane viewer. Runs, IF second window is closed.
+
+            geometry = str(self.middlepane_width) + "x" + str(self.winfo_height())
+            self.Image_frame = CanvasImage(self.middlepane_frame, geometry, self.canvasimage_background, imageobj, self)
+            self.Image_frame.grid(row = 0, column = 0, sticky = "NSEW")
+            self.Image_frame.default_delay.set(self.default_delay.get()) #tell imageframe if animating, what delays to use
+            self.Image_frame.rescale(min(self.middlepane_width / self.Image_frame.imwidth, self.winfo_height() / self.Image_frame.imheight))  # Scales to the window
+            self.Image_frame.center_image()
+            logger.debug("Rescaled and Centered")
+
+            self.focused_on_secondwindow = True
+
+            self.old_img_frame.append(self.Image_frame)
+            if self.flicker_free_dock_view and self.dock_view.get():
+                try:
+                    if len(self.old_img_frame) > 1 and self.old_img_frame[0]:
+                        self.old_img_frame[0].destroy()
+                        self.old_img_frame.pop(0)
+                        #self.update_idletasks()
+                except Exception as e:
+                    pass
+
+            self.Image_frame.canvas.focus_set()
+            return
+
+        # Standalone image viewer
+        if not hasattr(self, 'second_window') or not self.second_window or not self.second_window.winfo_exists():
+            self.old_img_frame.clear()
+            # No window exists, create one
+            self.second_window = tk.Toplevel() #create a new window
+            second_window = self.second_window
+            second_window.configure(background=self.main_colour)
+            second_window.rowconfigure(0, weight=1)
+            second_window.columnconfigure(0, weight=1)
+            second_window.title("Image: " + path)
+            second_window.geometry(self.viewer_geometry)
+            second_window.bind("<Button-3>", self.save_viewer_geometry)
+            second_window.protocol("WM_DELETE_WINDOW", self.save_viewer_geometry)
+            second_window.obj = imageobj
+            second_window.transient(self)
+
+        elif self.show_next.get():
+            self.second_window.title("Image: " + path)
+
+        geometry = self.viewer_geometry.split('+')[0]
+        self.Image_frame = CanvasImage(self.second_window, geometry, self.canvasimage_background, imageobj, self)
+        self.Image_frame.default_delay.set(self.default_delay.get()) #tell imageframe if animating, what delays to use
+        self.Image_frame.grid(row = 0, column = 0, sticky = "NSEW")  # Initialize Frame grid statement in canvasimage, Add to main window grid
+        self.Image_frame.rescale(min(self.second_window.winfo_width() / self.Image_frame.imwidth, self.second_window.winfo_height() / self.Image_frame.imheight))  # Scales to the window
+        self.Image_frame.center_image()
+
+        logger.debug("Rescaled and Centered")
+        self.focused_on_secondwindow = True
+
+        if not self.show_next.get():
+            self.second_window.after(0, lambda: self.Image_frame.canvas.focus_set())
+        else:
+            self.second_window.after(0, lambda: self.Image_frame.canvas.focus_set())
+
+    
+    "Exit function"
+    def closeprogram(self):
+        if len(self.assigned_squarelist) != 0:
+            if askokcancel("Designated but Un-Moved files, really quit?","You have destination designated, but unmoved files. (Simply cancel and Move All if you want)"):
+                self.save_viewer_geometry()
+                self.close_destination_window()
+                self.fileManager.saveprefs(self)
+                self.destroy()
+        else:
+            self.save_viewer_geometry()
+            self.close_destination_window()
+            self.fileManager.saveprefs(self)
+            self.destroy()
+    def save_viewer_geometry(self, event=None):
+        if hasattr(self, 'second_window') and self.second_window and self.second_window.winfo_exists():
+            self.viewer_geometry = self.second_window.winfo_geometry()
+            #self.checkdupename(self.second_window.obj)
+            if hasattr(self, 'Image_frame'):
+                if hasattr(self.Image_frame, "player"):
+                    if self.Image_frame.player.is_playing():
+                        self.Image_frame.player.stop()
+                    self.Image_frame.player.release()
+                self.Image_frame.destroy()
+                del self.Image_frame
+            self.second_window.destroy()
+            del self.second_window
+        elif hasattr(self, 'Image_frame'):
+            self.Image_frame.destroy()
+            del self.Image_frame
+        #if the viewer is closed when show next is on, disable show next.
+    def filedialogselect(self, target, type):
+        if type == "d":
+            path = tkFileDialog.askdirectory()
+        elif type == "f":
+            d = tkFileDialog.askopenfile(initialdir=getcwd(
+            ), title="Select Session Data File", filetypes=(("JavaScript Object Notation", "*.json"),))
+            path = d.name
+        if isinstance(target, tk.Entry):
+            target.delete(0, tk.END)
+            target.insert(0, path)
+
+    "GIF HANDLING"
     def start_gifs(self):
         logger.debug("starting gifs, if you see two of these, something is wrong.") #should only run once. Otherwise two processes try to change the frame leading to speed issues.
         # Check the visible list for pictures to animate.
@@ -1313,13 +949,11 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
             else:
                 #logger.info(f"Lazy load: {a.obj.name.get()[:30]}")
                 self.lazy_load(a)
-
     def gen_id_and_animate(self, i):
-        random_id = random.randint(1,1000000)
+        random_id = randint(1,1000000)
         self.running.append((i, random_id))
         self.animate(i, False, random_id)
         logger.info(f"Animating: {len(self.running)}, Finished: {i.obj.name.get()[:30]}")
-
     def lazy_load(self, i):
         try:
             if i.obj.frames and i.obj.index != i.obj.framecount and i.obj.lazy_loading:
@@ -1329,10 +963,12 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
 
                     if self.default_delay.get():
                         #logger.debug(f"{i.obj.index+1}/{i.obj.framecount} ({i.obj.delay}): {i.obj.name.get()[:30]}")
-                        i.canvas.after(i.obj.delay, lambda: self.lazy_load_loop(i)) #run again.
+                        i.obj.index = (i.obj.index + 1) % i.obj.framecount
+                        i.canvas.after(i.obj.delay, lambda: self.lazy_load(i)) #run again.
                     else:
                         #logger.debug(f"{i.obj.index+1}/{i.obj.framecount} ({i.obj.frametimes[i.obj.index]}): {i.obj.name.get()[:30]}")
-                        i.canvas.after(i.obj.frametimes[i.obj.index], lambda: self.lazy_load_loop(i)) #or a.obj.delay
+                        i.obj.index = (i.obj.index + 1) % i.obj.framecount
+                        i.canvas.after(i.obj.frametimes[i.obj.index], lambda: self.lazy_load(i)) #or a.obj.delay
 
                 else: #wait for frame to load.
                     #logger.debug(f"Buffering: {i.obj.name.get()[:30]}")
@@ -1346,31 +982,191 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                     i.canvas.after(i.obj.delay, lambda: self.lazy_load(i))
         except Exception as e:
             logger.error(f"Lazy load couldn't process the frame: {e}. Likely because of threading.")
-
-    def lazy_load_loop(self, i):
-        i.obj.index = (i.obj.index + 1) % i.obj.framecount
-        self.lazy_load(i)
-
     def animate(self, i,x, random_id = None): #frame by frame as to not freeze the main one XD #Post. animate a frame for each picture in the list and run this again.
         i.canvas.itemconfig(i.canvas_image_id, image=i.obj.frames[i.obj.index]) #change the frame
         if(i.obj.isvisible and random_id in [tup[1] for tup in self.running]): #and i in self.running
             x = True
             if self.default_delay.get():
                 logger.debug(f"{i.obj.index+1}/{i.obj.framecount} ({i.obj.delay}): {i.obj.name.get()[:30]}")
-                i.canvas.after(i.obj.delay, lambda: self.animation_loop(i,x, random_id)) #run again.
+                i.obj.index = (i.obj.index + 1) % i.obj.framecount
+                i.canvas.after(i.obj.delay, lambda: self.animate(i,x, random_id)) #run again.
             else:
                 logger.debug(f"{i.obj.index+1}/{i.obj.framecount} ({i.obj.frametimes[i.obj.index]}): {i.obj.name.get()[:30]}")
-                i.canvas.after(i.obj.frametimes[i.obj.index], lambda: self.animation_loop(i,x, random_id)) #run again.""
+                i.obj.index = (i.obj.index + 1) % i.obj.framecount
+                i.canvas.after(i.obj.frametimes[i.obj.index], lambda: self.animate(i,x, random_id)) #run again.""
         else:
-            base_name, ext = os.path.splitext(i.obj.name.get())
+            base_name, ext = path.splitext(i.obj.name.get())
             logger.info(f"Ended: {base_name[:(30-len(ext))]+ext}")
             pass
+    
+    "RENDER LIST"
+    def makegridsquare(self, parent, imageobj, setguidata, dest):
+        #CHANGE1
+        frame = tk.Frame(parent, borderwidth=0,
+                         highlightthickness = self.whole_box_size, highlightcolor=self.imageborder_default_colour,highlightbackground=self.imageborder_default_colour, padx = 0, pady = 0) 
 
-    def animation_loop(self, i, x, random_id):
-        i.obj.index = (i.obj.index + 1) % i.obj.framecount
+        frame.obj = imageobj
+        truncated_filename = self.truncate_text(imageobj)
+        truncated_name_var = tk.StringVar(frame, value=truncated_filename)
+        frame.obj2 = truncated_name_var # This is needed or it is garbage collected I guess
+        frame.grid_propagate(True)
 
-        self.animate(i, x, random_id)
+        try:
+            if setguidata:
+                if not path.exists(imageobj.thumbnail):
+                    self.fileManager.makethumb(imageobj)
+                try:
+                    #this is faster
+                    img = ImageTk.PhotoImage(Image.open(imageobj.thumbnail))
 
+                except:  # Pyvips fallback
+                    buffer = pyvips.Image.new_from_file(imageobj.thumbnail)
+                    img = ImageTk.PhotoImage(Image.frombuffer(
+                        "RGB", [buffer.width, buffer.height], buffer.write_to_memory()))
+            else:
+                img = imageobj.guidata['img']
+
+            canvas = tk.Canvas(frame, width=self.thumbnailsize,
+                               height=self.thumbnailsize,bg=self.square_colour, highlightthickness=self.square_border_size, highlightcolor=self.imageborder_default_colour, highlightbackground = self.imageborder_default_colour) #The gridbox color.
+            canvas.grid(column=0, row=0, sticky="NSEW")
+            #tooltiptext=tk.StringVar(frame,self.tooltiptext(imageobj)) #CHECK PROFILE
+            #ToolTip(canvas,msg=tooltiptext.get,delay=1) #CHECK PROFILE
+
+            canvas.image = img
+            frame.canvas = canvas
+
+            frame.rowconfigure(0, weight=4)
+            frame.rowconfigure(1, weight=1)
+
+            #Added reference for animation support. We use this to refresh the frame 1/20, 2/20..
+            canvas_image_id = canvas.create_image(
+                self.thumbnailsize/2+self.square_border_size, self.thumbnailsize/2+self.square_border_size, anchor="center", image=img) #If you use gridboxes, you must +1 to thumbnailsize/2, so it counteracts the highlighthickness.
+            frame.canvas_image_id = canvas_image_id
+
+            # Create a frame for the Checkbutton to control its height
+            #sqr = canvas.create_rectangle((0, 0, self.thumbnailsize, 3), width=0)
+            #frame.sqr = sqr
+
+            check_frame = tk.Frame(frame, height=self.checkbox_height, padx= 2, bg=self.square_text_box_colour)
+            check_frame.grid_propagate(False)
+            check_frame.grid(column=0, row=1, sticky="EW")  # Place the frame in the grid
+            
+            frame.cf = check_frame
+            #bar = tk.Frame(frame, width=self.thumbnailsize, height = 3, bg=self.grid_background_colour)
+            #bar.grid_propagate(False)
+            #bar.grid(column=0, row=1, sticky="EW")
+            #frame.bar = bar
+
+            
+
+            #Create different dest for destinations to control view better. These also call a command to cancel the viewer image from being moved by keypresses, if we interact with other gridsquares first.
+            if not dest:
+                check = ttk.Checkbutton(check_frame, textvariable=truncated_name_var, variable=imageobj.checked, onvalue=True, offvalue=False, command=lambda: (self.uncheck_show_next()), style="Theme_square.TCheckbutton")
+            else:
+                check = ttk.Checkbutton(check_frame, textvariable=truncated_name_var, variable=imageobj.destchecked, onvalue=True, offvalue=False, command=lambda: (self.uncheck_show_next()), style="Theme_square.TCheckbutton")
+            check.grid(sticky="NSEW")
+
+            if(setguidata):  # save the data to the image obj to both store a reference and for later manipulation
+                imageobj.setguidata(
+                    {"img": img, "frame": frame, "canvas": canvas, "check": check, "show": True}) #"tooltip":tooltiptext
+            frame.c = check
+            # anything other than rightclicking toggles the checkbox, as we want.
+            canvas.bind("<Button-1>", partial(bindhandler, check, "invoke"))
+            canvas.bind(
+                "<Button-3>", lambda e: (self.displayimage(frame)))
+            check.bind("<Button-3>", lambda e: (self.displayimage(frame)))
+
+            #make blue if only one that is blue, must remove other blue ones. blue ones are stored the gridsquare in a global list.
+            canvas.bind("<MouseWheel>", partial(
+                bindhandler, parent, "scroll"))
+            frame.bind("<MouseWheel>", partial(
+                bindhandler, self.imagegrid, "scroll"))
+
+            check.bind("<MouseWheel>", partial(
+                bindhandler, self.imagegrid, "scroll"))
+            
+            canvas.bind('<Right>', lambda event: (canvas.after_idle(self.navigator, event), self.navigation_key_pressed_toggle(True)))
+            canvas.bind('<Left>', lambda event: (canvas.after_idle(self.navigator, event), self.navigation_key_pressed_toggle(True)))
+            canvas.bind('<Up>', lambda event: (canvas.after_idle(self.navigator, event), self.navigation_key_pressed_toggle(True)))
+            canvas.bind('<Down>', lambda event: (canvas.after_idle(self.navigator, event), self.navigation_key_pressed_toggle(True)))
+
+            frame.bind('<Right>', lambda event: (canvas.after_idle(self.navigator, event), self.navigation_key_pressed_toggle(True)))
+            frame.bind('<Left>', lambda event: (canvas.after_idle(self.navigator, event), self.navigation_key_pressed_toggle(True)))
+            frame.bind('<Up>', lambda event: (canvas.after_idle(self.navigator, event), self.navigation_key_pressed_toggle(True)))
+            frame.bind('<Down>', lambda event: (canvas.after_idle(self.navigator, event), self.navigation_key_pressed_toggle(True)))
+
+            check.bind('<Right>', lambda event: (canvas.after_idle(self.navigator, event), self.navigation_key_pressed_toggle(True)))
+            check.bind('<Left>', lambda event: (canvas.after_idle(self.navigator, event), self.navigation_key_pressed_toggle(True)))
+            check.bind('<Up>', lambda event: (canvas.after_idle(self.navigator, event), self.navigation_key_pressed_toggle(True)))
+            check.bind('<Down>', lambda event: (canvas.after_idle(self.navigator, event), self.navigation_key_pressed_toggle(True)))
+
+            if imageobj.moved:
+                frame.configure(
+                    highlightbackground="green", highlightthickness=2)
+                if path.dirname(imageobj.path) in self.fileManager.destinationsraw:
+                    color = self.fileManager.destinations[indexOf(
+                        self.fileManager.destinationsraw,path.dirname(imageobj.path))]['color']
+                    frame['background'] = color
+                    canvas['background'] = color
+            #if imageobj.dupename:
+            #    frame.configure(
+            #        highlightbackground="brown", highlightthickness=2)
+        except Exception as e:
+            logger.error(e)
+        return frame
+    def tooltiptext(self,imageobject):
+        text=""
+        if imageobject.dupename:
+            text += "Image has Duplicate Filename!\n"
+        text += "Leftclick to select this for assignment. Rightclick to open full view"
+        return text
+    def truncate_text(self, imageobj): #max_length must be over 3+extension or negative indexes happen.
+        filename = imageobj.name.get()
+        base_name, ext = path.splitext(filename)
+        smallfont = self.smallfont
+        text_width = smallfont.measure(filename)
+
+        if text_width+24 <= self.thumbnailsize:
+
+            return filename # Return whole filename
+
+        ext = ".." + ext
+
+        while True: # Return filename that has been truncated.
+            test_text = base_name + ext # Test with one less character
+            text_width = smallfont.measure(test_text)
+            if text_width+24 < self.thumbnailsize:  # Reserve space for ellipsis
+                break
+            base_name = base_name[:-1]
+        return test_text
+
+    def displaygrid(self, imagelist, range): #dummy to handle sortimages calls for now...
+        number_of_animated = 0 #Just to tell user how many gifs and webps are being attempted to load
+        for i in range:
+            gridsquare = self.makegridsquare(self.imagegrid, imagelist[i], True, False)
+            self.gridsquarelist.append(gridsquare)
+            if not gridsquare.obj.moved:
+                self.unassigned_squarelist.append(gridsquare)
+                gridsquare.obj.isvisible = True
+
+            elif gridsquare.obj.moved:
+                self.moved_squarelist.append(gridsquare)
+                gridsquare.obj.isvisible = False
+
+            if gridsquare.obj.isanimated: # If the imageobj is a gif or webp, we render the square
+                # Static fallback image in case we fail to animate.
+                gridsquare.canvas_window = self.imagegrid.window_create("insert", window=gridsquare, padx=self.gridsquare_padx, pady=self.gridsquare_pady)
+                self.displayedlist.append(gridsquare)
+                Thread(target=self.fileManager.load_frames, args=(gridsquare,)).start()
+                number_of_animated += 1
+
+            else: # Normal image
+                gridsquare.canvas_window = self.imagegrid.window_create("insert", window=gridsquare, padx=self.gridsquare_padx, pady=self.gridsquare_pady)
+                self.displayedlist.append(gridsquare)
+
+        logger.debug(f"Trying to animate {number_of_animated} pictures.")
+        self.refresh_rendered_list()
+        self.start_gifs()
     def render_squarelist(self, squarelist): #This renders the given squarelist.
 
         current_squares = self.displayedlist.copy()
@@ -1414,7 +1210,6 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                 self.displayedlist.append(gridsquare)
                 gridsquare.obj.isvisible = True
         #print(f'Display: {len(self.displayedlist)}')
-
     def refresh_rendered_list(self):
         current_list = None
         if self.show_unassigned.get():
@@ -1442,6 +1237,20 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
         #a3 = len(self.moved_squarelist)
         #print(f"C:{len(current_list)}:G:{len(self.gridsquarelist)}:U:{a1}:A:{a2}:M:{a3}:D:{len(self.displayedlist)}")
         #print(f"U:{self.show_unassigned.get()}:A:{self.show_assigned.get()}:M:{self.show_moved.get()}")
+    def on_option_selected(self, selected_option):
+        if selected_option == "Show Unassigned":
+            self.show_unassigned.set(False)
+            self.clicked_show_unassigned()
+        elif selected_option == "Show Assigned":
+            self.clicked_show_assigned()
+        elif selected_option == "Show Moved":
+            self.clicked_show_moved()
+        elif selected_option == "Show Animated":
+            self.clicked_show_animated()
+        if self.show_next.get() and len(self.displayedlist) >= 1 and hasattr(self, "Image_frame"):
+            if not self.current_selection and self.displayedlist[0]:
+                self.current_selection == self.displayedlist[0]
+            self.displayimage(self.displayedlist[0])
 
     def clicked_show_unassigned(self): #Turns you on~
         if not self.fix_flag:
@@ -1457,7 +1266,6 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
         else:
             self.show_unassigned.set(True)
             self.fix_flag = False
-
     def clicked_show_assigned(self):
         if self.show_assigned.get() == False:
             self.show_unassigned.set(False)
@@ -1468,7 +1276,6 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
             self.running = []
             self.refresh_rendered_list()
             self.start_gifs()
-
     def clicked_show_moved(self):
         if self.show_moved.get() == False:
             self.show_assigned.set(False)
@@ -1479,7 +1286,6 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
             self.running = []
             self.refresh_rendered_list()
             self.start_gifs()
-
     def clicked_show_animated(self):
         if self.show_animated.get() == False:
             self.show_assigned.set(False)
@@ -1490,7 +1296,21 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
             self.refresh_rendered_list()
             self.running = []
             self.start_gifs()
-
+    
+    def load_more_images(self, *args):
+        filelist = self.fileManager.imagelist
+        if len(self.gridsquarelist) < len(filelist):
+            listmax = min(len(self.gridsquarelist) +
+                          self.squaresperpage.get(), len(filelist))
+            ran = range(len(self.gridsquarelist), listmax)
+            sublist = filelist[ran[0]:listmax]
+            print(f"Loading: {len(sublist)}")
+            self.fileManager.generatethumbnails(sublist)
+            self.displaygrid(self.fileManager.imagelist, ran)
+        else:
+            self.addpagebutton.configure(text="No More Images!",background="#DD3333")
+    
+    "DESTINATION WINDOW"
     def showthisdest(self, dest, *args): #If a destination window is already open, just update it.
 
         self.dest = dest['path']
@@ -1526,29 +1346,6 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
         # Refresh the destinations and set the active window
         self.filtered_images = []
         self.refresh_destinations()
-
-    def close_destination_window(self, event=None):
-        if event:
-            for square in self.dest_squarelist:
-                if square.winfo_x() <= event.x <= square.winfo_x() + square.winfo_width() and \
-                   square.winfo_y() <= event.y <= square.winfo_y() + square.winfo_height():
-                    logger.debug("Click inside a square, not closing.")
-                    return  # Click is inside a square, do not close
-
-        try:
-            if hasattr(self, 'destwindow'):
-                self.destpane_geometry = self.destwindow.winfo_geometry()
-                self.destgrid.destroy()
-                del self.destgrid
-                self.destwindow.destroy()
-                self.destwindow = None
-                del self.destwindow
-                self.dest_squarelist = []
-                self.filtered_images = []
-                self.queue = []
-        except Exception as e:
-            pass
-
     def refresh_destinations(self): #so when view changes, squarelist is updated, the
 
         if hasattr(self, 'destgrid') and self.destgrid: #If a destination window is open
@@ -1628,7 +1425,6 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                 self.dest_squarelist.remove(gridsquare)
                 gridsquare.obj.isvisibleindestination = False
             self.start_gifs_destination()
-
     def start_gifs_destination(self): # Check if images in the current destination view are animated or not.
         current_index = 0
         for i in self.dest_squarelist:
@@ -1636,7 +1432,6 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                 current_index = 0
                 x = False
                 self.animate_destination(i, current_index, x)
-
     def animate_destination(self, i, index, x):  # Frame by frame animation
         if x == False:
             if i not in self.track_animated:
@@ -1659,29 +1454,37 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
         else:
             logger.info("Stopped destination window animations.")
             pass
-
     def destination_loop(self, i, index, x):
         index = (index + 1) % i.obj.framecount
         self.animate_destination(i,index,x)
+    def close_destination_window(self, event=None):
+        if event:
+            for square in self.dest_squarelist:
+                if square.winfo_x() <= event.x <= square.winfo_x() + square.winfo_width() and \
+                   square.winfo_y() <= event.y <= square.winfo_y() + square.winfo_height():
+                    logger.debug("Click inside a square, not closing.")
+                    return  # Click is inside a square, do not close
 
-    def load_more_images(self, *args):
-        filelist = self.fileManager.imagelist
-        if len(self.gridsquarelist) < len(filelist):
-            listmax = min(len(self.gridsquarelist) +
-                          self.squaresperpage.get(), len(filelist))
-            ran = range(len(self.gridsquarelist), listmax)
-            sublist = filelist[ran[0]:listmax]
-            print(f"Loading: {len(sublist)}")
-            self.fileManager.generatethumbnails(sublist)
-            self.displaygrid(self.fileManager.imagelist, ran)
-        else:
-            self.addpagebutton.configure(text="No More Images!",background="#DD3333")
+        try:
+            if hasattr(self, 'destwindow'):
+                self.destpane_geometry = self.destwindow.winfo_geometry()
+                self.destgrid.destroy()
+                del self.destgrid
+                self.destwindow.destroy()
+                self.destwindow = None
+                del self.destwindow
+                self.dest_squarelist = []
+                self.filtered_images = []
+                self.queue = []
+        except Exception as e:
+            pass
 
 last_scroll_time = None
 last_scroll_time2 = None
 current_scroll_direction = -1
 flag1 = []
 flag_len = 1
+last_row_length = 0
 
 def throttled_yview(widget, page_mode, *args):
     """Throttle scroll events for both MouseWheel and Scrollbar slider"""
@@ -1689,7 +1492,7 @@ def throttled_yview(widget, page_mode, *args):
     global flag_len
     #global last_scroll_time
     #global throttle_time
-    #now = time.time()
+    #now = time()
     #if not last_scroll_time:
     #    last_scroll_time = now
     #else:
@@ -1728,12 +1531,8 @@ def throttled_yview(widget, page_mode, *args):
         widget.yview_moveto(moveto)
     widget.update()
     flag1.pop(0)
-
-
 def throttled_scrollbar(*args): # Throttled scrollbar callback
     throttled_yview(args[0], 'yview', *args[1:])
-
-last_row_length = 0
 def bindhandler_1(widget): # Fixes moving from dock view back to standalone view / could figure out custom values from rows, but eh.
     #global last_row_length
     #if last_row_length == 0:
@@ -1743,7 +1542,6 @@ def bindhandler_1(widget): # Fixes moving from dock view back to standalone view
     #    widget.yview_scroll(1, "units")
     #last_row_length += 1
     pass
-
 def bindhandler(*args):
     global current_scroll_direction
     global flag1
@@ -1753,7 +1551,7 @@ def bindhandler(*args):
     global last_scroll_time2
     global throttle_time
     throttle_time = 0.01
-    now = time.time()
+    now = time()
     if last_scroll_time2 is None or (now - last_scroll_time2) > throttle_time:  # 100ms throttle
             last_scroll_time2 = now
     if command == "scroll1":
@@ -1789,7 +1587,7 @@ def bindhandler(*args):
            scroll_amount = floor(pixels_per_step)
            widget.yview_scroll(delta_direction * scroll_amount, "pixels")
            widget.update()
-           #time.sleep(current_speed * delay)
+           #sleep(current_speed * delay)
            accumulated_scroll += scroll_amount
 
         for i in range(steps // 2, steps):
@@ -1798,7 +1596,7 @@ def bindhandler(*args):
             scroll_amount = floor(pixels_per_step)
             widget.yview_scroll(delta_direction * scroll_amount, "pixels")
             widget.update()
-            time.sleep(current_speed * delay)
+            sleep(current_speed * delay)
             accumulated_scroll += scroll_amount
 
         # Correct any remaining pixels to ensure the total scroll is exactly 281
@@ -1812,21 +1610,21 @@ def bindhandler(*args):
         #    current_speed = initial_speed / (slowdown_factor ** i)
         #    widget.yview_scroll(-pixel * floor(args[2].delta / 120), "pixels")
         #    widget.update()
-        #    time.sleep(current_speed * delay)
+        #    sleep(current_speed * delay)
         ## Deceleration phase: Gradually decrease speed
         #for i in range(9, 18):  # Second half of steps for deceleration
         #    current_speed = initial_speed / (slowdown_factor ** (18 - i))
         #    widget.yview_scroll(-pixel * floor(args[2].delta / 120), "pixels")
         #    widget.update()
         #    print(current_speed)
-        #    time.sleep(current_speed * delay)
+        #    sleep(current_speed * delay)
 
         #for i in range(18):  # Number of scroll steps
         #    current_speed = initial_speed / (slowdown_factor ** i)
         #    print(current_speed)
         #    widget.yview_scroll(-pixel * floor(args[2].delta / 120), "pixels")
         #    widget.update()
-        #    time.sleep(current_speed * delay)  # Adjust delay as needed
+        #    sleep(current_speed * delay)  # Adjust delay as needed
         widget.yview_scroll(-40*-1*floor(args[2].delta/120), "pixels")
         flag1.pop(0)
 
