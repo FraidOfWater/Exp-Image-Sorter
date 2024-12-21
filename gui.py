@@ -1,5 +1,5 @@
 from os import path, getcwd
-from time import time, sleep
+from time import time, sleep, perf_counter
 import pyvips
 import tkinter as tk
 import logging
@@ -18,7 +18,7 @@ from operator import indexOf
 from functools import partial
 from threading import Thread
 import vlc
-#Do navigator
+
 logger = logging.getLogger("GUI")
 logger.setLevel(logging.WARNING)  # Set to the lowest level you want to handle
 handler = logging.StreamHandler()
@@ -29,6 +29,8 @@ logger.addHandler(handler)
 
 throttle_time = None
 "Colour stuff"
+
+
 def luminance(hexin):
     color = tuple(int(hexin.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
     r = color[0]
@@ -69,7 +71,7 @@ class GUIManager(tk.Tk):
     def __init__(self, fileManager) -> None:
         super().__init__()
         self.fileManager = fileManager
-
+        self.vlc_instance = vlc.Instance('--quiet')
         #DEFAULT VALUES FOR PREFS.JSON. This is essentially the preference file the program creates at the very start.
         #paths
         self.source_folder = ""
@@ -167,8 +169,6 @@ class GUIManager(tk.Tk):
         self.started_not_integrated = False
         self.refresh_flag = False
         self.clear_all = False # To scrub views after view change
-        self.key_pressed = False
-        self.enter_toggle = False
         self.old_img_frame = []
 
         # Tracking index
@@ -667,6 +667,7 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
     def handle_setdestination_call(self, state, x=None, event=None):
         if x:
             self.fileManager.setDestination(x, event)
+        self.fileManager.navigator.dest_keys_pressed = state
     "Exclude window"
     def excludeshow(self):
         excludewindow = tk.Toplevel()
@@ -804,12 +805,12 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
         self.configure(background=self.op[self.switch_counter])
     """
     "CanvasImage"
-    def displayimage(self, frame, flag=True): #Create secondary window for image viewing
+    def displayimage(self, frame): #Create secondary window for image viewing
         imageobj = frame.obj
         items_per_row = int(max(1, self.imagegrid.winfo_width() / self.actual_gridsquare_width))
         row, col = map(int, self.imagegrid.index(tk.INSERT).split('.'))
         logger.debug(f"Row: {items_per_row}, Column: {col}, and {self.thumbnailsize} and {self.imagegrid.winfo_width()}")
-        self.fileManager.navigator.highlight_click(frame, "selected", "default")
+        self.fileManager.navigator.highlight_click(frame, self.displayedlist)
 
         if hasattr(self, "Image_frame"):
             if hasattr(self.Image_frame, "player"):
@@ -933,27 +934,20 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
     "GIF HANDLING"
     def start_gifs(self):
         logger.debug("starting gifs, if you see two of these, something is wrong.") #should only run once. Otherwise two processes try to change the frame leading to speed issues.
+        #need two lists. one for old, one for new
         # Check the visible list for pictures to animate.
-        self.running = []
         current_squares = self.displayedlist
-        load_these = []
         for i in current_squares: #could let in unanimated... because threading. check for frames?
-            if i.obj.isanimated and i.obj.isvisible:
-                if i not in [tup[0] for tup in self.running]: # not already displayed
-                    load_these.append(i)
-        for a in load_these:
-            if len(a.obj.frames) == a.obj.framecount and not a.obj.framecount == 0:
-                logger.info(f"Animate: {a.obj.name.get()[:30]}")
-                self.gen_id_and_animate(a)
+            if i.obj.isanimated and i.obj.isvisible and not i.obj.name.get().endswith(".mp4"):
+                self.running.append(i)
+                if len(i.obj.frames) == i.obj.framecount and not i.obj.framecount == 0: # all frames
+                    i.obj.index = 0
+                    logger.info(f"Animate: {i.obj.name.get()[:30]}")
+                    self.animate(i)
+                else: # lazy load
+                    #logger.info(f"Lazy load: {a.obj.name.get()[:30]}")
+                    self.lazy_load(i)
 
-            else:
-                #logger.info(f"Lazy load: {a.obj.name.get()[:30]}")
-                self.lazy_load(a)
-    def gen_id_and_animate(self, i):
-        random_id = randint(1,1000000)
-        self.running.append((i, random_id))
-        self.animate(i, False, random_id)
-        logger.info(f"Animating: {len(self.running)}, Finished: {i.obj.name.get()[:30]}")
     def lazy_load(self, i):
         try:
             if i.obj.frames and i.obj.index != i.obj.framecount and i.obj.lazy_loading:
@@ -974,26 +968,29 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                     #logger.debug(f"Buffering: {i.obj.name.get()[:30]}")
                     i.canvas.after(i.obj.delay, lambda: self.lazy_load(i))
             else:
-                if not i.obj.lazy_loading and i.obj.frames: #if all loaded
+                if not i.obj.lazy_loading and len(i.obj.frames) == i.obj.framecount: #if all loaded
                     #logger.debug(f"Moving to animate_loop method: {i.obj.name.get()[:30]}")
-                    self.gen_id_and_animate(i)
+                    self.animate(i)
                 else: # 0 frames?
                     #logger.debug(f"0 frames, buffering: {i.obj.name.get()[:30]}")
                     i.canvas.after(i.obj.delay, lambda: self.lazy_load(i))
         except Exception as e:
             logger.error(f"Lazy load couldn't process the frame: {e}. Likely because of threading.")
-    def animate(self, i,x, random_id = None): #frame by frame as to not freeze the main one XD #Post. animate a frame for each picture in the list and run this again.
-        i.canvas.itemconfig(i.canvas_image_id, image=i.obj.frames[i.obj.index]) #change the frame
-        if(i.obj.isvisible and random_id in [tup[1] for tup in self.running]): #and i in self.running
-            x = True
+    def animate(self, i): #frame by frame as to not freeze the main one XD #Post. animate a frame for each picture in the list and run this again.
+        if self.running.count(i) > 1:
+            self.running.remove(i)
+            return
+
+        if i.obj.isvisible: #and i in self.running
+            i.canvas.itemconfig(i.canvas_image_id, image=i.obj.frames[i.obj.index]) #change the frame
             if self.default_delay.get():
                 logger.debug(f"{i.obj.index+1}/{i.obj.framecount} ({i.obj.delay}): {i.obj.name.get()[:30]}")
                 i.obj.index = (i.obj.index + 1) % i.obj.framecount
-                i.canvas.after(i.obj.delay, lambda: self.animate(i,x, random_id)) #run again.
+                i.canvas.after(i.obj.delay, lambda: self.animate(i)) #run again.
             else:
                 logger.debug(f"{i.obj.index+1}/{i.obj.framecount} ({i.obj.frametimes[i.obj.index]}): {i.obj.name.get()[:30]}")
                 i.obj.index = (i.obj.index + 1) % i.obj.framecount
-                i.canvas.after(i.obj.frametimes[i.obj.index], lambda: self.animate(i,x, random_id)) #run again.""
+                i.canvas.after(i.obj.frametimes[i.obj.index], lambda: self.animate(i)) #run again.""
         else:
             base_name, ext = path.splitext(i.obj.name.get())
             logger.info(f"Ended: {base_name[:(30-len(ext))]+ext}")
@@ -1033,6 +1030,7 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
             #ToolTip(canvas,msg=tooltiptext.get,delay=1) #CHECK PROFILE
 
             canvas.image = img
+
             frame.canvas = canvas
 
             frame.rowconfigure(0, weight=4)
@@ -1142,7 +1140,14 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
 
     def displaygrid(self, imagelist, range): #dummy to handle sortimages calls for now...
         number_of_animated = 0 #Just to tell user how many gifs and webps are being attempted to load
+        anims = []
+        a = perf_counter()
         for i in range:
+            if imagelist[i].isanimated:
+                anims.append(imagelist[i])
+        self.fileManager.generate_thumbframes(anims)
+        for i in range:
+
             gridsquare = self.makegridsquare(self.imagegrid, imagelist[i], True, False)
             self.gridsquarelist.append(gridsquare)
             if not gridsquare.obj.moved:
@@ -1157,7 +1162,8 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                 # Static fallback image in case we fail to animate.
                 gridsquare.canvas_window = self.imagegrid.window_create("insert", window=gridsquare, padx=self.gridsquare_padx, pady=self.gridsquare_pady)
                 self.displayedlist.append(gridsquare)
-                Thread(target=self.fileManager.load_frames, args=(gridsquare,)).start()
+                #anims.append(gridsquare)
+                #Thread(target=self.fileManager.load_thumb_frames, args=(gridsquare,)).start()
                 number_of_animated += 1
 
             else: # Normal image
@@ -1167,10 +1173,11 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
         logger.debug(f"Trying to animate {number_of_animated} pictures.")
         self.refresh_rendered_list()
         self.start_gifs()
+        print(f"Displayed grid in: {perf_counter()-a:.2f}")
     def render_squarelist(self, squarelist): #This renders the given squarelist.
 
         current_squares = self.displayedlist.copy()
-
+        anims = []
         if self.clear_all:
             for gridsquare in current_squares:
                 if gridsquare in squarelist:
@@ -1183,16 +1190,28 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
         #delete
         for gridsquare in current_squares:
             if gridsquare not in squarelist:
+                if gridsquare.obj.frames:
+                    self.running = [i for i in self.running if i != gridsquare] #could be done more efficiently
+                    self.fileManager.empty_thumb_frames(gridsquare)
+
                 self.imagegrid.window_configure(gridsquare, window="")
                 self.displayedlist.remove(gridsquare)
                 gridsquare.obj.isvisible = False
+                
 
         # Readd
         if self.show_assigned.get():
             for gridsquare in self.render_refresh:
-                self.imagegrid.window_configure(gridsquare, window="")
-                gridsquare.canvas_window = self.imagegrid.window_create(
-                            "1.0", window=gridsquare)
+                if gridsquare.obj.isanimated: # If the imageobj is a gif or webp, we render the square
+                    # Static fallback image in case we fail to animate.
+                    self.imagegrid.window_configure(gridsquare, window="")
+                    gridsquare.canvas_window = self.imagegrid.window_create(
+                                "1.0", window=gridsquare, padx=self.gridsquare_padx, pady=self.gridsquare_pady)
+                    
+                else:
+                    self.imagegrid.window_configure(gridsquare, window="")
+                    gridsquare.canvas_window = self.imagegrid.window_create(
+                                "1.0", window=gridsquare)
                 gridsquare.obj.isvisible = True
                 self.displayedlist.append(gridsquare)
             self.render_refresh = []
@@ -1202,13 +1221,29 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
         for gridsquare in squarelist:
             if gridsquare not in self.displayedlist:
                 if self.show_assigned.get():
-                    gridsquare.canvas_window = self.imagegrid.window_create(
-                        "1.0", window=gridsquare)
+                    if gridsquare.obj.isanimated and gridsquare.obj.framecount != 0: # If the imageobj is a gif or webp, we render the square
+                        # Static fallback image in case we fail to animate.
+                        gridsquare.canvas_window = self.imagegrid.window_create(
+                                    "1.0", window=gridsquare, padx=self.gridsquare_padx, pady=self.gridsquare_pady)
+                        anims.append(gridsquare.obj)
+                    else:
+                        gridsquare.canvas_window = self.imagegrid.window_create(
+                            "1.0", window=gridsquare)
                 else:
-                    gridsquare.canvas_window = self.imagegrid.window_create(
-                        "insert", window=gridsquare)
+                    if gridsquare.obj.isanimated and gridsquare.obj.framecount != 0: # If the imageobj is a gif or webp, we render the square
+                        # Static fallback image in case we fail to animate.
+                        gridsquare.canvas_window = self.imagegrid.window_create(
+                                    "insert", window=gridsquare, padx=self.gridsquare_padx, pady=self.gridsquare_pady)
+                        anims.append(gridsquare.obj)
+                    else:
+                        gridsquare.canvas_window = self.imagegrid.window_create(
+                            "insert", window=gridsquare)
                 self.displayedlist.append(gridsquare)
                 gridsquare.obj.isvisible = True
+
+        if anims:
+            self.fileManager.load_thumb_frames_again(anims)
+
         #print(f'Display: {len(self.displayedlist)}')
     def refresh_rendered_list(self):
         current_list = None
@@ -1247,10 +1282,8 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
             self.clicked_show_moved()
         elif selected_option == "Show Animated":
             self.clicked_show_animated()
-        if self.show_next.get() and len(self.displayedlist) >= 1 and hasattr(self, "Image_frame"):
-            if not self.current_selection and self.displayedlist[0]:
-                self.current_selection == self.displayedlist[0]
-            self.displayimage(self.displayedlist[0])
+        if self.show_next.get() and len(self.displayedlist) >= 1 and hasattr(self, "Image_frame"): # Updates selection to first pic
+            self.fileManager.navigator.view_change(self.displayedlist)
 
     def clicked_show_unassigned(self): #Turns you on~
         if not self.fix_flag:
@@ -1260,7 +1293,6 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                 self.show_unassigned.set(True)
                 self.show_animated.set(False)
                 self.clear_all = True
-                self.running = []
                 self.refresh_rendered_list()
                 self.start_gifs()
         else:
@@ -1273,7 +1305,6 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
             self.show_assigned.set(True)
             self.show_animated.set(False)
             self.clear_all = True
-            self.running = []
             self.refresh_rendered_list()
             self.start_gifs()
     def clicked_show_moved(self):
@@ -1283,7 +1314,6 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
             self.show_moved.set(True)
             self.show_animated.set(False)
             self.clear_all = True
-            self.running = []
             self.refresh_rendered_list()
             self.start_gifs()
     def clicked_show_animated(self):
@@ -1294,7 +1324,6 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
             self.show_animated.set(True)
             self.clear_all = True
             self.refresh_rendered_list()
-            self.running = []
             self.start_gifs()
     
     def load_more_images(self, *args):
