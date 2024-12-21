@@ -36,11 +36,9 @@ This fork is a hobby, it adds new features and other tweaks, and removes some ot
 
       Miscellaneous
 
-    Run Without Compiling: Copy over required DLLs and run the script directly.
+    Run Without Compiling: Copy over required DLLs and run the script directly. (if using newest source, must use vips-dev-xxx folder (find the link for WINDOWS BINARIES). from https://github.com/libvips/libvips/releases)) (both _w64_web (normal) and _all work)
     User File Accessibility: Prefs, session data, and data folders are now outside _internal
-    Core Utilization: Automatically utilizes available CPU cores.
-    Fixed Bugs: That appeared in the original
-    
+
 
 # Warnings #
 
@@ -55,8 +53,7 @@ This fork is a hobby, it adds new features and other tweaks, and removes some ot
 1. Install Python: Ensure you have Python installed.
 2. Install Dependencies: Use pip to install the required dependencies:
 
-       pip install pyvips tkinter-tooltip pillow pyinstaller (more now check install.bat, also need vlc.exe 64bit)
-         or if you built yourself from the latest source (mp4, webm animation and audio support) "pip install pyvips tkinter-tooltip pillow pyinstaller opencv-python audioop-lts imageio imageio[ffmpeg] pydub pygame simpleaudio"
+       pip install pyvips tkinter-tooltip pillow pyinstaller
 
 4. Required DLLs: Obtain the following DLLs from a compiled copy in the _internal folder:
 
@@ -80,7 +77,7 @@ This fork is a hobby, it adds new features and other tweaks, and removes some ot
 # How to run as a script #
 ### Running Without Building ###
 
-   1. Edit sortimages_multiview.py and enable the following code block, then save:
+   1. a. Edit sortimages_multiview.py and enable the following code block, then save:
 
             #""" # This can/should be commented if you build.
             import ctypes
@@ -97,13 +94,21 @@ This fork is a hobby, it adds new features and other tweaks, and removes some ot
             ctypes.CDLL(dll_path3)
             ctypes.CDLL(dll_path4)
             #"""
-   2. Shortcut
+   1. b. If running from newest source, you must use the new vips. (no need for step a)
+      
+          (vips-dev-xxx folder (find the link for WINDOWS BINARIES). from https://github.com/libvips/libvips/releases)) (both _w64_web (normal) and _all work)
+          (put this next to the other .py files.)
+          (download vlc 64 bit, copy the vlc.exe next to .py files)
+          Dependencies:
+          (pip install pillow pyvips imageio imageio[ffmpeg] python-vlc tkinter-tooltip)
+      
+   3. Shortcut
       
             start.bat
                   cd %~dp0
                   python sortimages_multiview.py
                   pause
-   3. Note
+   4. Note
 
             To edit this in VSC, you must open the FOLDER with "Open with code". Opening only the sortimages_multiview.py will make VSC's terminal use \Users\user path,which will fail to import pyvips for some reason.
       
