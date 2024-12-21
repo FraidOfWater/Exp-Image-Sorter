@@ -9,15 +9,7 @@ from time import time, perf_counter
 import logging
 import vlc
 from os.path import getsize
-#import only thread and event, import only time, import only some math.
-#First launch second_window_viewer doesn't work.
-#Videos broken on second_viewer.
-#Navigator not implemented.
-#First frame of gif bugged.
-#Resizing for all others too beside video.
-#Zooming for all others besides static.
-#Zooming for video? Experimental, not needed.
-#White flicker when starting video players from scratch. has to do with resizer, persistent vlc session?
+
 logger = logging.getLogger("Canvasimage")
 logger.setLevel(logging.ERROR) 
 handler = logging.StreamHandler()
@@ -52,16 +44,16 @@ class AutoScrollbar(ttk.Scrollbar):
     def place(self, **kw):
         raise tk.TclError('Cannot use place with the widget ' + self.__class__.__name__)
 
-
 class CanvasImage:
     """ Display and zoom image """
-
     "Initialization"
+    #@profile
     def __init__(self, master, imagewindowgeometry, viewer_colour, imageobj, gui):
         self.timer = Timer()
         self.timer.start()
         self.obj = imageobj
         self.gui = gui
+        self.gui.unbind("<Configure>")
         # Lists, attributes and other flags.
         self.frames = []            # Stores loaded frames for .Gif, .Webp
         self.original_frames = []   # Could be used for zooming logic
@@ -76,12 +68,9 @@ class CanvasImage:
         # Navigator locking mechanism
         self.og_posx = 0
         self.og_posy = 0
-        self.last_state = ""
-        self.exit_lock = False
         # Logic for quick displaying of first frame.
         self.first = True           # Flag that turns off when the initial picture has been rendered.
-        self.replace_first = True   # Flag that turns off when the pyramid has created the same picture in higher quality and rendered it.
-        self.replace_await = False
+        self.replace_await = False  # Flag tells whether we want to render a second better quality on top
         # Picture sizes
         self.file_size = round(self.obj.file_size/1.048576/1000000,2) #file size in MB
         # The initial quality of placeholder image, used to display the image just a bit faster.
@@ -101,35 +90,10 @@ class CanvasImage:
         # Fix for lag in first image that is placed!
         self.count = 0
         self.count1 = 3
-        # Video handling
-        if hasattr(self.obj, 'video_thumb_path'):
-            self.path = self.obj.video_thumb_path
-        else:
-            self.path = self.obj.path
+        # Video handling (if path points to video file, we must use its thumb to get its size.)
+        self.path = self.obj.path
         # Window
         geometry_width, geometry_height = imagewindowgeometry.split('x',1)
-
-        """Opening the image""" #fix
-        Image.MAX_IMAGE_PIXELS = 1000000000  # suppress DecompressionBombError for the big image
-        with catch_warnings():  # suppress DecompressionBombWarning
-            simplefilter('ignore')
-            self.image = Image.open(self.path)  # open image, but down't load it
-        self.imwidth, self.imheight = self.image.size  # public for outer classes
-        self.image = self.image
-        if self.imwidth * self.imheight > self.__huge_size * self.__huge_size and \
-           self.image.tile[0][0] == 'raw':  # only raw images could be tiled
-            self.__huge = True  # image is huge
-            self.__offset = self.image.tile[0][2]  # initial tile offset
-            self.__tile = [self.image.tile[0][0],  # it have to be 'raw'
-                           [0, 0, self.imwidth, 0],  # tile extent (a rectangle)
-                           self.__offset,
-                           self.image.tile[0][3]]  # list of arguments to the decoder
-        self.__min_side = min(self.imwidth, self.imheight)  # get the smaller image side
-        # Set ratio coefficient for image pyramid
-        self.__ratio = max(self.imwidth, self.imheight) / self.__huge_size if self.__huge else 1.0
-        self.__curr_img = 0  # current image from the pyramid
-        self.__scale = self.imscale * self.__ratio  # image pyramid scale
-        self.__reduction = 2 # reduction degree of image pyramid
 
         """ Initialization of frame in master widget"""
         self.__imframe = ttk.Frame(master)
@@ -144,28 +108,56 @@ class CanvasImage:
         #self.canvas.grid_propagate(True) #Experimental
         self.canvas_height = int(geometry_height)
         self.canvas_width = int(geometry_width)
+        #self.canvas.update() #profile
+
+        self.file_type = ["STATIC", "VIDEO", "ANIMATION"]
+        # Handle .mp4, .webm - VLC (audio)
+        if self.obj.path.lower().endswith((".mp4",".webm")): # Is video 
+            self.file_type = self.file_type[1] #takes a loong time. either generate full size thumb OR must save width and height to fileimage
+            self.imwidth, self.imheight = self.obj.dimensions
+            self.handle_video()
+            self.binds()
+            self.gui.bind("<Configure>", self.resize_to_window) #must unbind...
+            return
+        
+        """Opening the image""" #fix
+        Image.MAX_IMAGE_PIXELS = 1000000000  # suppress DecompressionBombError for the big image
+        with catch_warnings():  # suppress DecompressionBombWarning
+            simplefilter('ignore')
+            self.image = Image.open(self.path)  # open image, but down't load it
+        self.imwidth, self.imheight = self.image.size  # public for outer classes
+        if self.imwidth * self.imheight > self.__huge_size * self.__huge_size and \
+           self.image.tile[0][0] == 'raw':  # only raw images could be tiled
+            self.__huge = True  # image is huge
+            self.__offset = self.image.tile[0][2]  # initial tile offset
+            self.__tile = [self.image.tile[0][0],  # it have to be 'raw'
+                           [0, 0, self.imwidth, 0],  # tile extent (a rectangle)
+                           self.__offset,
+                           self.image.tile[0][3]]  # list of arguments to the decoder
+        self.__min_side = min(self.imwidth, self.imheight)  # get the smaller image side
+        # Set ratio coefficient for image pyramid
+        self.__ratio = max(self.imwidth, self.imheight) / self.__huge_size if self.__huge else 1.0
+        self.__curr_img = 0  # current image from the pyramid
+        self.__scale = self.imscale * self.__ratio  # image pyramid scale
+        self.__reduction = 2 # reduction degree of image pyramid
         self.__pyramid = []
         self.pyramid = []
-        if not self.obj.path.endswith((".mp4",".webm")):
-            self.__pyramid = [self.smaller()] if self.__huge else [Image.open(self.path)]
-        
-        self.canvas.update()
+        self.__pyramid = [self.smaller()] if self.__huge else [Image.open(self.path)]
+
         # Handle static images
-        self.file_type = ["STATIC", "VIDEO", "ANIMATION"]
         if not self.obj.isanimated:
             self.file_type = self.file_type[0]
+            self.pyramid_ready = Event()
             self.handle_static()
-            self.canvas.bind('<Configure>', lambda event: (self.__show_image()))  # canvas is resized from displayimage, time to show image.
-        # Handle .mp4, .webm - VLC (audio)
-        elif self.obj.name.get().endswith((".mp4", ".webm")):
-            self.file_type = self.file_type[1]
-            self.handle_video()
+
         # Handle .gif, .webp - Custom renderer
         else:
             self.file_type = self.file_type[2]
             self.handle_gif()
-            self.canvas.bind('<Configure>', lambda event: (self.__show_image()))  # canvas is resized from displayimage, time to show image.
-
+        self.binds()
+        self.canvas.bind('<Configure>', lambda event: (self.__show_image()))  # canvas is resized from displayimage, time to show image.
+      
+    def binds(self):
         # Bind events to the Canvas
         self.canvas.bind('<ButtonPress-1>', self.__move_from)  # remember canvas position / panning
         #self.canvas.bind('<ButtonRelease-1>', lambda event: self.time_set(event))  # remember canvas position / panning (navigator)
@@ -173,70 +165,72 @@ class CanvasImage:
         self.canvas.bind('<MouseWheel>', self.__wheel)  # zoom for Windows and MacOS, but not Linux / zoom pyramid.
         self.canvas.bind('<Button-5>',   self.__wheel)  # zoom for Linux, wheel scroll down
         self.canvas.bind('<Button-4>',   self.__wheel)  # zoom for Linux, wheel scroll up
-
-        # Navigation
-    
     "Video"
+    #@profile
     def handle_video(self):
         "Handles videos"
+        path = self.obj.path
+        timer = self.timer
         # Create a VLC instance
-        self.vlc_instance = vlc.Instance('--quiet')
-        self.media_list_player = self.vlc_instance.media_list_player_new()
-        self.media_list = self.vlc_instance.media_list_new()
-        media = self.vlc_instance.media_new(self.obj.path)
-        self.media_list.add_media(media)
-        self.media_list_player.set_media_list(self.media_list)
-        self.player = self.media_list_player.get_media_player()
+        vlc_instance = self.gui.vlc_instance
+        media_list_player = vlc_instance.media_list_player_new()
+        #vlc_instance = vlc.Instance('--quiet')
         
-        self.video_frame = tk.Canvas(self.canvas,width=self.gui.middlepane_width, bg=self.viewer_colour, highlightbackground="black",highlightthickness=0, borderwidth=0)
-        self.canvas.grid_rowconfigure(0, weight=1)  # Allow row to expand
-        self.canvas.grid_columnconfigure(0, weight=1)  # Allow column to expand
-        self.canvas.update()  # Wait until the canvas has finished creating.
+        media_list = vlc_instance.media_list_new()
+        media = vlc_instance.media_new(path)
+        media_list.add_media(media)
+        media_list_player.set_media_list(media_list)
+        self.player = media_list_player.get_media_player()
+        
         new_width = self.canvas_width
         new_height = self.canvas_height
-        width, height = self.image.size
-        aspect_ratio = width / height
-        if self.canvas_width / self.canvas_height > aspect_ratio:
-            new_height = self.canvas_height
+        aspect_ratio = self.imwidth / self.imheight
+
+        if new_width / new_height > aspect_ratio:
             new_width = int(new_height * aspect_ratio)
         else:
-            new_width = self.canvas_width
             new_height = int(new_width / aspect_ratio)
         new_width -= 4 #divider
-        self.video_frame.config(width=new_width, height=new_height)
-        self.video_frame.grid(pady=((self.canvas_height - new_height) // 2), sticky="nsew")
-        self.video_frame_id = self.video_frame.winfo_id()
-        self.player.set_hwnd(self.video_frame_id)
-        self.media_list_player.set_playback_mode(vlc.PlaybackMode.loop)
-        self.media_list_player.play()
-        self.canvas.update()  # Wait until the canvas has finished creating.
-        self.container = self.canvas.create_rectangle((0, 0, self.imwidth, self.imheight), width=0)
-        Thread(target=media.parse, daemon=True).start()
-        total_seconds = int(media.get_duration()/1000)
-        minutes = total_seconds // 60
-        seconds = total_seconds % 60
-        
-        print(f"Size: {getsize(self.obj.path)/(1024*1024):.2f} MB. Duration: {minutes}:{seconds}")
-        print(f"F:  {self.timer.stop()}\n")
-        self.gui.bind("<Configure>", lambda event: (self.resize_to_window(self.file_type)))
 
-    def resize_to_window(self, file_type):
+        self.video_frame = tk.Canvas(self.canvas,width=new_width, height=new_height,
+                                     bg=self.viewer_colour, highlightbackground="black",
+                                        highlightthickness=0, borderwidth=0)
+        self.canvas.grid_rowconfigure(0, weight=1)  # Allow row to expand
+        self.canvas.grid_columnconfigure(0, weight=1)  # Allow column to expand
+        #self.canvas.update()  # Wait until the canvas has finished creating.
+        
+        self.video_frame.grid(pady=((self.canvas_height - new_height) // 2), sticky="nsew")
+        video_frame_id = self.video_frame.winfo_id()
+        self.player.set_hwnd(video_frame_id)
+        media_list_player.set_playback_mode(vlc.PlaybackMode.loop)
+        media_list_player.play()
+        #self.canvas.update()  # Wait until the canvas has finished creating.
+
+        def video_print_data():
+            media.parse()
+            total_seconds = int(media.get_duration()/1000)
+            minutes = total_seconds // 60
+            seconds = total_seconds % 60
+            print(f"Size: {getsize(path)/(1024*1024):.2f} MB. Duration: {minutes}:{seconds}")
+            print(f"F:  {timer.stop()}\n")    
+        Thread(target=video_print_data, daemon=True).start()
+
+    def resize_to_window(self, *args):
         "Canvas resizer"
         # Get the current width of the middle pane
         new_width = self.gui.middlepane_frame.winfo_width()
-        original_width, original_height = self.image.size
-        aspect_ratio = original_width / original_height
+        aspect_ratio = self.imwidth / self.imheight
         # Calculate the new height to maintain the aspect ratio
         new_height = int(new_width / aspect_ratio)
 
-        if file_type == "VIDEO":
+        if self.file_type == "VIDEO":
             # Update the video frame size
             self.video_frame.config(width=new_width, height=new_height)
             self.video_frame.grid(pady=((self.canvas_height - new_height) // 2), sticky="nsew")
             pass
             # Optionally, you can also update the canvas size if needed
             #self.canvas.config(width=new_width, height=new_height)
-        elif file_type == "ANIMATION":
+        elif self.file_type == "ANIMATION":
             pass
         else: # STATIC
             pass
@@ -245,119 +239,123 @@ class CanvasImage:
 
     "Static"
     def handle_static(self):
+        def render_second():
+            self.pyramid_ready.wait()
+            self.replace_await = True
+            try:
+                self.__show_image()
+            except Exception as e:
+                print(e)
+
+        def lazy_pyramid(w, h):
+            "Generates zoom pyramid"
+            c11.set()
+            try:
+                if self.file_size > self.gui.quick_preview_size_threshold:
+                    Thread(target=render_second, daemon=True).start()
+                self.pyramid = [Image.open(self.path)]
+                while w > 512 and h > 512: # stop this if program closing
+                    w /= self.__reduction
+                    h /= self.__reduction
+                    self.pyramid.append(self.pyramid[-1].resize(w,h), self.__filter)
+                self.__pyramid = self.pyramid # pass the whole zoom pyramid when it is ready.
+            except Exception as e:
+                logger.info("Thread caught:", e)
+                
+        
+            
+
         "Handles static images"
         w, h = self.__pyramid[-1].size
-        self.pyramid_ready = Event()
-        Thread(target=lambda:self.lazy_pyramid(w,h), daemon=True).start()
+        c11 = Event()
+        
+        Thread(target=lazy_pyramid, args=(w,h), daemon=True).start()
+        c11.wait()
         #self.canvas.update()  # Wait until the canvas has finished creating.
         self.container = self.canvas.create_rectangle((0, 0, self.imwidth, self.imheight), width=0)
-    def lazy_pyramid(self,w,h):
-        "Generates zoom pyramid"
-        try:
-            Thread(target=self.helperr, daemon=True).start()
-            self.pyramid = [Image.open(self.path)]
-            self.replace_first = True
-            while w > 512 and h > 512:
-                w /= self.__reduction
-                h /= self.__reduction
-                self.pyramid.append(self.pyramid[-1].resize((int(w), int(h)), self.__filter))
-            self.__pyramid = self.pyramid # pass the whole zoom pyramid when it is ready.
-        except Exception as e:
-            self.pyramid_ready.set() #failsafe
-            logger.info("Thread caught:", e)
-    def helperr(self):
-        self.pyramid_ready.wait()
-        self.replace_first = False
-        self.replace_await = True
-        try:
-            self.__show_image()
-        except Exception as e:
-            print(e)
 
     "GIF"
     def handle_gif(self):
         "Handles gifs"
-        try:
-            self.length = self.obj.framecount
-            new_width = self.canvas_width
-            new_height = self.canvas_height
-            width, height = self.image.size
-            aspect_ratio = width / height
-            if new_width / new_height > aspect_ratio:
-                new_width = int(new_height*aspect_ratio)
-            else:
-                new_height = int(new_width / aspect_ratio)
-            self.new_size = (new_width, new_height)
-            self.load_frames_thread = Thread(target=self.load_frames, daemon=True).start()
-            self.lazy_load()
-            self.canvas.update()  # Wait until the canvas has finished creating.
-            self.container = self.canvas.create_rectangle((0, 0, self.imwidth, self.imheight), width=0)
-        except Exception as e:
-            logger.error(f"Can't access imageinfo. {e}")
-    def load_frames(self):
-        "Generates frames for gif, webp"
-        try:
-            frame = ImageTk.PhotoImage(self.image.resize(self.new_size), Image.Resampling.LANCZOS)
-            canvas_width = self.canvas_width
-            canvas_height = self.canvas_height
-            frame_width = frame.width()
-            frame_height = frame.height()
-            x_offset = (canvas_width - frame_width) // 2
-            y_offset = (canvas_height - frame_height) // 2
-            self.imageid = self.canvas.create_image(x_offset, y_offset, anchor='nw', image=frame)
-            self.frames.append(frame)
-            print(f"Size: {self.file_size} MB. Frames: {self.obj.framecount}")
-            print(f"F:  {self.timer.stop()}\n")
-            self.first = False # Flags that the first has been created
-            for i in range(1, self.obj.framecount):
-                self.image.seek(i)
-                logger.debug(f"Load: {self.lazy_index+1}/{self.obj.framecount} ({self.obj.frametimes[self.lazy_index]})")
-                frame = ImageTk.PhotoImage(self.image.resize(self.new_size), Image.Resampling.LANCZOS)
-                self.frames.append(frame)
-            self.lazy_loading = False # Lower the lazy_loading flag so animate can take over.
-            return
-        except Exception as e:
-            if hasattr(self, 'frames'): # This wont let the error display if the window is being closed.
-                logger.error(f"Error loading frames: {e}")
-    def lazy_load(self):
-        "Display new frames as soon as possible, when all loaded, switch to simple looping method"
-        if not self.lazy_loading: # When all frames are loaded, we switch to just looping
-            logger.debug("All frames loaded, stopping lazy_load")
-            self.animate_image()
-            return
-        elif not self.frames or not len(self.frames) > self.lazy_index: #if the list is still empty. Wait.
-            logger.debug("Buffering") #Ideally 0 buffering, update somethng so frames is initialzied quaranteed.
-            self.canvas.after(self.obj.delay, self.lazy_load)
-            return
-        elif self.lazy_index != self.obj.framecount:
-            #Checks if more frames than index is trying and less than max allowed.
-            self.canvas.itemconfig(self.imageid, image=self.frames[self.lazy_index])
-            if self.default_delay.get():
-                logger.debug(f"Lazy: {self.lazy_index+1}/{self.obj.framecount} ({self.obj.delay}) ###")
-                self.lazy_index = (self.lazy_index + 1) % self.obj.framecount
-                self.canvas.after(self.obj.delay, self.lazy_load)
-                return
-            else:
-                logger.debug(f"Lazy: {self.lazy_index+1}/{self.obj.framecount} ({self.obj.frametimes[self.lazy_index]}) ###")
-                self.lazy_index = (self.lazy_index + 1) % self.obj.framecount
-                self.canvas.after(self.obj.frametimes[self.lazy_index], self.lazy_load)
-                return
-        else:
-            logger.error("Error in lazy load, take a look")
-            self.canvas.after(self.obj.delay, self.lazy_load)
-    def animate_image(self):
-        "Simple gif looper"
-        self.canvas.itemconfig(self.imageid, image=self.frames[self.lazy_index])
-        
-        if self.default_delay.get():
-            logger.debug(f"{self.lazy_index+1}/{self.obj.framecount} ({self.obj.delay})")
-            self.lazy_index = (self.lazy_index + 1) % len(self.frames)
-            self.canvas.after(self.obj.delay, self.animate_image)
+        def load_frames(image, new_width, new_height):
+            "Generates frames for gif, webp"
+            try:
+                self.image.seek(0) # remove if doesnt eliminate first frame bug
+                frame = ImageTk.PhotoImage(image.resize((new_width, new_height)), Image.Resampling.LANCZOS)
+                frame_width = frame.width()
+                frame_height = frame.height()
+                self.canvas_height
+                self.canvas_width
 
+                x_offset = (self.canvas_width - frame_width) // 2
+                y_offset = (self.canvas_height - frame_height) // 2
+                self.imageid = self.canvas.create_image(x_offset, y_offset, anchor='nw', image=frame)
+                self.frames.append(frame)
+                print(f"Size: {self.file_size} MB. Frames: {self.obj.framecount}")
+                print(f"F:  {self.timer.stop()}\n")
+                self.first = False # Flags that the first has been created
+                for i in range(1, self.obj.framecount): #Check here to not continue if we stop the program
+                    self.image.seek(i)
+                    logger.debug(f"Load: {self.lazy_index+1}/{self.obj.framecount} ({self.obj.frametimes[self.lazy_index]})")
+                    frame = ImageTk.PhotoImage(self.image.resize((new_width, new_height)), Image.Resampling.LANCZOS)
+                    self.frames.append(frame)
+                self.lazy_loading = False # Lower the lazy_loading flag so animate can take over.
+                return
+            except Exception as e:
+                if hasattr(self, 'frames'): # This wont let the error display if the window is being closed.
+                    logger.error(f"Error loading frames: {e}")
+        def lazy_load():
+            def animate_image():
+                "Simple gif looper"
+                self.canvas.itemconfig(self.imageid, image=self.frames[self.lazy_index])
+
+                if self.default_delay.get():
+                    logger.debug(f"{self.lazy_index+1}/{self.obj.framecount} ({self.obj.delay})")
+                    self.lazy_index = (self.lazy_index + 1) % len(self.frames)
+                    self.canvas.after(self.obj.delay, animate_image)
+
+                else:
+                    logger.debug(f"{self.lazy_index+1}/{self.obj.framecount} ({self.obj.frametimes[self.lazy_index]})")
+                    self.lazy_index = (self.lazy_index + 1) % len(self.frames)
+                    self.canvas.after(self.obj.frametimes[self.lazy_index], animate_image)
+            "Display new frames as soon as possible, when all loaded, switch to simple looping method"
+            if not self.lazy_loading: # When all frames are loaded, we switch to just looping
+                logger.debug("All frames loaded, stopping lazy_load")
+                animate_image()
+                return
+            elif not self.frames or not len(self.frames) > self.lazy_index: #if the list is still empty. Wait.
+                logger.debug("Buffering") #Ideally 0 buffering, update somethng so frames is initialzied quaranteed.
+                self.canvas.after(self.obj.delay, lazy_load)
+                return
+            elif self.lazy_index != self.obj.framecount:
+                #Checks if more frames than index is trying and less than max allowed.
+                self.canvas.itemconfig(self.imageid, image=self.frames[self.lazy_index])
+                if self.default_delay.get():
+                    logger.debug(f"Lazy: {self.lazy_index+1}/{self.obj.framecount} ({self.obj.delay}) ###")
+                    self.lazy_index = (self.lazy_index + 1) % self.obj.framecount
+                    self.canvas.after(self.obj.delay, lazy_load)
+                    return
+                else:
+                    logger.debug(f"Lazy: {self.lazy_index+1}/{self.obj.framecount} ({self.obj.frametimes[self.lazy_index]}) ###")
+                    self.lazy_index = (self.lazy_index + 1) % self.obj.framecount
+                    self.canvas.after(self.obj.frametimes[self.lazy_index], lazy_load)
+                    return
+            else:
+                logger.error("Error in lazy load, take a look")
+                self.canvas.after(self.obj.delay, lazy_load)
+
+        self.length = self.obj.framecount
+        new_width = self.canvas_width
+        new_height = self.canvas_height
+        aspect_ratio = self.imwidth / self.imheight
+        if new_width / new_height > aspect_ratio:
+            new_width = int(new_height*aspect_ratio)
         else:
-            logger.debug(f"{self.lazy_index+1}/{self.obj.framecount} ({self.obj.frametimes[self.lazy_index]})")
-            self.lazy_index = (self.lazy_index + 1) % len(self.frames)
-            self.canvas.after(self.obj.frametimes[self.lazy_index], self.animate_image)
+            new_height = int(new_width / aspect_ratio)
+        self.load_frames_thread = Thread(target=load_frames, args=(self.image, new_width, new_height), daemon=True).start()
+        lazy_load()
+        self.canvas.update()  # Wait until the canvas has finished creating.
+        self.container = self.canvas.create_rectangle((0, 0, self.imwidth, self.imheight), width=0)
     
     "Display"
     def __show_image(self):
@@ -408,12 +406,14 @@ class CanvasImage:
                                                     anchor='nw', image=imagetk)
                     else:  # show normal image
                         if self.count < self.count1: # fixes lag on movign rescaled picture.
-                                self.manual_wheel()
+                                
                                 #logger.debug(f"scroll event {self.__curr_img}, {(max(0, self.__curr_img))} {self.count} {self.count1}")
                                 self.count += 1
                         if self.first:
+                            #for i in range(3):
+                            #    self.manual_wheel()
                             self.first = False
-                            image = self.__pyramid[0]
+                            image = self.__pyramid[(max(0, self.__curr_img))]
                             if self.file_size < self.gui.quick_preview_size_threshold: # if small render high quality
                                 print(f"Size (small): {self.file_size} MB. Frames: {self.obj.framecount}")
                                 imagetk = ImageTk.PhotoImage(image.resize((int(x2 - x1), int(y2 - y1)), self.__filter))
@@ -429,7 +429,7 @@ class CanvasImage:
                             self.canvas.imagetk = imagetk  # keep an extra reference to prevent garbage-collection
                             self.pyramid_ready.set() #tell threading that second picture is allowed to render.
 
-                        elif self.replace_await and self.file_size > self.gui.quick_preview_size_threshold: # only render second time if needed.
+                        elif self.replace_await: # only render second time if needed.
                             self.replace_await = False
                             image = self.__pyramid[(max(0, self.__curr_img))]
                             imagetk = ImageTk.PhotoImage(image.resize((int(x2 - x1), int(y2 - y1)), self.__filter))
@@ -470,7 +470,6 @@ class CanvasImage:
     
     def __wheel(self, event=None, direction=None):
         "Zoom with mouse wheel"
-        print("activation")
         if event:
             x = self.canvas.canvasx(event.x)
             y = self.canvas.canvasy(event.y)
@@ -614,13 +613,6 @@ class CanvasImage:
             self.canvas.coords(self.container, (x_offset), (y_offset), (x_offset + scaled_image_width), (y_offset + scaled_image_height))
     def destroy(self):
         "ImageFrame destructor"
-        self.frames.clear()
-        self.original_frames.clear()
-        del self.frames
-        del self.original_frames
-        self.image.close()
-        del self.image
-
         # Video
         if hasattr(self, "player"):
             try:
@@ -629,6 +621,16 @@ class CanvasImage:
                 self.player.release()
             except Exception as e:
                 print(e)
+            self.canvas.destroy()
+            self.__imframe.destroy()
+            return
+
+        self.frames.clear()
+        self.original_frames.clear()
+        del self.frames
+        del self.original_frames
+        self.image.close()
+        del self.image
         try:
             for img in self.pyramid:
                 img.close()
@@ -643,7 +645,6 @@ class CanvasImage:
             del self.__pyramid
         except Exception as e:
             logger.error(f"Error in closing __pyramid: {e}")
-
         self.canvas.destroy()
         self.__imframe.destroy()
 """
