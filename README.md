@@ -47,68 +47,27 @@ This fork is a hobby, it adds new features and other tweaks, and removes some ot
     GIFs and WebPs do not support zooming due to implementation complexity.
     Image renaming and dupe checking removed/not supported.
 
-# Requirements For Building #
-### How to Build ###
+# How to "build" from source #
+ You can also download ready to run from releases, just install python , pip and run install.bat for dependencies.
 
-1. Install Python: Ensure you have Python installed.
-2. Install Dependencies: Use pip to install the required dependencies:
-
-       pip install pyvips tkinter-tooltip pillow pyinstaller
-
-4. Required DLLs: Obtain the following DLLs from a compiled copy in the _internal folder:
-
-       libglib-2.0
-       libgobject-2.0
-       libvips-42
-       libvips-cpp-42
-
-      Place the DLLs in the same folder as the .py and .bat scripts.
-
-5. Run the Batch File: Execute the .bat file.
-
-      The finished copy can be found in the dist folder.
-
-      Note: If you edit any source files, delete the build and dist folders to avoid building from outdated files.
-
-      You can also add --noconsole and --onefile to the pyinstaller command to disable the console or to avoid having the _internal folder.
-
-      If you get any errors, try restarting the computer, run the .exe with cmd so you see any errors. Ask chatGPT!
-
-# How to run as a script #
-### Running Without Building ###
-
-   1. a. Edit sortimages_multiview.py and enable the following code block, then save:
-
-            #""" # This can/should be commented if you build.
-            import ctypes
-            try:
-                script_dir = os.path.dirname(os.path.abspath(__file__))
-                dll_path1 = os.path.join(script_dir, 'libvips-cpp-42.dll')
-                dll_path2 = os.path.join(script_dir, 'libvips-42.dll')
-                dll_path3 = os.path.join(script_dir, 'libglib-2.0-0.dll')
-                dll_path4 = os.path.join(script_dir, 'libgobject-2.0-0.dll')
-            except FileNotFoundError:
-                logging
-            ctypes.CDLL(dll_path1)
-            ctypes.CDLL(dll_path2)
-            ctypes.CDLL(dll_path3)
-            ctypes.CDLL(dll_path4)
-            #"""
-   1. b. If running from newest source, you must use the new vips. (no need for step a)
+   1. Downloading requirements
       
-          (vips-dev-xxx folder (find the link for WINDOWS BINARIES). from https://github.com/libvips/libvips/releases)) (both _w64_web (normal) and _all work)
-          (put this next to the other .py files.)
-          (download vlc 64 bit, copy the vlc.exe next to .py files)
-          Dependencies:
-          (pip install pillow pyvips imageio imageio[ffmpeg] python-vlc tkinter-tooltip psutil)
+            If running from newest source, you need: dependencies.
+            install python (newest, 3 and above).
+            install pip.
+            run command: pip install pillow pyvips imageio imageio[ffmpeg] python-vlc tkinter-tooltip psutil
+            download vips: Named "vips-dev-w64-web-8.16.0.zip" or later from https://github.com/libvips/libvips/releases. There should be a section and a link saying "WINDOWS BINARIES", you need that. __web and _all should both work.
+            place vips: in the same folder as the .py files are in.
+            download vlc: "vlc 64 bit"
+            put vlc.exe: in the same folder as the .py files are in.          
       
-   3. Shortcut
+   3. Create Shortcut
       
             start.bat
                   cd %~dp0
                   python sortimages_multiview.py
                   pause
-   4. Note
+   3. Note
 
             To edit this in VSC, you must open the FOLDER with "Open with code". Opening only the sortimages_multiview.py will make VSC's terminal use \Users\user path,which will fail to import pyvips for some reason.
       
