@@ -1,2 +1,2 @@
-pip install pyvips tkinter-tooltip pillow pyinstaller imageio
+pip install pillow pyvips imageio imageio[ffmpeg] python-vlc tkinter-tooltip psutil
 pause
