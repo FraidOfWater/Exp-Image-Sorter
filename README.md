@@ -100,7 +100,7 @@ This fork is a hobby, it adds new features and other tweaks, and removes some ot
           (put this next to the other .py files.)
           (download vlc 64 bit, copy the vlc.exe next to .py files)
           Dependencies:
-          (pip install pillow pyvips imageio imageio[ffmpeg] python-vlc tkinter-tooltip)
+          (pip install pillow pyvips imageio imageio[ffmpeg] python-vlc tkinter-tooltip psutil)
       
    3. Shortcut
       
