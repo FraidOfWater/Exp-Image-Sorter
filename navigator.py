@@ -1,19 +1,14 @@
-from math import floor
-from time import time
+from math import ceil
+
 from tkinter import ttk
-
-#Highlight_frame
-#click on frame, highlights it -> Get frame data upon click
-# move over by keys, highlights it ->Get frame data by moving up and down in the list. (from array). Must keep index in memory. (default 0)
-# press setdest and the next in line is highlighted. -> Lookup current index of the array and highlight it.
-
-
 
 class Navigator:
     "Presets"
-    def __init__(self, fileManager, gui):
-        self.gui = gui
+    def __init__(self, fileManager):
+        self.gui = fileManager.gui
+        gui = self.gui
         self.fileManager = fileManager
+        self.displayedlist = self.fileManager.gui.gridmanager.displayedlist
         style = ttk.Style()
         self.style = style
         style.configure("Theme_square.TCheckbutton", background=gui.square_text_box_colour, foreground=gui.square_text_colour) # Theme for Square
@@ -22,133 +17,165 @@ class Navigator:
 
         self.index = 0
         self.old = None # Last changed frame / Default PREVIOUS / Always current selection (for showing next upon moves)
-        self.dest_keys_pressed = False
-
-    def highlight_click(self, new, lista):
-        "From a click event, changes old colour to default, then changes new colour to activated"
-        if new == self.old:
+        
+        self.arrow_action = None
+        self.arrow_action_reversed = None
+    def select(self, new):
+        "From a click event, removes highlight from previous frame, adds it to the clicked one"
+        if new == self.old and self.old: #show next scenario
             return
         if self.old:
             self.default(self.old)
         self.selected(new)
         self.old = new #updates old
-        self.index = lista.index(new) #updates index
+        self.index = self.displayedlist.index(new) #updates index
+        self.gui.displayimage(new)
         
     def view_change(self, lista):
-        "Default old and select first frame upon changing views"
-        # Some lists are displayed in a different manner
-        # Unassigned/animated list is displayed as sorted
-        # Assigned/move list is displayed backwards (newest moved)
-        self.default(self.old)
-        if self.gui.show_assigned.get() or self.gui.show_moved.get():
-            self.selected(lista[-1])
-            self.gui.displayimage(lista[-1])
+        "When view is changed, remove highlight from previous frame, adds it to the first frame"
+        if self.old:
+            self.default(self.old)
+            self.old = None
+        if not self.gui.show_next.get():
+            return
+        if self.gui.current_view.get() == "Show Assigned" or self.gui.current_view.get() == "Show Moved":
+            if self.gui.displayimage:
+                # Assigned list is *displayed* in "last added"-manner. (by tkinter, so here we use [-1], as that is newest in list)
+                self.selected(lista[-1])
+                self.old = lista[-1]
+                self.gui.displayimage(lista[-1])
         else:
-            self.selected(lista[0])
-            self.gui.displayimage(lista[0])
+            if self.gui.displayimage:
+                self.selected(lista[0])
+                self.old = lista[0]
+                self.gui.displayimage(lista[0])
 
     def select_next(self, lista):
-        "Called by setdestination, just selects the current index again"
+        "Called by setdestination, removes highlight from previous frame, adds it to the one entering index"
         if self.old: # default old
             self.default(self.old)
-        if len(lista) > self.index: # select image in OLD index.
-            self.old = lista[self.index]
-            self.selected(self.old)
-            #index doesnt change
-        elif len(lista)-1 > self.index and len(lista) != 0: # if index-1 exists (means we are at the end of the list and trying to "next", we go backwards)
-            self.old = lista[self.index-1]
-            self.selected(self.old)
-            self.index -= 1
-        else: # last pic,
+        if len(lista) == 0: # last image [0], len == 0.
+            self.old = None
             return
+        elif len(lista) == self.index: # last image assigned [-1].
+            self.old = lista[self.index-1]
+            self.index -= 1
+        elif len(lista) > self.index: # new image enters index
+            self.old = lista[self.index]
+        self.selected(self.old)
         self.gui.displayimage(self.old)
 
-    #updownleftright = 38,40,37,39
-    def highlight_right(self, lista):
-        self.default(self.old)
-        self.index += 1
-        self.selected(lista[self.index])
-        self.old = lista[self.index]
-    def highlight_left(self, lista):
-        self.default(self.old)
-        self.index -= 1
-        self.selected(lista[self.index])
-        self.old = lista[self.index]
-    def highlight_up(self, lista, pics_per_row):
-        self.items_per_row = int(max(1, self.gui.imagegrid.winfo_width() / self.gui.actual_gridsquare_width))
-        self.items_per_rowy = int(max(1, self.gui.imagegrid.winfo_height() / self.gui.actual_gridsquare_height))
-        self.last_row = max(0,floor((self.index) / self.items_per_row))
-        self.list_length = len(self.gui.displayedlist)
-        self.current_row = max(0,floor((self.index) / self.items_per_row))
-        self.total_rows = self.list_length / self.items_per_row
-
-        # Calculate the index for the first and last visible items in the current bounding box
-        self.first_visible_index = self.gui.imagegrid.yview()[0] * self.total_rows  # Index of the first visible item
-        self.last_visible_index = self.gui.imagegrid.yview()[1] * self.total_rows  # Index of the last visible item
-        if self.gui.page_mode:
-            
-            if self.last_row < self.current_row:  # Down (S, Down)
-                if self.current_row >= self.list_length-self.items_per_rowy:
-                    self.gui.imagegrid.yview_moveto(1)
-                    return
-                if self.current_row > floor(self.last_visible_index):  # If we're at the bottom of the visible area
-                    target_scroll = (self.current_row-1) / self.total_rows
-                    self.gui.imagegrid.yview_moveto(target_scroll)
-            return
-        else:
-            if self.last_row < self.current_row:
-                if self.current_row == 1: #
-                    self.gui.imagegrid.yview_moveto(0)
-                    return
-
-                if self.current_row < floor(self.first_visible_index)+1:
-                    #self.imagegrid.yview_scroll(-1, "units")
-                    target_scroll = (self.current_row) / self.total_rows
-                    self.gui.imagegrid.yview_moveto(target_scroll)
+    def bindhandler(self, event):
+        #updownleftright = 38,40,37,39
+        def scroll_up():
+            lista = self.displayedlist
+            columns = int(max(1, self.gui.imagegrid.winfo_width() / self.gui.actual_gridsquare_width))
+            rows = ceil(len(lista) / columns)
+            current_row = self.index // columns
+            first_visible_row = round(self.gui.imagegrid.yview()[0] * rows)  # Index of the first visible item
+            #print(f"In a row: {columns}, rows: {rows}, current_row: {current_row}, first visible row: {first_visible_row}, last visible row: {last_visible_row}")
+            if first_visible_row > current_row: # Scroll up
+                target_scroll = (first_visible_row-1) / rows
+                self.gui.imagegrid.yview_moveto(target_scroll)
+        def scroll_down():
+            lista = self.displayedlist
+            columns = int(max(1, self.gui.imagegrid.winfo_width() / self.gui.actual_gridsquare_width))
+            rows = ceil(len(lista) / columns)
+            current_row = self.index // columns
+            first_visible_row = round(self.gui.imagegrid.yview()[0] * rows)  # Index of the first visible item
+            last_visible_row = round(self.gui.imagegrid.yview()[1] * rows)  # Index of the last visible item
+            if last_visible_row <= current_row: # Scroll down
+                target_scroll = (first_visible_row+1) / rows
+                self.gui.imagegrid.yview_moveto(target_scroll)
+        def highlight_right():
+            lista = self.displayedlist
+            check_bound = self.index+1
+            if check_bound >= len(lista):
                 return
-        self.default(self.old)
-        self.index = self.index+pics_per_row
-        self.selected(lista[self.index])
-    def highlight_down(self, lista, pics_per_row):
-        self.items_per_row = int(max(1, self.gui.imagegrid.winfo_width() / self.gui.actual_gridsquare_width))
-        self.items_per_rowy = int(max(1, self.gui.imagegrid.winfo_height() / self.gui.actual_gridsquare_height))
-        self.last_row = max(0,floor((self.index) / self.items_per_row))
-        self.list_length = len(self.gui.displayedlist)
-        self.current_row = max(0,floor((self.index) / self.items_per_row))
-        self.total_rows = self.list_length / self.items_per_row
-
-        # Calculate the index for the first and last visible items in the current bounding box
-        self.first_visible_index = self.gui.imagegrid.yview()[0] * self.total_rows  # Index of the first visible item
-        self.last_visible_index = self.gui.imagegrid.yview()[1] * self.total_rows  # Index of the last visible item
-        if self.gui.page_mode:
-            if self.last_row < self.current_row:
-                if self.current_row >= self.list_length-self.items_per_rowy:
-                    self.gui.imagegrid.yview_moveto(1)
-                    return
-
-                if self.current_row > floor(self.last_visible_index):
-                    target_scroll = (self.current_row-self.items_per_rowy) / self.total_rows
-                    self.gui.imagegrid.yview_moveto(target_scroll)
-            return
+            self.default(self.old)
+            self.index = check_bound
+            self.selected(lista[self.index])
+            self.old = lista[self.index]
+            scroll_down()
+        def highlight_left():
+            lista = self.displayedlist
+            check_bound = self.index-1
+            if check_bound < 0:
+                return
+            self.index = check_bound
+            self.default(self.old)
+            self.selected(lista[self.index])
+            self.old = lista[self.index]
+            scroll_up()
+        def highlight_up():
+            lista = self.displayedlist
+            columns = int(max(1, self.gui.imagegrid.winfo_width() / self.gui.actual_gridsquare_width))
+            check_upper_bound = self.index-columns
+            if check_upper_bound < 0:
+                return
+            self.index = check_upper_bound
+            self.default(self.old)
+            self.selected(lista[self.index])
+            self.old = lista[self.index]
+            scroll_up()
+        def highlight_down():
+            lista = self.displayedlist
+            columns = int(max(1, self.gui.imagegrid.winfo_width() / self.gui.actual_gridsquare_width))
+            check_lower_bound = self.index+columns
+            if check_lower_bound > len(lista)-1:
+                return
+            self.index = check_lower_bound
+            self.default(self.old)
+            self.selected(lista[self.index])
+            self.old = lista[self.index]
+            scroll_down()
+        lista = self.displayedlist
+        
+        if not self.arrow_action:
+            self.arrow_action = {
+                "Right": lambda: highlight_right(),
+                "Left": lambda: highlight_left(),
+                "Up": lambda: highlight_up(),
+                "Down": lambda: highlight_down()
+            }
+        if not self.arrow_action_reversed:
+            self.arrow_action_reversed = {
+                "Left": lambda: highlight_right(),
+                "Right": lambda: highlight_left(),
+                "Down": lambda: highlight_up(),
+                "Up": lambda: highlight_down()
+            }
+        if self.gui.current_view.get() == "Show Assigned":
+            arrow_action = self.arrow_action_reversed
         else:
-            if self.last_row < self.current_row or self.current_row == 0:  # Up (W, Up)
-                if self.current_row == 1: #
-                    self.gu.imagegrid.yview_moveto(0)
-                    return
+            arrow_action = self.arrow_action
 
-                if self.current_row < floor(self.first_visible_index):  # If we're at the top of the visible area
-                    target_scroll = (self.current_row-self.items_per_rowy+1) / self.total_rows
-                    self.gui.imagegrid.yview_moveto(target_scroll)
-        self.default(self.old)
-        self.index = self.index-pics_per_row
-        self.selected(lista[self.index])
-
+        if self.old:
+            key = event.keysym
+            arrow_action[key]()
+            self.gui.displayimage(self.old)
+        else:
+            print("investigate")
+            if lista:
+                if self.gui.current_view.get() in ("Show Assigned", "Show Moved"):
+                    gridsquare = lista[-1]
+                else:
+                    gridsquare = lista[0]
+                self.select(gridsquare)
+        
     def default(self, frame):
         "Reverts colour back to default"
-        frame.configure(highlightcolor = self.gui.imageborder_default_colour,  highlightbackground = self.gui.imageborder_default_colour)
-        frame.canvas.configure(bg=self.gui.imagebox_default_colour, highlightcolor=self.gui.imageborder_default_colour, highlightbackground = self.gui.imageborder_default_colour)
-        frame.c.configure(style="Theme_square.TCheckbutton")
-        frame.cf.configure(bg=self.gui.square_text_box_colour)
+        if frame.obj.dest != "":
+            alt = frame.obj.dest_color
+            frame.configure(highlightcolor = alt,  highlightbackground = alt)
+            frame.canvas.configure(bg=alt, highlightcolor=alt, highlightbackground = alt)
+            frame.c.configure(style="Theme_square.TCheckbutton")
+            frame.cf.configure(bg=self.gui.square_text_box_colour)
+        else:
+            frame.configure(highlightcolor = self.gui.imageborder_default_colour,  highlightbackground = self.gui.imageborder_default_colour)
+            frame.canvas.configure(bg=self.gui.imagebox_default_colour, highlightcolor=self.gui.imageborder_default_colour, highlightbackground = self.gui.imageborder_default_colour)
+            frame.c.configure(style="Theme_square.TCheckbutton")
+            frame.cf.configure(bg=self.gui.square_text_box_colour)
     def selected(self, frame):
         frame.configure(highlightbackground = self.gui.imageborder_selected_colour, highlightcolor = self.gui.imageborder_selected_colour)
         frame.canvas.configure(bg=self.gui.imagebox_selection_colour, highlightbackground = self.gui.imageborder_selected_colour, highlightcolor = self.gui.imageborder_selected_colour)
