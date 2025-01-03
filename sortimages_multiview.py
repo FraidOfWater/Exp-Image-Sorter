@@ -1,7 +1,7 @@
 import os
 import json
 import logging
-
+import io
 from time import perf_counter
 from random import seed, random
 from shutil import rmtree, move as shutilmove
@@ -24,28 +24,37 @@ from navigator import Navigator
 def import_pyvips():
     base_path = os.path.dirname(os.path.abspath(__file__))
     vipsbin = os.path.join(base_path, "vips-dev-8.16", "bin")
+    
+    # Check if the vipsbin directory exists
+    if not os.path.exists(vipsbin):
+        raise FileNotFoundError(f"The directory {vipsbin} does not exist.")
+
     os.environ['PATH'] = os.pathsep.join((vipsbin, os.environ['PATH']))
-    if os.path.exists(vipsbin):
-        os.add_dll_directory(vipsbin)
+    os.add_dll_directory(vipsbin)
 import_pyvips()
-import pyvips
+try:
+    import pyvips
+except Exception as e:
+    print("Couldn't import pyvips:", e)
 
-
+#old canvasimage cant be displayed again?
+#the keys can activate bordering for no reason (refreshes if cannot move.)
 #Ideas:
+# destination_viewer duplicates frames if more than one is passed
+# when loading dest, red loading color is intterruped on grid. use separate, also the dest squars dont have that red canvas around them when they load for some reason.
 # cleanup (animate), move # do testing, catch errors in move with actualy error messages.
-# Reimplement destination window. Whole shebang
-# Stats for img creation speed, if buffered, size, framecount, (0 and 1 static), type, second render, displayedlist
+# Stats for F, S, Frames, type, if buffered, size, (0 and 1 static)
 # page mode, throttling
 #test empty folder, test folder with size change.
+#test sessions, (load session assigned wont gen names?) (assigned and moved should pull color from button info matching path.)
 
 # Bugs
 # actual gridsquare width not correct
 # does second render even work anymore? pyramid was broken for so long.
-# Still appears to be a small memory leak somewhere. Happesn when loading through alot of imgs.
+# Still appears to be a small memory leak somewhere. Happesn when loading through alot of imgs. in canvasviewer probably.
+
 
 # fail to allocate bitmap memory issue? Just dont load too many anims. prob due to tkinter not able to handle so many gifs.
-# exp with another lib? that can do gifs and webp or webm by default? must also support vlc or mp4 and webm natively. must support PIL and pyvips.
-
 #Lets not do zooming, resizing to windows or imagegrid.
 #Lets not do threading for frames. I like the slight lag. + No problems
 #Lets not do a settings tab, json is pretty enough.
@@ -73,36 +82,38 @@ class Imagefile:
         self.isanimated = False
         self.lazy_loading = True # gif, webp could be culled, just check if max frames lower than curernt num of frames generated
         self.frames = [] # gif, webp
+        self.frames_dest = []
         self.frametimes = [] #gif, webp
         self.framecount = 0 #gif, webp
         self.index = 0 #need only for gif
+        self.index_dest = 0
         self.delay = 100 #Default delay #cull
         self.id = None #need
-    
+        self.truncated_filename = "..."
+
     def setid(self, id):
         self.id = id
     def setguidata(self, data):
         self.guidata = data
-    
+
     def setdest(self, dest):
         self.dest = dest["path"]
         self.dest_color = dest["color"]
         logger.info("Set destination of %s to %s",
                       self.name.get(), self.dest)
     def move(self, x, assigned, moved, gui) -> str:
-        destpath = self.dest
 
-        if destpath != "" and os.path.isdir(destpath):
+        if self.dest != "" and os.path.isdir(self.dest):
             file_name = self.name.get()
 
             # Check for name conflicts (source -> destination)
-            exists_already_in_destination = os.path.exists(os.path.join(destpath, file_name))
+            exists_already_in_destination = os.path.exists(os.path.join(self.dest, file_name))
             if exists_already_in_destination:
                 print(f"File {self.name.get()[:30]} already exists at destination. Cancelling move.")
                 return ("") # Returns if 1. Would overwrite someone
-            
+
             try:
-                new_path = os.path.join(destpath, file_name)
+                new_path = os.path.join(self.dest, file_name)
                 old_path = self.path
 
                 # Throws exception when image is open.
@@ -111,7 +122,6 @@ class Imagefile:
                 assigned.remove(x)
                 moved.append(x)
 
-                self.moved = True
                 self.show = False
 
                 self.guidata["frame"].configure(
@@ -119,13 +129,11 @@ class Imagefile:
 
                 self.path = new_path
                 returnstr = ("Moved:" + self.name.get() +
-                             " -> " + destpath + "\n")
-                destpath = ""
+                             " -> " + self.dest + "\n")
                 self.dest = ""
                 self.moved = True
-                gui.images_left.set(int(gui.images_left.get())-1)
-                gui.images_left_and_assigned.set(f"{len(assigned)}/{int(gui.images_left.get())}")
-                gui.images_sorted.set(int(gui.images_sorted.get())+1)
+                self.gui.images_left_stats.set(f"{len(self.gui.gridmanager.assigned)}/{len(self.gui.gridmanager.gridsquarelist)-len(self.gui.gridmanager.assigned)-len(self.gui.gridmanager.moved)}/{len(self.imagelist)-len(self.gui.gridmanager.assigned)-len(self.gui.gridmanager.moved)}")
+                gui.images_sorted.set(len(self.gui.gridmanager.moved))
                 return returnstr
             except Exception as e:
                 # Shutil failed. Delete the copy from destination, leaving the original at source.
@@ -148,7 +156,7 @@ class SortImages:
     destinations = []
     exclude = []
     def __init__(self) -> None:
-        
+
         self.timer = Timer()
         self.last_call_time = 0
         self.throttle_delay = 0.19
@@ -186,7 +194,7 @@ class SortImages:
                     logger.warning(f"Couldn't load first image in data folder")
                 finally:
                     del image
-                
+
             else:
                 logger.warning(f"Data folder is empty")
                 pass
@@ -198,6 +206,7 @@ class SortImages:
 
         script_dir = os.path.dirname(os.path.abspath(__file__)) # Else if a ran as py script
         self.prefs_path = os.path.join(script_dir, "prefs.json")
+        self.prefs_path = os.path.join(os.getcwd(), "prefs.json")
         self.data_dir = os.path.join(script_dir, "data")
 
         hotkeys = ""
@@ -214,7 +223,7 @@ class SortImages:
                 self.exclude = jprefs["paths"]["exclude"]
             #Preferences
                 self.gui.thumbnailsize = int(jprefs["preferences"]["user"]["thumbnailsize"])
-                
+
                 hotkeys = jprefs["preferences"]["user"]["hotkeys"]
                 self.gui.extra_buttons = jprefs["preferences"]["user"]["extra_buttons"]
                 self.gui.force_scrollbar = jprefs["preferences"]["user"]["force_scrollbar"]
@@ -232,7 +241,7 @@ class SortImages:
                 self.gui.gridsquare_pady = int(jprefs["appearance"]["image_container"]["gridsquare_pady"])
                 self.gui.text_box_colour = jprefs["appearance"]["image_container"]["text_box_colour"]
                 self.gui.text_box_selection_colour = jprefs["appearance"]["image_container"]["text_box_selection_colour"]
-                
+
                 self.gui.imageborder_default_colour = jprefs["appearance"]["image_container"]["imageborder_default_colour"]
                 self.gui.imageborder_selected_colour = jprefs["appearance"]["image_container"]["imageborder_selected_colour"]
                 self.gui.imageborder_locked_colour = jprefs["appearance"]["image_container"]["imageborder_locked_colour"]
@@ -262,20 +271,29 @@ class SortImages:
             #GUI CONTROLLED PREFRENECES
                 self.gui.squaresperpage.set(jprefs["qui"]["squaresperpage"])
                 self.gui.sortbydatevar.set(jprefs["qui"]["sortbydate"])
-                self.gui.default_delay.set(jprefs["qui"]["default_delay"])
                 self.gui.viewer_x_centering = jprefs["qui"]["viewer_x_centering"]
                 self.gui.viewer_y_centering = jprefs["qui"]["viewer_y_centering"]
                 self.gui.show_next.set(jprefs["qui"]["show_next"])
                 self.gui.dock_view.set(jprefs["qui"]["dock_view"])
                 self.gui.dock_side.set(jprefs["qui"]["dock_side"])
             #Window positions
-                #self.gui.main_geometry = jprefs["window_settings"]["main_geometry"]
-                #self.gui.viewer_geometry = jprefs["window_settings"]["viewer_geometry"]
-                #self.gui.destpane_geometry = jprefs["window_settings"]["destpane_geometry"]
-                #self.gui.leftpane_width = int(jprefs["window_settings"]["leftpane_width"])
-                #self.gui.middlepane_width = int(jprefs["window_settings"]["middlepane_width"])
-                #self.gui.images_sorted.set(jprefs["window_settings"]["images_sorted"])
-                
+                self.gui.main_geometry = jprefs["window_settings"]["main_geometry"]
+                self.gui.viewer_geometry = jprefs["window_settings"]["viewer_geometry"]
+                self.gui.destpane_geometry = jprefs["window_settings"]["destpane_geometry"]
+                self.gui.leftpane_width = int(jprefs["window_settings"]["leftpane_width"])
+                self.gui.middlepane_width = int(jprefs["window_settings"]["middlepane_width"])
+                # make sure middlepane doesnt become "hidden", fooled me!
+                win_width, discard = self.gui.main_geometry.split("x")
+                win_width = int(win_width)
+                l_pan = self.gui.leftpane_width
+                m_pan = self.gui.middlepane_width
+                print(win_width, l_pan, m_pan)
+                if win_width - l_pan-m_pan < self.gui.thumbnailsize+35:
+                    space = int(win_width) - int(self.gui.leftpane_width)
+                    self.gui.middlepane_width = space-self.gui.thumbnailsize-35 # actual gridsqaure width?
+
+                self.gui.images_sorted.set(jprefs["window_settings"]["images_sorted"])
+
                 self.gui.actual_gridsquare_width = self.gui.thumbnailsize + self.gui.gridsquare_padx + self.gui.square_border_size*2 + self.gui.whole_box_size*2
                 self.gui.actual_gridsquare_height = self.gui.thumbnailsize + self.gui.gridsquare_pady + self.gui.square_border_size*2 + self.gui.whole_box_size*2 + self.gui.checkbox_height
 
@@ -354,7 +372,6 @@ class SortImages:
             "qui": {
                 "squaresperpage": gui.squaresperpage.get(),
                 "sortbydate": gui.sortbydatevar.get(),
-                "default_delay": gui.default_delay.get(),
                 "viewer_x_centering": gui.viewer_x_centering,
                 "viewer_y_centering": gui.viewer_y_centering,
                 "show_next": gui.show_next.get(),
@@ -403,8 +420,8 @@ class SortImages:
                     isanimated = True
                 else:
                     isanimated = False
-                
-    
+
+
                 imagesavedata.append({
                     "name": obj.name.get(),
                     "file_size": obj.file_size,
@@ -459,6 +476,10 @@ class SortImages:
                         pass
 
                     self.imagelist.append(obj)
+            moved_list = []
+            for x in self.imagelist:
+                if x.dest != "" and obj.moved:
+                    moved_list.append(x)
             assigned_list = []
             for line in savedata['assigned_list']:
                 assigned_list.append(line)
@@ -466,9 +487,10 @@ class SortImages:
             self.gui.thumbnailsize=savedata['thumbnailsize']
             self.gui.initial_dock_setup()
             gui.guisetup(self.destinations)
-            gui.gridmanager.load_session(assigned_list)
-            self.gui.images_left.set(len(self.imagelist))
-            self.gui.images_left_and_assigned.set(f"{len(self.gui.gridmanager.assigned)}/{self.gui.images_left.get()}")
+            gui.gridmanager.load_session(assigned_list, moved_list) # what about moved?
+            self.gui.destination_viewer.get_paths(loadession=True)
+            self.gui.images_left_stats.set(f"{len(self.gui.gridmanager.assigned)}/{len(self.gui.gridmanager.gridsquarelist)-len(self.gui.gridmanager.assigned)-len(self.gui.gridmanager.moved)}/{len(self.imagelist)-len(self.gui.gridmanager.assigned)-len(self.gui.gridmanager.moved)}")
+            gui.images_sorted.set(len(self.gui.gridmanager.moved))
         else:
             logger.warning("No Last Session!")
 
@@ -486,7 +508,7 @@ class SortImages:
             self.gui.after(0, self.gui.Image_frame.destroy)
             del self.gui.Image_frame
             reopen = "dock"
-        
+
         for x in temp:
             try:
                 out = x.obj.move(x, assigned, moved, self.gui) # Pass functionality to happen in move so it can fail removing from the sorted lists when shutil.move fails.
@@ -520,67 +542,95 @@ class SortImages:
         else:
             print("Victim of throttling")
             return
-        
+
         #take multiple
         dest = args[0]
         marked = [] # List of all marked
-        displayedlist = self.gui.gridmanager.displayedlist # Current list being compared
+        if hasattr(self.gui.destination_viewer, "destwindow"):
+            displayedset = self.gui.gridmanager.displayedset.union(self.gui.destination_viewer.displayedset)
+        else: displayedset = self.gui.gridmanager.displayedset # Current list being compared
+
         try:
             wid = args[1].widget
         except AttributeError:
             wid = args[1]["widget"]
         if isinstance(wid, tk.Entry):
             pass
-        
+
         # Return all images whose checkbox is checked (And currently in view by image viewer, so you can just press a hotkey and not have to check a checkbox everytime) (If interacting with other squares, it will cancel itself out. This is so user wont accidentally move anything.)
         else:
-            marked = [x for x in displayedlist if x.obj.checked.get()] # All checked are now in marked list.
+            marked = [x for x in displayedset if x.obj.checked.get()] # All checked are now in marked list.
 
             "Current selection is added to marked if focus never lost"
-            if self.navigator.old and self.gui.focused_on_secondwindow and self.navigator.old in displayedlist: # to see if we have clicked elsewhere as to not move the displayed image anymore.
+            if self.navigator.old and self.gui.focused_on_secondwindow and self.navigator.old in displayedset: # to see if we have clicked elsewhere as to not move the displayed image anymore.
                 if self.navigator.old not in marked:
                     marked.append(self.navigator.old)
 
             #Handle lists
             to_remove_from_grid = []
             to_refresh_from_grid = []
+            remove = []
+            add = []
             for x in marked: #set background to button colour
                 x.obj.setdest(dest)
                 x.obj.guidata["frame"]['background'] = dest['color']
                 x.obj.guidata["canvas"]['background'] = dest['color']
                 x.obj.checked.set(False)
 
+
+                if hasattr(self.gui.destination_viewer, "destwindow"):
+                    if x.obj.dest:
+                        if x.obj.id in self.gui.destination_viewer.displayedlist_ids:
+                            remove.append(x)
+                        else:
+                            add.append(x.obj)
+                if remove:
+                    self.gui.destination_viewer.remove_squares(remove)
+                if add:
+                    self.gui.destination_viewer.add_squares(add)
+
                 # Move from list to list
                 if self.gui.current_view.get() == "Show Unassigned":
-                    self.gui.gridmanager.unassigned.remove(x)
-                    self.gui.gridmanager.assigned.append(x)
-                    to_remove_from_grid.append(x)
-                    
+                    if x in self.gui.gridmanager.displayedset:
+                        self.gui.gridmanager.unassigned.remove(x)
+                        self.gui.gridmanager.assigned.append(x)
+                        to_remove_from_grid.append(x)
+
                 # Moving from assigned to assigned
                 elif self.gui.current_view.get() == "Show Assigned":
-                    self.gui.gridmanager.assigned.remove(x)
-                    self.gui.gridmanager.assigned.append(x)
-                    to_refresh_from_grid.append(x) # Means we want to update pos so it lines up with assigned list order.
+                    if x in self.gui.gridmanager.displayedset:
+                        self.gui.gridmanager.assigned.remove(x)
+                        self.gui.gridmanager.assigned.append(x)
+                        to_refresh_from_grid.append(x) # Means we want to update pos so it lines up with assigned list order.
+                        #dest, dest may be changed, check if destsquare is same as gridsquare, if not, nothing, if yes, remove.
 
                 # Moving from moved to assigned
                 elif self.gui.current_view.get() == "Show Moved":
-                    self.gui.gridmanager.moved.remove(x)
-                    self.gui.gridmanager.assigned.append(x)
-                    to_remove_from_grid.append(x)
-                
+                    if x in self.gui.gridmanager.displayedset:
+                        self.gui.gridmanager.moved.remove(x)
+                        self.gui.gridmanager.assigned.append(x)
+                        to_remove_from_grid.append(x)
             self.gui.gridmanager.remove_squares(to_remove_from_grid, unload=True) # For moved and Unassigned
             "Assigned view: end of list is 'newest' and is displayed first, remove from list and add it back so it shows up as first."
             self.gui.gridmanager.remove_squares(to_refresh_from_grid, unload=False)
             self.gui.gridmanager.add_squares(to_refresh_from_grid)
-        #Handle destviewer
-        # Check for destination view changes separately. Note, We use destchecked here, not checked.
+
+            #    gridsquare_ids = [x.obj.id for x in combined_list]
+            #    # remove
+            #    dest_ids = [x.obj.id for x in self.gui.destination_viewer.displayedlist]
+            #    add = [x for x in gridsquare_ids if x not in dest_ids]
+            #    # check if in the list. if in list check old and new dest
+            #    remove = [x for x in gridsquare_ids if x in dest_ids and ]
+            #    self.gui.destination_viewer.changed_squares(matched_destsquares_to_gridsquares)
+
 
         "If show next option checked, and next exists, and viewer is open, show next image"
-        if self.gui.show_next.get() and len(self.gui.gridmanager.displayedlist) >= 1 and hasattr(self.gui, "Image_frame"):
-            self.navigator.select_next(self.gui.gridmanager.displayedlist)
+        if self.gui.show_next.get() and len(self.gui.gridmanager.displayedset) >= 1 and hasattr(self.gui, "Image_frame"):
+            self.navigator.select_next(self.gui.gridmanager.displayedset)
 
         "Update stat tracker"
-        self.gui.images_left_and_assigned.set(f"{len(self.gui.gridmanager.assigned)}/{int(self.gui.images_left.get())}")
+        self.gui.images_left_stats.set(f"{len(self.gui.gridmanager.assigned)}/{len(self.gui.gridmanager.gridsquarelist)-len(self.gui.gridmanager.assigned)-len(self.gui.gridmanager.moved)}/{len(self.imagelist)-len(self.gui.gridmanager.assigned)-len(self.gui.gridmanager.moved)}")
+        self.gui.images_sorted.set(len(self.gui.gridmanager.moved))
 
     def setup(self, dest): # scan the destination
         def randomColor():
@@ -606,6 +656,7 @@ class SortImages:
         if ((os.path.isdir(self.sdp)) and (os.path.isdir(self.ddp)) and not samepath):
             self.setup(self.ddp)
             gui.guisetup(self.destinations)
+            self.gui.destination_viewer.get_paths(loadsession=False)
             gui.sessionpathvar.set(os.path.basename(
                 self.sdp)+"-"+os.path.basename(self.ddp)+".json")
             print("")
@@ -615,9 +666,9 @@ class SortImages:
             self.walk(self.sdp)
             self.gui.initial_dock_setup()
             self.timer.start()
-            self.gui.gridmanager.initialize()
-            self.gui.images_left.set(len(self.imagelist))
-            self.gui.images_left_and_assigned.set(f"{len(self.gui.gridmanager.assigned)}/{self.gui.images_left.get()}")
+            self.gui.gridmanager.load_more()
+            self.gui.images_left_stats.set(f"{len(self.gui.gridmanager.assigned)}/{len(self.gui.gridmanager.gridsquarelist)-len(self.gui.gridmanager.assigned)-len(self.gui.gridmanager.moved)}/{len(self.imagelist)-len(self.gui.gridmanager.assigned)-len(self.gui.gridmanager.moved)}")
+            gui.images_sorted.set(len(self.gui.gridmanager.moved))
 
         elif samepath:
             self.gui.sdpEntry.delete(0, tk.END)
@@ -628,7 +679,7 @@ class SortImages:
             self.gui.sdpEntry.delete(0, tk.END)
             self.gui.ddpEntry.delete(0, tk.END)
             self.gui.sdpEntry.insert(0, "ERROR INVALID PATH")
-            self.gui.ddpEntry.insert(0, "ERROR INVALID PATH")   
+            self.gui.ddpEntry.insert(0, "ERROR INVALID PATH")
     def walk(self, src):
         supported_formats = {"png", "gif", "jpg", "jpeg", "bmp", "pcx", "tiff", "webp", "psd", "jfif", "mp4", "webm"}
         animation_support = {"gif", "webp", "mp4", "webm"} # For clarity
@@ -667,22 +718,19 @@ class ThumbManager:
             try:
                 max_workers = max(1,self.threads*2)
                 a = perf_counter()
-                with concurrent.ThreadPoolExecutor(max_workers=max_workers) as executor: 
+                with concurrent.ThreadPoolExecutor(max_workers=max_workers) as executor:
                     executor.map(makethumb, filelist)
                 print(f"Thumbnails generated in: {perf_counter()-a:.2f}")
 
                 max_workers = max(1,self.threads)
 
                 a = perf_counter()
-                with concurrent.ThreadPoolExecutor(max_workers=max_workers) as executor: 
+                with concurrent.ThreadPoolExecutor(max_workers=max_workers) as executor:
                     executor.map(makeframes, animated)
                 print(f"Thumbframes generated in: {perf_counter()-a:.2f}")
             except Exception as e:
                 print("Error in generating thumbs and frames", e)
             finally: self.gen_thread = None
-        def makename(obj):
-            frame = obj.guidata['frame']
-            frame.obj2.set(self.gui.gridmanager.truncate_text(obj))
         def makethumb(imagefile):
             def gen_img_attributes():
                 #Hash using name, size, mod time. Creates unique thumb name.
@@ -695,22 +743,28 @@ class ThumbManager:
                 hash = md5()
                 hash.update(id.encode('utf-8'))
                 imagefile.setid(hash.hexdigest())
-                frame = imagefile.guidata['frame'] # Quite expensive name truncation!
-                frame.obj2.set(self.gui.gridmanager.truncate_text(imagefile)) # So I threaded it!
             def lazy_load_thumb():
+                def makename(obj):
+                    frame = obj.guidata['frame']
+                    obj.truncated_filename = self.gui.gridmanager.truncate_text(obj)
+                    frame.obj2.set(obj.truncated_filename)
                 try:
                     #this is faster
-                    img = ImageTk.PhotoImage(Image.open(imagefile.thumbnail))
-                except:  # Pyvips fallback
                     buffer = pyvips.Image.new_from_file(imagefile.thumbnail)
                     img = ImageTk.PhotoImage(Image.frombuffer(
                         "RGB", [buffer.width, buffer.height], buffer.write_to_memory()))
+                    
+                except:  # PIL fallback
+                    print("Pillow fallback")
+                    img = ImageTk.PhotoImage(Image.open(imagefile.thumbnail))
                 finally:
                     imagefile.guidata['img'] = img
                     canvas = imagefile.guidata['canvas']
                     frame = imagefile.guidata['frame']
                     canvas.image = img
                     canvas.itemconfig(frame.canvas_image_id, image=img)
+                    makename(imagefile) # Quite expensive name truncation! # So I threaded it!
+
             gen_img_attributes()
             thumbpath = os.path.join(self.data_dir, imagefile.id+os.extsep+"jpg")
             if (os.path.exists(thumbpath)): # Already exists, just point to it.
@@ -718,7 +772,7 @@ class ThumbManager:
                 lazy_load_thumb()
                 if imagefile.path.lower().endswith((".mp4",".webm")): # (canvasimage) video_get_size() needs vlc to initialize the player, or it will report 0,0. We need dims ASAP for aspect ratio, so we get it from here.
                     reader = None
-                    try: 
+                    try:
                         reader = get_reader(imagefile.path)
                         image = Image.fromarray(reader.get_data(0))
                         imagefile.dimensions = image.size
@@ -746,27 +800,27 @@ class ThumbManager:
                 finally:
                     if reader:
                         reader.close()
-                    
+
             # Generate thumbnail for static images
             else:
                 try:
-                    with Image.open(imagefile.path) as image:
-                        image.thumbnail((self.gui.thumbnailsize,self.gui.thumbnailsize))
-                        if image.mode in ("RGBA", "P"):
-                            image = image.convert("RGB")
-                        image.save(thumbpath)
-                        imagefile.thumbnail = thumbpath
-                        lazy_load_thumb()
+                    image = pyvips.Image.thumbnail(imagefile.path, self.gui.thumbnailsize)
+                    image.write_to_file(thumbpath)
+                    imagefile.thumbnail = thumbpath
+                    lazy_load_thumb()
                 except Exception as e:
-                    print(f"Error in thumb generation: {e}")
-                    # Fallback to pyvips if pillow fails
+                    print(f"Error in thumb generation (Pyvips): {e}")
+                    # Fallback to pillows
                     try:
-                        image = pyvips.Image.thumbnail(imagefile.path, self.gui.thumbnailsize)
-                        image.write_to_file(thumbpath)
+                        with Image.open(imagefile.path) as image:
+                            image.thumbnail((self.gui.thumbnailsize,self.gui.thumbnailsize))
+                            if image.mode in ("RGBA", "P"):
+                                image = image.convert("RGB")
+                            image.save(thumbpath)
                         imagefile.thumbnail = thumbpath
                         lazy_load_thumb()
                     except Exception as e:
-                        print(f"Error in thumbnail generation (pyvips): {e}")                      
+                        print(f"Error in thumbnail generation (PIL): {e}")
         def makeframes(obj): # Creates frames and frametimes for gifs and webps
             # Load frames for WEBM impepelemnt with vlc? can take a long time to load.
             if obj.path.lower().endswith(".webm"):
@@ -782,7 +836,7 @@ class ThumbManager:
                         obj.framecount += 1
                         obj.frametimes.append(obj.delay)
                         self.animate.add_animation(obj)
-                        
+
                     obj.lazy_loading = False
                 except Exception as e:
                     print(f"Error in frame generation for grid: {e}")
@@ -819,7 +873,7 @@ class ThumbManager:
                             obj.frames.append(tk_image)
                             obj.framecount += 1
                             self.animate.add_animation(obj)
-                            
+
                         if all(i == 0 for i in obj.frametimes):
                             for i in range(len(obj.frametimes)):
                                 obj.frametimes[i] = obj.delay
@@ -831,6 +885,7 @@ class ThumbManager:
                     obj.isanimated = False
         self.gen_thread = Thread(target=multithread, daemon=True)
         self.gen_thread.start()
+
     def reload(self, gridsquares):
         #queue system. executor global, submit/map to it def concurrent(squares, workers) 1 persistent thread for it. no daemon
         def multithread():
@@ -857,11 +912,11 @@ class ThumbManager:
             try:
                 try:
                     #this is faster
-                    img = ImageTk.PhotoImage(Image.open(imageobj.thumbnail))
-                except:  # Pyvips fallback
                     buffer = pyvips.Image.new_from_file(imageobj.thumbnail)
                     img = ImageTk.PhotoImage(Image.frombuffer(
                         "RGB", [buffer.width, buffer.height], buffer.write_to_memory()))
+                except:  # Pyvips fallback
+                    img = ImageTk.PhotoImage(Image.open(imageobj.thumbnail))
                 finally:
                     imageobj.guidata['img'] = img
                     gridsquare.canvas.image = img
@@ -888,7 +943,7 @@ class ThumbManager:
                         tk_image = ImageTk.PhotoImage(image)
                         obj.frames.append(tk_image)
                         self.animate.add_animation(obj)
-                        
+
                     obj.lazy_loading = False
                 except Exception as e:
                     print(f"Error in frame generation for grid: {e}")
@@ -910,7 +965,7 @@ class ThumbManager:
                             tk_image = ImageTk.PhotoImage(frame)
                             obj.frames.append(tk_image)
                             self.animate.add_animation(obj)
-                            
+
                         obj.lazy_loading = False
                         logger.info(f"All frames loaded for: {obj.name.get()[:30]}")
                 except Exception as e: #fallback to static.
@@ -920,7 +975,8 @@ class ThumbManager:
             new_thread = Thread(target=multithread, daemon=True)
             new_thread.start()
             print("(Thread) Reloading:", len(gridsquares))
-    def unload(self, gridsquare): # thread?
+
+    def unload(self, gridsquares): # thread?
         def unload_static(gridsquare):
             gridsquare.canvas.itemconfig(gridsquare.canvas_image_id, image=None)
             gridsquare.canvas.image = None
@@ -930,28 +986,29 @@ class ThumbManager:
             gridsquare.obj.index = 0
             gridsquare.obj.frames = []
             gridsquare.obj.lazy_loading = True
-        if gridsquare.obj.frames:
-            unload_animated(gridsquare)
-        unload_static(gridsquare)
-        gc.collect()
+        for gridsquare in gridsquares:
+            if gridsquare.obj.frames:
+                unload_animated(gridsquare)
+            unload_static(gridsquare)
+        gc.collect() # gc takes long. maybe we can tell it what to do? why is gc necessary even? something STILL pointing to the image?
+        # see if we can have tkinter reference the images from imagefile context.
+    #setdest, moveall to thumbmanager? walk here?
 
 class Animate:
     def __init__(self):
         self.running = set() # Stores every frame going to be animated or animating.
-        self.thread = None
     def add_animation(self, obj):
-        gridsquare = obj.guidata['frame']
+        gridsquare = obj.guidata["frame"]
         if gridsquare in self.running:
             return
         self.running.add(gridsquare)
-        if self.thread:
-            self.thread.lazy(gridsquare)
-        else:
-            self.start_animations(gridsquare)
+        self.start_animations(gridsquare)
+
     def remove_animation(self, gridsquare, square_colour):
         if gridsquare in self.running:
             gridsquare.obj.guidata["canvas"]["background"] = square_colour
             self.running.remove(gridsquare)
+
     def start_animations(self, gridsquare):
         def lazy(gridsquare):
             i = gridsquare
@@ -970,7 +1027,7 @@ class Animate:
                 try:
                     if len(i.obj.frames) > i.obj.index: # When next frame is available, but not all of them exist yet.
                         i.canvas.itemconfig(i.canvas_image_id, image=i.obj.frames[i.obj.index])
-                        i.obj.index = (i.obj.index + 1) % i.obj.framecount 
+                        i.obj.index = (i.obj.index + 1) % i.obj.framecount
                         i.canvas.after(i.obj.frametimes[i.obj.index], lambda: lazy(i))
                     else: # Frame must wait to ge generated, wait.
                         i.canvas.after(i.obj.delay, lambda: lazy(i))  #default delay instead 100 ms.
@@ -986,10 +1043,10 @@ class Animate:
                 i.canvas.itemconfig(i.canvas_image_id, image=i.obj.frames[i.obj.index]) #change the frame
                 i.obj.index = (i.obj.index + 1) % i.obj.framecount
                 i.canvas.after(i.obj.frametimes[i.obj.index], lambda: loop(i)) #run again.
-        lazy(gridsquare) # Non threaded
+        lazy(gridsquare) # Non threaded #lazy load dest lazy load...
     def stop_animations(self, gridsquare):
         self.running.clear()
-        self.thread = None  
+        self.thread = None
 
 class Timer:
     "Timer for benchmarking"
@@ -1000,7 +1057,7 @@ class Timer:
     def stop(self):
         current_time = perf_counter()
         elapsed_time = current_time - self.creation_time
-        return f"{elapsed_time:.3f} s"   
+        return f"{elapsed_time:.3f} s"
 # Run Program
 if __name__ == '__main__':
     mainclass = SortImages()
