@@ -3,6 +3,7 @@ from math import ceil
 from tkinter import ttk
 
 class Navigator:
+    #if focus on destviewer, use dest displayedlist for indexing. how to check... have variable that updates based on what is focused and check that for every action.
     "Presets"
     def __init__(self, fileManager):
         self.gui = fileManager.gui
@@ -17,7 +18,7 @@ class Navigator:
 
         self.index = 0
         self.old = None # Last changed frame / Default PREVIOUS / Always current selection (for showing next upon moves)
-        
+
         self.arrow_action = None
         self.arrow_action_reversed = None
     def select(self, new):
@@ -30,7 +31,17 @@ class Navigator:
         self.old = new #updates old
         self.index = self.displayedlist.index(new) #updates index
         self.gui.displayimage(new)
-        
+    def dest_select(self, new):
+        "From a click event, removes highlight from previous frame, adds it to the clicked one"
+        if new == self.old and self.old: #show next scenario
+            return
+        if self.old:
+            self.default(self.old)
+        self.selected(new)
+        self.old = new #updates old
+        self.index = self.gui.destination_viewer.displayedlist.index(new) #updates index
+        self.gui.displayimage(new)
+
     def view_change(self, lista):
         "When view is changed, remove highlight from previous frame, adds it to the first frame"
         if self.old:
@@ -130,7 +141,7 @@ class Navigator:
             self.old = lista[self.index]
             scroll_down()
         lista = self.displayedlist
-        
+
         if not self.arrow_action:
             self.arrow_action = {
                 "Right": lambda: highlight_right(),
@@ -162,7 +173,7 @@ class Navigator:
                 else:
                     gridsquare = lista[0]
                 self.select(gridsquare)
-        
+
     def default(self, frame):
         "Reverts colour back to default"
         if frame.obj.dest != "":
