@@ -5,3 +5,4 @@ imageio[ffmpeg]
 python-vlc
 tkinter-tooltip
 psutil
+pyinstaller
