@@ -43,7 +43,7 @@ This fork is a hobby, it adds new features and other tweaks, and removes some ot
     Use tools like ANTIDUPL to remove duplicates.
     No guarantees of functionality; backup images before use.
     GIFs, WebPs, webm and mp4 do not support zooming due to implementation complexity.
-    Sessions do not work for build 4.1. I will fix it in later revisions.
+    Sessions do not work for build 4.2. I will fix it in later revisions.
 
 # How to run code #
  You can also download ready to run from releases, just install python , pip and run install.bat for dependencies.
