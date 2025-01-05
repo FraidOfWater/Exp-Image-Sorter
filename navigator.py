@@ -21,16 +21,20 @@ class Navigator:
 
         self.arrow_action = None
         self.arrow_action_reversed = None
+
+        self.window_focused = "GRID"
+
     def select(self, new):
         "From a click event, removes highlight from previous frame, adds it to the clicked one"
-        if new == self.old and self.old: #show next scenario
-            return
+        #if new == self.old and self.old: #show next scenario <- what? this breaks, and doesnt seem to have anything in common with show next.
+        #    return #### test
         if self.old:
             self.default(self.old)
         self.selected(new)
         self.old = new #updates old
         self.index = self.displayedlist.index(new) #updates index
-        self.gui.displayimage(new)
+        self.window_focused = "GRID"
+        self.gui.displayimage(new.obj)
     def dest_select(self, new):
         "From a click event, removes highlight from previous frame, adds it to the clicked one"
         if new == self.old and self.old: #show next scenario
@@ -40,26 +44,28 @@ class Navigator:
         self.selected(new)
         self.old = new #updates old
         self.index = self.gui.destination_viewer.displayedlist.index(new) #updates index
-        self.gui.displayimage(new)
+        self.window_focused = "DEST"
+        self.gui.displayimage(new.obj)
 
-    def view_change(self, lista):
+    def view_change(self):
         "When view is changed, remove highlight from previous frame, adds it to the first frame"
+        lista = self.displayedlist
         if self.old:
             self.default(self.old)
             self.old = None
-        if not self.gui.show_next.get():
+        if not self.gui.show_next.get() or len(lista) == 0:
             return
         if self.gui.current_view.get() == "Show Assigned" or self.gui.current_view.get() == "Show Moved":
             if self.gui.displayimage:
                 # Assigned list is *displayed* in "last added"-manner. (by tkinter, so here we use [-1], as that is newest in list)
                 self.selected(lista[-1])
                 self.old = lista[-1]
-                self.gui.displayimage(lista[-1])
+                self.gui.displayimage(lista[-1].obj)
         else:
             if self.gui.displayimage:
                 self.selected(lista[0])
                 self.old = lista[0]
-                self.gui.displayimage(lista[0])
+                self.gui.displayimage(lista[0].obj)
 
     def select_next(self, lista):
         "Called by setdestination, removes highlight from previous frame, adds it to the one entering index"
@@ -74,12 +80,11 @@ class Navigator:
         elif len(lista) > self.index: # new image enters index
             self.old = lista[self.index]
         self.selected(self.old)
-        self.gui.displayimage(self.old)
+        self.gui.displayimage(self.old.obj)
 
     def bindhandler(self, event):
         #updownleftright = 38,40,37,39
         def scroll_up():
-            lista = self.displayedlist
             columns = int(max(1, self.gui.imagegrid.winfo_width() / self.gui.actual_gridsquare_width))
             rows = ceil(len(lista) / columns)
             current_row = self.index // columns
@@ -89,7 +94,6 @@ class Navigator:
                 target_scroll = (first_visible_row-1) / rows
                 self.gui.imagegrid.yview_moveto(target_scroll)
         def scroll_down():
-            lista = self.displayedlist
             columns = int(max(1, self.gui.imagegrid.winfo_width() / self.gui.actual_gridsquare_width))
             rows = ceil(len(lista) / columns)
             current_row = self.index // columns
@@ -99,7 +103,6 @@ class Navigator:
                 target_scroll = (first_visible_row+1) / rows
                 self.gui.imagegrid.yview_moveto(target_scroll)
         def highlight_right():
-            lista = self.displayedlist
             check_bound = self.index+1
             if check_bound >= len(lista):
                 return
@@ -108,8 +111,8 @@ class Navigator:
             self.selected(lista[self.index])
             self.old = lista[self.index]
             scroll_down()
+            self.gui.displayimage(self.old.obj)
         def highlight_left():
-            lista = self.displayedlist
             check_bound = self.index-1
             if check_bound < 0:
                 return
@@ -118,8 +121,8 @@ class Navigator:
             self.selected(lista[self.index])
             self.old = lista[self.index]
             scroll_up()
+            self.gui.displayimage(self.old.obj)
         def highlight_up():
-            lista = self.displayedlist
             columns = int(max(1, self.gui.imagegrid.winfo_width() / self.gui.actual_gridsquare_width))
             check_upper_bound = self.index-columns
             if check_upper_bound < 0:
@@ -129,8 +132,8 @@ class Navigator:
             self.selected(lista[self.index])
             self.old = lista[self.index]
             scroll_up()
+            self.gui.displayimage(self.old.obj)
         def highlight_down():
-            lista = self.displayedlist
             columns = int(max(1, self.gui.imagegrid.winfo_width() / self.gui.actual_gridsquare_width))
             check_lower_bound = self.index+columns
             if check_lower_bound > len(lista)-1:
@@ -140,8 +143,12 @@ class Navigator:
             self.selected(lista[self.index])
             self.old = lista[self.index]
             scroll_down()
+            self.gui.displayimage(self.old.obj)
         lista = self.displayedlist
-
+        if self.window_focused == "DEST":
+            ### make logic to scroll the correct window...
+            #lista = self.gui.destination_viewer.displayedlist
+            pass
         if not self.arrow_action:
             self.arrow_action = {
                 "Right": lambda: highlight_right(),
@@ -164,7 +171,6 @@ class Navigator:
         if self.old:
             key = event.keysym
             arrow_action[key]()
-            self.gui.displayimage(self.old)
         else:
             print("investigate")
             if lista:
@@ -178,7 +184,7 @@ class Navigator:
         "Reverts colour back to default"
         if frame.obj.dest != "":
             alt = frame.obj.dest_color
-            frame.configure(highlightcolor = alt,  highlightbackground = alt)
+            frame.configure(highlightcolor = alt,  highlightbackground = alt) # Trying to access destroyed destsquare? # If dest is closed, remove self.old if any frame was there.
             frame.canvas.configure(bg=alt, highlightcolor=alt, highlightbackground = alt)
             frame.c.configure(style="Theme_square.TCheckbutton")
             frame.cf.configure(bg=self.gui.square_text_box_colour)
