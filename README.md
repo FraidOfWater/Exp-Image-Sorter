@@ -12,7 +12,7 @@ This fork is a hobby, it adds new features and other tweaks, and removes some ot
     Animation support: Added support for .gif, .webp, .webm and .mp4.
     Docked Image Viewer: Choose between integrated or free-floating viewer.
 
-    Navigation: Use arrow keys or WASD to navigate the grid; lock images for zooming with enter or clicking. Press Spacebar to check images.
+    Navigation: Use arrow keys or WASD to navigate the grid.
     Quick Assigning: Assign images directly from the viewer with a hotkey.
     Show Next: Automatically shows the next image upon assigning the current one.
 
