@@ -6,3 +6,4 @@ python-vlc
 tkinter-tooltip
 psutil
 pyinstaller
+objgraph
