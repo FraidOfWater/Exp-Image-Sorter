@@ -1,16 +1,18 @@
 from math import log, pow
-import logging
 from time import perf_counter
-
 from warnings import catch_warnings, simplefilter
-from PIL import Image, ImageTk
+
 from threading import Thread, Event
-import vlc
+
+import logging
+from gc import collect
+
+from PIL import Image, ImageTk
 
 import tkinter as tk
 from tkinter import ttk
+import vlc
 
-import gc
 logger = logging.getLogger("Canvasimage")
 logger.setLevel(logging.ERROR)
 handler = logging.StreamHandler()
@@ -238,7 +240,7 @@ class CanvasImage:
                 self.gui.old_img_frame.remove(x)
                 x.destroy()
                 del x
-            gc.collect()
+            collect()
     "Static"
     def handle_static(self):
         def lazy_pyramid(w, h):
@@ -314,26 +316,25 @@ class CanvasImage:
                     self.frames.append(frame)
                 self.lazy_loading = False # Lower the lazy_loading flag so animate can take over.
             except AttributeError as e:
-                gc.collect()
+                collect()
                 logger.debug(f"Error loading frames: {e}")
                 pass
             except OSError as e:
-                gc.collect()
+                collect()
                 logger.debug(f"Error loading frames: {e}")
                 pass
             except ValueError as e:
-                gc.collect()
+                collect()
                 logger.debug(f"Error loading frames: {e}")
                 pass
             except Exception as e:
-                gc.collect()
+                collect()
                 logger.debug(f"Error loading frames: {e}")
 
 
         def lazy_load():
             def animate_image():
                 "Simple gif looper"
-                print("test")
                 self.canvas.itemconfig(self.imageid, image=self.frames[self.lazy_index])
                 logger.debug(f"{self.lazy_index+1}/{self.obj.framecount} ({self.obj.frametimes[self.lazy_index]})")
                 self.lazy_index = (self.lazy_index + 1) % len(self.frames)
@@ -695,4 +696,4 @@ class CanvasImage:
         if hasattr(self, "obj"):
             del self.obj
         del self
-        gc.collect()
+        collect()
