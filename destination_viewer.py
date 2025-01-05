@@ -1,8 +1,18 @@
 import os
+
 from time import perf_counter
+
+from threading import Thread
+from concurrent.futures import ThreadPoolExecutor
+
+from gc import collect
+
+import tkinter as tk
+from tkinter import ttk
 
 from PIL import Image, ImageTk
 from imageio import get_reader
+
 def import_pyvips():
     base_path = os.path.dirname(os.path.abspath(__file__))
     vipsbin = os.path.join(base_path, "vips-dev-8.16", "bin")
@@ -19,13 +29,11 @@ try:
 except Exception as e:
     print("Couldn't import pyvips:", e)
 
-from threading import Thread
-import concurrent.futures as concurrent
 
-import tkinter as tk
-from tkinter import ttk
 
-import gc
+
+
+
 #This module is more or less contained. It has its own thumbmanager and animate methods as it is its own program, and I dont want to complicate'
 # original method in sortimages. Maybe in the future do subclasses or inheritance or similar to replace these.
 class Destination_Viewer():
@@ -37,19 +45,13 @@ class Destination_Viewer():
         style = ttk.Style()
         style.configure("Theme_square.TCheckbutton", background=self.gui.grid_background_colour, foreground=self.gui.text_colour)
 
-    def get_paths(self, loadsession: bool):
+    def get_paths(self): # needed? ###
         "Create a list for every buttondest" "If loadsession=True, sort everything from assigned and moved to the lists"
         # Dest lists are created at load time from loadsession. If no loadsession, lists are still constructed, but destsquares added to them via setdest
         self.paths = []
         for x in self.gui.buttons:
             #x['bg'] refers to tkinter background color. x.dest['path'] to path name.
             self.paths.append(x.dest['path'])
-        if loadsession:
-            moved = [x for x in self.fileManager if x.moved]
-            assigned = [x for x in self.fileManager if x.dest]
-            generate = moved+assigned
-            for obj in generate:
-                self.makedestsquare(obj)
 
     def create_window(self, *args):
         if hasattr(self, 'destwindow'):
@@ -141,6 +143,7 @@ class Destination_Viewer():
             canvas = tk.Canvas(frame, width=self.gui.thumbnailsize,
                                height=self.gui.thumbnailsize,bg=self.gui.square_colour, highlightthickness=self.gui.square_border_size, highlightcolor=self.gui.imageborder_default_colour, highlightbackground = self.gui.imageborder_default_colour) #The gridbox color.
             canvas.grid(column=0, row=0, sticky="NSEW")
+
             img = None
             canvas.image = img
 #
@@ -197,6 +200,8 @@ class Destination_Viewer():
                     print("Click inside a square, not closing.")
                     return  # Click is inside a square, do not close
         self.dest_thumbs.unload(self.displayedlist)
+        if self.fileManager.navigator.old in self.displayedset:
+            self.fileManager.navigator.old = None
         for x in self.displayedlist:
             x.canvas.destroy()
             x.destroy()
@@ -213,7 +218,7 @@ class Destination_Viewer():
         del self.animated
         del self.displayedlist
         del self.displayedset
-        gc.collect()
+        collect()
 
 class ThumbManager:
     def __init__(self, dest_viewer):
@@ -232,11 +237,11 @@ class ThumbManager:
             animated = [x for x in gridsquares if x.obj.isanimated and x.obj.framecount != 0]
             try:
                 max_workers = max(1,self.threads*2)
-                with concurrent.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
                     executor.map(reload_static, gridsquares)
                 print(f"Thumbnails loaded in: {perf_counter()-a:.2f}")
                 max_workers = max(1,self.threads)
-                with concurrent.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
                     executor.map(reload_animated, animated)
                 print(f"Thumbframes loaded in: {perf_counter()-a:.2f}")
             except Exception as e:
@@ -327,7 +332,7 @@ class ThumbManager:
             if gridsquare.obj.frames_dest:
                 unload_animated(gridsquare)
             unload_static(gridsquare)
-        gc.collect() # gc takes long. maybe we can tell it what to do? why is gc necessary even? something STILL pointing to the image?
+        #collect() # gc takes long. maybe we can tell it what to do? why is gc necessary even? something STILL pointing to the image? ###
         # see if we can have tkinter reference the images from imagefile context.
     #setdest, moveall to thumbmanager? walk here?
 
@@ -349,7 +354,7 @@ class Animate:
     def start_animations(self, gridsquare):
         def lazy(gridsquare):
             i = gridsquare
-            i.obj.guidata["canvas"]['background'] = "red"
+            i.obj.guidata["canvas"]['background'] = "red" ### may not edit destsquare... unclear why doesht work.
             if i not in self.running: # Stop if not in "view" or in self.running
                 return
             if not i.obj.frames_dest: # No frames have been initialized. Shouldn't happen ever. Dead code?
@@ -359,6 +364,7 @@ class Animate:
                 print("Error, frames generated doesnt match expected")
                 return
             if not i.obj.lazy_loading and len(i.obj.frames_dest) == i.obj.framecount: # All frames ready. (second part only webm, dead)
+                i.obj.guidata["canvas"]['background'] = "green" # move to laZY?
                 loop(i)
             else:
                 try:
@@ -375,7 +381,7 @@ class Animate:
             if not gridsquare in self.running:
                 return
             i = gridsquare
-            i.obj.guidata["canvas"]['background'] = "green" # move to laZY?
+            
             if len(i.obj.frames_dest) >= i.obj.index_dest:
                 i.canvas.itemconfig(i.canvas_image_id, image=i.obj.frames_dest[i.obj.index_dest]) #change the frame
                 i.obj.index_dest = (i.obj.index_dest + 1) % i.obj.framecount
