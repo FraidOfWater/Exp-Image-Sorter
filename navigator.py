@@ -8,8 +8,9 @@ class Navigator:
     def __init__(self, fileManager):
         self.gui = fileManager.gui
         gui = self.gui
+        self.gridmanager = gui.gridmanager
         self.fileManager = fileManager
-        self.displayedlist = self.fileManager.gui.gridmanager.displayedlist
+        self.displayedlist = self.gridmanager.displayedlist
         style = ttk.Style()
         self.style = style
         style.configure("Theme_square.TCheckbutton", background=gui.square_text_box_colour, foreground=gui.square_text_colour) # Theme for Square
@@ -28,23 +29,31 @@ class Navigator:
         "From a click event, removes highlight from previous frame, adds it to the clicked one"
         #if new == self.old and self.old: #show next scenario <- what? this breaks, and doesnt seem to have anything in common with show next.
         #    return #### test
+        self.window_focused = "GRID"
+        self.displayedlist = self.gridmanager.displayedlist
         if self.old:
             self.default(self.old)
-        self.selected(new)
-        self.old = new #updates old
-        self.index = self.displayedlist.index(new) #updates index
-        self.window_focused = "GRID"
-        self.gui.displayimage(new.obj)
+        if new:
+            self.selected(new)
+            
+            self.index = self.displayedlist.index(new) #updates index
+            self.gui.displayimage(new.obj)
+            self.old = new #updates old
+            
+        
     def dest_select(self, new):
         "From a click event, removes highlight from previous frame, adds it to the clicked one"
+        self.window_focused = "DEST"
+        self.displayedlist = self.gridmanager.displayedlist
         if new == self.old and self.old: #show next scenario
             return
         if self.old:
             self.default(self.old)
         self.selected(new)
         self.old = new #updates old
+        
         self.index = self.gui.destination_viewer.displayedlist.index(new) #updates index
-        self.window_focused = "DEST"
+        
         self.gui.displayimage(new.obj)
 
     def view_change(self):
@@ -56,13 +65,13 @@ class Navigator:
         if not self.gui.show_next.get() or len(lista) == 0:
             return
         if self.gui.current_view.get() == "Show Assigned" or self.gui.current_view.get() == "Show Moved":
-            if self.gui.displayimage:
+            if hasattr(self.gui, "Image_frame"):
                 # Assigned list is *displayed* in "last added"-manner. (by tkinter, so here we use [-1], as that is newest in list)
                 self.selected(lista[-1])
                 self.old = lista[-1]
                 self.gui.displayimage(lista[-1].obj)
         else:
-            if self.gui.displayimage:
+            if hasattr(self.gui, "Image_frame"):
                 self.selected(lista[0])
                 self.old = lista[0]
                 self.gui.displayimage(lista[0].obj)
@@ -104,12 +113,12 @@ class Navigator:
                 self.gui.imagegrid.yview_moveto(target_scroll)
         def highlight_right():
             check_bound = self.index+1
-            if check_bound >= len(lista):
+            if check_bound >= len(self.displayedlist):
                 return
             self.default(self.old)
             self.index = check_bound
-            self.selected(lista[self.index])
-            self.old = lista[self.index]
+            self.selected(self.displayedlist[self.index])
+            self.old = self.displayedlist[self.index]
             scroll_down()
             self.gui.displayimage(self.old.obj)
         def highlight_left():
@@ -118,8 +127,8 @@ class Navigator:
                 return
             self.index = check_bound
             self.default(self.old)
-            self.selected(lista[self.index])
-            self.old = lista[self.index]
+            self.selected(self.displayedlist[self.index])
+            self.old = self.displayedlist[self.index]
             scroll_up()
             self.gui.displayimage(self.old.obj)
         def highlight_up():
@@ -129,26 +138,22 @@ class Navigator:
                 return
             self.index = check_upper_bound
             self.default(self.old)
-            self.selected(lista[self.index])
-            self.old = lista[self.index]
+            self.selected(self.displayedlist[self.index])
+            self.old = self.displayedlist[self.index]
             scroll_up()
             self.gui.displayimage(self.old.obj)
         def highlight_down():
             columns = int(max(1, self.gui.imagegrid.winfo_width() / self.gui.actual_gridsquare_width))
             check_lower_bound = self.index+columns
-            if check_lower_bound > len(lista)-1:
+            if check_lower_bound > len(self.displayedlist)-1:
                 return
             self.index = check_lower_bound
             self.default(self.old)
-            self.selected(lista[self.index])
-            self.old = lista[self.index]
+            self.selected(self.displayedlist[self.index])
+            self.old = self.displayedlist[self.index]
             scroll_down()
             self.gui.displayimage(self.old.obj)
-        lista = self.displayedlist
-        if self.window_focused == "DEST":
-            ### make logic to scroll the correct window...
-            #lista = self.gui.destination_viewer.displayedlist
-            pass
+        
         if not self.arrow_action:
             self.arrow_action = {
                 "Right": lambda: highlight_right(),
@@ -163,16 +168,25 @@ class Navigator:
                 "Down": lambda: highlight_up(),
                 "Up": lambda: highlight_down()
             }
+
+        
+
         if self.gui.current_view.get() == "Show Assigned":
             arrow_action = self.arrow_action_reversed
         else:
             arrow_action = self.arrow_action
 
-        if self.old:
-            key = event.keysym
-            arrow_action[key]()
+        if self.window_focused == "DEST":
+            lista = self.gui.destination_viewer.displayedlist
+            self.displayedlist = self.gui.destination_viewer.displayedlist
+            arrow_action = self.arrow_action_reversed
         else:
-            print("investigate")
+            self.displayedlist = self.gridmanager.displayedlist
+            lista = self.gridmanager.displayedlist
+        key = event.keysym
+        try:
+            arrow_action[key]()
+        except:
             if lista:
                 if self.gui.current_view.get() in ("Show Assigned", "Show Moved"):
                     gridsquare = lista[-1]
@@ -182,6 +196,8 @@ class Navigator:
 
     def default(self, frame):
         "Reverts colour back to default"
+        if not frame:
+            return
         if frame.obj.dest != "":
             alt = frame.obj.dest_color
             frame.configure(highlightcolor = alt,  highlightbackground = alt) # Trying to access destroyed destsquare? # If dest is closed, remove self.old if any frame was there.
@@ -194,12 +210,14 @@ class Navigator:
             frame.c.configure(style="Theme_square.TCheckbutton")
             frame.cf.configure(bg=self.gui.square_text_box_colour)
     def selected(self, frame):
-        frame.configure(highlightbackground = self.gui.imageborder_selected_colour, highlightcolor = self.gui.imageborder_selected_colour)
-        frame.canvas.configure(bg=self.gui.imagebox_selection_colour, highlightbackground = self.gui.imageborder_selected_colour, highlightcolor = self.gui.imageborder_selected_colour)
-        frame.c.configure(style="Theme_square2.TCheckbutton")
-        frame.cf.configure(bg=self.gui.square_text_box_selection_colour)
+        if frame:
+            frame.configure(highlightbackground = self.gui.imageborder_selected_colour, highlightcolor = self.gui.imageborder_selected_colour)
+            frame.canvas.configure(bg=self.gui.imagebox_selection_colour, highlightbackground = self.gui.imageborder_selected_colour, highlightcolor = self.gui.imageborder_selected_colour)
+            frame.c.configure(style="Theme_square2.TCheckbutton")
+            frame.cf.configure(bg=self.gui.square_text_box_selection_colour)
     def locked(self, frame):
-        frame.configure(highlightbackground = self.gui.imageborder_locked_colour, highlightcolor = self.gui.imageborder_locked_colour)
-        frame.canvas.configure(bg=self.gui.imagebox_locked_colour, highlightbackground = self.gui.imageborder_locked_colour, highlightcolor = self.gui.imageborder_locked_colour)
-        frame.c.configure(style="Theme_square3.TCheckbutton")
-        frame.cf.configure(bg=self.gui.square_text_box_locked_colour)
+        if frame:
+            frame.configure(highlightbackground = self.gui.imageborder_locked_colour, highlightcolor = self.gui.imageborder_locked_colour)
+            frame.canvas.configure(bg=self.gui.imagebox_locked_colour, highlightbackground = self.gui.imageborder_locked_colour, highlightcolor = self.gui.imageborder_locked_colour)
+            frame.c.configure(style="Theme_square3.TCheckbutton")
+            frame.cf.configure(bg=self.gui.square_text_box_locked_colour)
