@@ -8,15 +8,16 @@ This fork is a hobby, it adds new features and other tweaks, and removes some ot
 
       GUI
 
-    Theme Customization: Main theme is now "Midnight Blue"; customize using hex codes; prefs.json.
+    Theme Customization: Main theme is now "Midnight Blue"; customize using hex codes; themes.json. (Can also add your own, themes.json is parsed on each run, and themes added to options)
     Animation support: Added support for .gif, .webp, .webm and .mp4.
     Docked Image Viewer: Choose between integrated or free-floating viewer.
 
-    Navigation: Use arrow keys or WASD to navigate the grid.
+    Navigation: Use arrow keys to navigate the grid.
     Quick Assigning: Assign images directly from the viewer with a hotkey.
     Show Next: Automatically shows the next image upon assigning the current one.
+    Auto Load: Load more images up to a value, if below that value.
 
-    Sorting Options: Added "Sort by date modified" in GUI and Prefs.json.
+    Sorting Options: Added "Sort by date modified"-button.
     View Options: Introduced an option box to show unassigned, assigned, moved, or animations.
     Name Truncation: Prevents overflow and misalignment in the grid / fixed root problem auto resizing gridboxes..
     
@@ -30,7 +31,9 @@ This fork is a hobby, it adds new features and other tweaks, and removes some ot
     Overwrite Safeguards: Prevents overwriting locked images or those assigned to others.
     Threading: Implements threading for lazy loading of images and GIFs/WebPs.
     Buffering: Buffers large images to reduce latency; configurable in Prefs.json.
-    Removed: Dupechecking and Image-renaming
+    Memory limit: Due to memory requirements of animations, limit number of frames loaded to memory.
+    Animation queue: Loads animations as the memory limit allows.
+    Removed: Dupechecking
 
       IMG-VIEWER
 
@@ -41,31 +44,31 @@ This fork is a hobby, it adds new features and other tweaks, and removes some ot
 # Warnings #
 
     Use tools like ANTIDUPL to remove duplicates.
-    No guarantees of functionality; backup images before use.
+    No guarantees of functionality; backup images before use. Largely untested for now.
     GIFs, WebPs, webm and mp4 do not support zooming due to implementation complexity.
-    Sessions do not work for build 4.2. I will fix it in later revisions.
 
 # How to run code #
- You can also download ready to run from releases, just install python , pip and run install.bat for dependencies.
- In releases you can download four different builds:
- - Exe.standalone (Largest)
- - Exe. (You must have vlc 64 bit installed)
- - Script.standalone
- - Script. (You must have vlc 64 bit installed) (Smallest)
+Download a compiled copy from releases.
+ - Executable: Contains all dependencies.
+ - Scripts: Install python, pip. Run install.bat, run start.bat.
+How to compile:
+ - Executable with all dependencies (standalone) (Largest). You need to include at least following from vlc 64 bit. Folders: "plugins", files: "libvlc.dll", "libvlccore.dll". Run build.bat, files and folders in this directory.
+ - Executable without vlc (You must have vlc 64 bit installed). No need to think about vlc. You must have vips-dev-x folder. (Vips windows binaries, "ALL" or "WEB" 64 bit.)
+ - Script with all dependencies: Same as above. VLC folder and VIPS folder.
+ - Script without vlc (Smallest): Same as above. VLC installed, VIPS folder.
  - (Note, you must run install.bat for script builds, you can then run by clicking on start.bat)
 
    1. Downloading requirements
-      
             You need to install:
              - python (newest, 3 and above) (coded on 3.12)
              - pip (should come with python)
              - vlc (64 bit, installer)
             Then:
-             - run command: pip install pillow pyvips imageio imageio[ffmpeg] python-vlc tkinter-tooltip psutil pyinstaller
+             - run install.bat
              - download vips windows binaries from github: file name: "vips-dev-w64-web-8.16.0.zip" or later. https://github.com/libvips/libvips/releases. There should be a section in releases, with a link saying "WINDOWS BINARIES", if you do not see one, look for older releases with available windows binaries. (-all also works)
              - place vips: in the same folder as the .py files are in.
       
-   3. Create Shortcut / Use shortcut
+   2. Create Shortcut / Use shortcut
       
             start.bat
                   cd %~dp0
