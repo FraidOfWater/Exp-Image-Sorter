@@ -164,15 +164,6 @@ class GUIManager(tk.Tk): #Main window
             # Return the RSS (Resident Set Size) in bytes
             return (memory_info.rss)
         self.current_ram_strvar.set(f"RAM: {get_memory_usage() / (1024 ** 2):.2f} MB")
-        frames = 0
-        if hasattr(self.destination_viewer, "displayedlist"):
-            test = self.gridmanager.gridsquarelist + self.destination_viewer.displayedlist
-        else: test = self.gridmanager.gridsquarelist
-        for x in test:
-            frames += len(x.obj.frames)
-        stri = f"{frames}, {len(self.fileManager.animation_queue)}"
-        if stri != old:
-            print(stri)
 
         "Anim: displayedlist with frames/displayedlist with framecount/(queue)"
         temp = [x for x in self.gridmanager.displayedlist if x.obj.frametimes]
@@ -187,7 +178,7 @@ class GUIManager(tk.Tk): #Main window
 
         self.concurrent_frames = c
 
-        self.after(333, self.show_ram_usage, stri)
+        self.after(333, self.show_ram_usage)
     def manage_lines(self, input):
         self.text_widget.configure(state="normal")
         self.text_widget.insert(tk.END, f"{input}\n") 
