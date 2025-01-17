@@ -1,12 +1,10 @@
 from math import log, pow
 from time import perf_counter
 from warnings import catch_warnings, simplefilter
-from os.path import getsize
 from threading import Thread, Event
 
 import logging
-from gc import collect, garbage
-import gc
+from gc import collect
 from PIL import Image, ImageTk
 
 import tkinter as tk
@@ -58,7 +56,7 @@ class CanvasImage:
         self.file_size = round(self.obj.file_size/1.048576/1000000,2) #file size in MB
 
         "Gui stats"
-        self.gui.name_ext_size.set(self.obj.name.get())
+        self.gui.name_ext_size.set(self.obj.name)
         # The initial quality of placeholder image, used to display the image just a bit faster.
         accepted_modes = ["NEAREST", "BILINEAR", "BICUBIC", "LANCZOS"]
         if gui.filter_mode.upper() in accepted_modes:
@@ -83,7 +81,7 @@ class CanvasImage:
         geometry_width, geometry_height = imagewindowgeometry.split('x',1)
 
         self.style = ttk.Style()
-        self.style.configure("bg.TFrame", background=gui.canvasimage_background) # no white flicker screens
+        self.style.configure("bg.TFrame", background=gui.viewer_bg) # no white flicker screens
 
         """ Initialization of frame in master widget"""
         self.__imframe = ttk.Frame(master, style="bg.TFrame")
@@ -91,7 +89,7 @@ class CanvasImage:
         self.hbar = AutoScrollbar(self.__imframe, orient='horizontal')
         self.vbar = AutoScrollbar(self.__imframe, orient='vertical')
         # Create canvas and bind it with scrollbars. Public for outer classes
-        self.canvas = tk.Canvas(self.__imframe, bg=gui.canvasimage_background,
+        self.canvas = tk.Canvas(self.__imframe, bg=gui.viewer_bg,
                                 highlightthickness=0, xscrollcommand=self.hbar.set,
                                 yscrollcommand=self.vbar.set, width=geometry_width, height = geometry_height)  # Set canvas dimensions to remove scrollbars
         self.canvas.grid(row=0, column=0, sticky='nswe') # Place into grid
@@ -142,6 +140,7 @@ class CanvasImage:
                 self.gui.frameinfo.set(f"{0}/{0}/{self.obj.framecount}")
                 self.handle_gif()
             else:
+                self.__pyramid = [self.smaller()] if self.__huge else [Image.open(self.path)]
                 self.file_type = self.file_type[0]
                 self.pyramid_ready = Event()
                 self.first_rendered = Event()
@@ -234,7 +233,7 @@ class CanvasImage:
         new_width += 2 #divider
 
         self.video_frame = tk.Canvas(self.canvas,width=new_width, height=new_height,
-                                     bg=self.gui.canvasimage_background, highlightbackground="black",
+                                     bg=self.gui.viewer_bg, highlightbackground="black",
                                         highlightthickness=0, borderwidth=0)
         #self.canvas.update()  # Wait until the canvas has finished creating.
         self.video_frame.grid(pady=((self.canvas_height - new_height) // 2), sticky="nsew")
@@ -307,17 +306,17 @@ class CanvasImage:
     "GIF"
     def handle_gif(self):
         "Handles gifs"
-        def load_frames(image, new_width, new_height):
+        def load_frames(image1, new_width, new_height):
             "Generates frames for gif, webp"
             try:
-                self.image.seek(0) # remove if doesnt eliminate first frame bug
-                frame_frametime = image.info.get('duration', self.delay)
+                image1.seek(0) # remove if doesnt eliminate first frame bug
+                frame_frametime = image1.info.get('duration', self.delay)
                 if frame_frametime == 0:
                     self.delay = 100
                 else:
                     self.delay = frame_frametime
                 self.frametimes.append(frame_frametime)
-                frame = ImageTk.PhotoImage(image.resize((new_width, new_height)), Image.Resampling.LANCZOS)
+                frame = ImageTk.PhotoImage(image1.resize((new_width, new_height)), Image.Resampling.LANCZOS)
                 self.frames.append(frame)
                 frame_width = frame.width()
                 frame_height = frame.height()
@@ -333,9 +332,9 @@ class CanvasImage:
                 try:
                     for i in range(1, temp): #Check here to not continue if we stop the program
 
-                        self.image.seek(i)
-                        frame_frametime = image.info.get('duration', self.delay)
-                        frame = ImageTk.PhotoImage(self.image.resize((new_width, new_height)), Image.Resampling.LANCZOS)
+                        image1.seek(i)
+                        frame_frametime = image1.info.get('duration', self.delay)
+                        frame = ImageTk.PhotoImage(image1.resize((new_width, new_height)), Image.Resampling.LANCZOS)
                         self.frametimes.append(frame_frametime)
                         self.frames.append(frame)
                         self.framecount += 1
@@ -477,6 +476,8 @@ class CanvasImage:
                             self.first = False
                             image = self.__pyramid[(max(0, self.__curr_img))]
                             if self.file_size < self.gui.quick_preview_size_threshold: # if small render high quality
+                                if self.imwidth < 256 and self.imheight < 256:
+                                    self.__filter = Image.Resampling.NEAREST
                                 ##print(f"Size (small): {self.file_size} MB. Frames: {self.obj.framecount}")
                                 imagetk = ImageTk.PhotoImage(image.resize((int(x2 - x1), int(y2 - y1)), self.__filter))
                             else:
