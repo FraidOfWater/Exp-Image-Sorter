@@ -2,8 +2,7 @@ pillow
 pyvips
 imageio
 imageio[ffmpeg]
+numpy
 python-vlc
-tkinter-tooltip
 psutil
 pyinstaller
-objgraph
