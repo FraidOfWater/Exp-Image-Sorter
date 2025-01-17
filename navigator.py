@@ -13,9 +13,8 @@ class Navigator:
         self.displayedlist = self.gridmanager.displayedlist
         style = ttk.Style()
         self.style = style
-        style.configure("Theme_square.TCheckbutton", background=gui.square_text_box_colour, foreground=gui.square_text_colour) # Theme for Square
+        style.configure("Theme_square1.TCheckbutton", background=gui.square_text_box_colour, foreground=gui.square_text_colour) # Theme for Square
         style.configure("Theme_square2.TCheckbutton", background=gui.square_text_box_selection_colour, foreground=gui.square_text_colour) # Theme for Square (selected)
-        style.configure("Theme_square3.TCheckbutton", background=gui.square_text_box_locked_colour, foreground=gui.square_text_colour) # Theme for Square (locked)
 
         self.index = 0
         self.old = None # Last changed frame / Default PREVIOUS / Always current selection (for showing next upon moves)
@@ -154,6 +153,8 @@ class Navigator:
             scroll_down()
             self.gui.displayimage(self.old.obj)
         
+        if self.gui.focused_on_field:
+            return
         if not self.arrow_action:
             self.arrow_action = {
                 "Right": lambda: highlight_right(),
@@ -202,22 +203,16 @@ class Navigator:
             alt = frame.obj.dest_color
             frame.configure(highlightcolor = alt,  highlightbackground = alt) # Trying to access destroyed destsquare? # If dest is closed, remove self.old if any frame was there.
             frame.canvas.configure(bg=alt, highlightcolor=alt, highlightbackground = alt)
-            frame.c.configure(style="Theme_square.TCheckbutton")
+            frame.c.configure(style="Theme_square1.TCheckbutton")
             frame.cf.configure(bg=self.gui.square_text_box_colour)
         else:
-            frame.configure(highlightcolor = self.gui.imageborder_default_colour,  highlightbackground = self.gui.imageborder_default_colour)
-            frame.canvas.configure(bg=self.gui.imagebox_default_colour, highlightcolor=self.gui.imageborder_default_colour, highlightbackground = self.gui.imageborder_default_colour)
-            frame.c.configure(style="Theme_square.TCheckbutton")
+            frame.configure(highlightcolor = self.gui.square_default,  highlightbackground = self.gui.square_default)
+            frame.canvas.configure(bg=self.gui.square_default, highlightcolor=self.gui.square_default, highlightbackground = self.gui.square_default)
+            frame.c.configure(style="Theme_square1.TCheckbutton")
             frame.cf.configure(bg=self.gui.square_text_box_colour)
     def selected(self, frame):
         if frame:
-            frame.configure(highlightbackground = self.gui.imageborder_selected_colour, highlightcolor = self.gui.imageborder_selected_colour)
-            frame.canvas.configure(bg=self.gui.imagebox_selection_colour, highlightbackground = self.gui.imageborder_selected_colour, highlightcolor = self.gui.imageborder_selected_colour)
+            frame.configure(highlightbackground = self.gui.square_selected, highlightcolor = self.gui.square_selected)
+            frame.canvas.configure(bg=self.gui.square_selected, highlightbackground = self.gui.square_selected, highlightcolor = self.gui.square_selected)
             frame.c.configure(style="Theme_square2.TCheckbutton")
             frame.cf.configure(bg=self.gui.square_text_box_selection_colour)
-    def locked(self, frame):
-        if frame:
-            frame.configure(highlightbackground = self.gui.imageborder_locked_colour, highlightcolor = self.gui.imageborder_locked_colour)
-            frame.canvas.configure(bg=self.gui.imagebox_locked_colour, highlightbackground = self.gui.imageborder_locked_colour, highlightcolor = self.gui.imageborder_locked_colour)
-            frame.c.configure(style="Theme_square3.TCheckbutton")
-            frame.cf.configure(bg=self.gui.square_text_box_locked_colour)
