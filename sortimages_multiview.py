@@ -56,6 +56,7 @@ logger.addHandler(handler)
 # Rewrite sharing of images and frames. Super messy.
 # Replace while loops with better program exit checking. While does not apparently check the if for every line, but for every loop.
 # This has caused clutter/complexity in gen_frames.
+# To fix frame limiter, figure out framecount first and choose to allow loading upon that.
 
 " Known issues "
 # Phantom shutdowns every once in a while. Reason unclear. (Was it the threads not shutting down bug? Sometimes I got thread unsynch thing. Not in sequence and such. Out of sequence)
@@ -857,12 +858,12 @@ class ThumbManager:
         def queue_trail():
             fileManager = self.fileManager
             animation_queue = fileManager.animation_queue
-            for x in animation_queue:
+            temp = reversed(animation_queue)
+            for x in temp:
                 if x.guidata.get("frame", None) or x.guidata.get("destframe", None):
                     gen_frames(x)
                 else:
                     animation_queue.remove(x)
-            pass
         def gen_thumb(imagefile): # session just calls this for displayedlist
             def get_mode(vips_img):
                 pformat = str(vips_img.interpretation).lower()
@@ -1074,8 +1075,19 @@ class ThumbManager:
                                 imagefile.frames.clear()
                                 imagefile.framecount = 0
                                 if imagefile not in self.fileManager.animation_queue:
-                                    print("added", imagefile.path)
                                     self.fileManager.animation_queue.append(imagefile)
+                                    
+                                    frame = imagefile.guidata.get("frame", None)
+                                    destframe = imagefile.guidata.get("destframe", None)
+                                    im = imagefile.guidata.get("img", None)
+                                    if frame:
+                                        if im:
+                                            frame.canvas.image = im
+                                            frame.canvas.itemconfig(frame.canvas_image_id, image=im)
+                                    if destframe:
+                                        if im:
+                                            destframe.canvas.image = im
+                                            destframe.canvas.itemconfig(destframe.canvas_image_id, image=im)
                                 return
                             if self.fileManager.program_is_exiting:
                                 return
@@ -1108,8 +1120,18 @@ class ThumbManager:
                                 imagefile.frames.clear()
                                 imagefile.framecount = 0
                                 if imagefile not in self.fileManager.animation_queue:
-                                    print("added", imagefile.path)
                                     self.fileManager.animation_queue.append(imagefile)
+                                    frame = imagefile.guidata.get("frame", None)
+                                    destframe = imagefile.guidata.get("destframe", None)
+                                    im = imagefile.guidata.get("img", None)
+                                    if frame:
+                                        if im:
+                                            frame.canvas.image = im
+                                            frame.canvas.itemconfig(frame.canvas_image_id, image=im)
+                                    if destframe:
+                                        if im:
+                                            destframe.canvas.image = im
+                                            destframe.canvas.itemconfig(destframe.canvas_image_id, image=im)
                                 return
                             if self.fileManager.program_is_exiting:
                                 return
@@ -1140,8 +1162,19 @@ class ThumbManager:
             imagefile.frames.clear()
             imagefile.framecount = 0
             if imagefile not in self.fileManager.animation_queue:
-                print("added", imagefile.path)
                 self.fileManager.animation_queue.append(imagefile)
+                frame = imagefile.guidata.get("frame", None)
+                destframe = imagefile.guidata.get("destframe", None)
+                im = imagefile.guidata.get("img", None)
+                if frame:
+                    if im:
+                        frame.canvas.image = im
+                        frame.canvas.itemconfig(frame.canvas_image_id, image=im)
+                if destframe:
+                    if im:
+                        destframe.canvas.image = im
+                        destframe.canvas.itemconfig(destframe.canvas_image_id, image=im)
+
 
         def multithread():
             if self.gen_thread != None:
@@ -1272,10 +1305,8 @@ class Animate:
                 if obj.guidata.get("canvas", None):
                     obj.guidata["canvas"]['background'] = "red" # note this points to gridsquare canvas.
             if obj not in self.running: # Stop if not in "view" or in self.running
-                print("running")
                 return
             if not obj.frames: # No frames have been initialized. Or were removed.
-                print("not")
                 self.remove_animation(obj)
                 return
             if not obj.lazy_loading and len(obj.frames) != obj.framecount: # All frames generated doesnt match expected (only webm, dead?)
