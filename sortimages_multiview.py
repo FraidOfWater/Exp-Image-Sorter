@@ -919,8 +919,6 @@ class ThumbManager:
             if temp:
                 load_thumb(temp, load=True)
                 return
-            if self.fileManager.program_is_exiting:
-                return
             if not imagefile.id:
                 #Hash using name, size, mod time. Creates unique thumb name.
                 file_name1 = imagefile.path.replace('\\', '/').split('/')[-1]
@@ -1048,7 +1046,7 @@ class ThumbManager:
                 destframe.obj2.set(imagefile.truncated_filename)
         def gen_frames(imagefile): # session just calls this for displayedlist -> called only after gen_anim_data for all. Now this has framecounts.
             if imagefile.frames:
-                print("frames already exist")
+                #print("frames already exist")
                 return
             while not self.fileManager.program_is_exiting and self.fileManager.gui.concurrent_frames < self.fileManager.max_concurrent_frames:
                 # Clear frames just in case.
@@ -1062,7 +1060,7 @@ class ThumbManager:
                         fps = (reader.get_meta_data().get('fps', 24))
                         imagefile.delay = int(round((1 / fps)*1000))
                         if round(imagefile.file_size/1.048576/1000000,2) > 10:
-                            print(f"{imagefile.name} is too big for grid animation.")
+                            #print(f"{imagefile.name} is too big for grid animation.")
                             imagefile.framecount = 2 # to register as "animated"
                             if imagefile in self.fileManager.animation_queue:
                                 self.fileManager.animation_queue.remove(imagefile)
