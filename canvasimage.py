@@ -53,7 +53,11 @@ class CanvasImage:
         self.first = True           # Flag that turns off when the initial picture has been rendered.
         self.replace_await = False  # Flag tells whether we want to render a second better quality on top
         # Picture sizes
-        self.file_size = round(self.obj.file_size/1.048576/1000000,2) #file size in MB
+        try:
+            self.file_size = round(self.obj.file_size/1.048576/1000000,2) #file size in MB
+        except Exception as e:
+            print("ERROR IN CANVAIMAGE:", e)
+            self.file_size = round(1.5)
 
         "Gui stats"
         self.gui.name_ext_size.set(self.obj.name)
