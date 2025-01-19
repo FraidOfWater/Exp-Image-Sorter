@@ -49,32 +49,47 @@ This fork is a hobby, it adds new features and other tweaks, and removes some ot
 
 # How to run code #
 Download a compiled copy from releases.
- - Executable: Contains all dependencies.
- - Scripts: Install python, pip. Run install.bat, run start.bat.
+ - Executable:
+   
+        Contains all dependencies.
+ - Scripts:
+   
+       Install python, pip. Run install.bat, run start.bat.
 How to compile:
- - Executable with all dependencies (standalone) (Largest). You need to include at least following from vlc 64 bit. Folders: "plugins", files: "libvlc.dll", "libvlccore.dll". Run build.bat, files and folders in this directory.
- - Executable without vlc (You must have vlc 64 bit installed). No need to think about vlc. You must have vips-dev-x folder. (Vips windows binaries, "ALL" or "WEB" 64 bit.)
- - Script with all dependencies: Same as above. VLC folder and VIPS folder.
- - Script without vlc (Smallest): Same as above. VLC installed, VIPS folder.
- - (Note, you must run install.bat for script builds, you can then run by clicking on start.bat)
 
-   1. Downloading requirements
-            You need to install:
-             - python (newest, 3 and above) (coded on 3.12)
-             - pip (should come with python)
-             - vlc (64 bit, installer)
-            Then:
-             - run install.bat
-             - download vips windows binaries from github: file name: "vips-dev-w64-web-8.16.0.zip" or later. https://github.com/libvips/libvips/releases. There should be a section in releases, with a link saying "WINDOWS BINARIES", if you do not see one, look for older releases with available windows binaries. (-all also works)
-             - place vips: in the same folder as the .py files are in.
+      Vips windows binaries:
+            Can be found on github: https://github.com/libvips/libvips/releases
+            File name: vips-dev-w64-web-8.16.0.zip (or newer)
+            Place the whole folder into the program folder. This structure: SIME/vips/bin
+      VLC files (64-bit):
+            Can be found on the web: https://get.videolan.org/vlc/3.0.21/win64/vlc-3.0.21-win64.exe
+            File name: vlc-3.0.21-win64.exe (or newer)
+            Place following files and folders into the program folder.
+            "Plugins", libvlc.dll, libvlccore.dll.
+
+      To compile a standalone version (EXE):
+            Include vips windows binaries.
+            Include VLC files.
+            Run build.bat, executable will be in dist folder.
+
+      To compile executable without vlc:
+            Include vips windows binaries.
+            Install VLC 64-bit on your system.
+            Run build.bat, executable will be in dist folder.
+
+      To get the script working on your own:
+            Include vips windows binaries.
+            Install VLC 64-bit on your system or include the VLC files.
+            
+       - (Note, you must run install.bat for script builds, you can then run by clicking on start.bat)
       
-   2. Create Shortcut / Use shortcut
+ Create Shortcut / Use shortcut
       
             start.bat
                   cd %~dp0
                   python sortimages_multiview.py
                   pause
-   3. Note
+Note
 
             To edit and run the source files in VSC, you must open the FOLDER with "Open with code". Opening only sortimages_multiview.py will make VSC's terminal use \Users\user path, which will fail to run the program. You must run from the right environment, the program folder.
       
