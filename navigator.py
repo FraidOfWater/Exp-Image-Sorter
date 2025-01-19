@@ -30,6 +30,8 @@ class Navigator:
         #    return #### test
         self.window_focused = "GRID"
         self.displayedlist = self.gridmanager.displayedlist
+        if new == None:
+            return
         if self.old:
             self.default(self.old)
         if new:
