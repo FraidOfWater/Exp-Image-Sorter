@@ -523,7 +523,7 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
             sorted_label = tk.Label(left_column2, justify="left", bg="#03070b", fg="#6a858a", textvariable=self.images_sorted_strvar) # SORTED
             sorted_label.grid(row = 0, column = 0, sticky="W")
 
-            self.images_left_stats_strvar = tk.StringVar(value="Left: 1/100/100") # Assigned/Displayed/Imagelist
+            self.images_left_stats_strvar = tk.StringVar(value="Left: NaN/NaN/NaN") # Assigned/Displayed/Imagelist
             left_label = tk.Label(left_column2, justify="left", bg="#03070b", fg="#6a858a", textvariable=self.images_left_stats_strvar) # LISTS
             left_label.grid(row = 1, column = 0, sticky="W")
 
@@ -1094,11 +1094,14 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
             self.last_time = perf_counter()
     def test(self, obj):
         "Display image in viewer"
+        print("test")
         def close_old():
             if hasattr(self, "Image_frame"):
                 self.middlepane_frame.grid_forget()
                 self.Image_frame.canvas.unbind("<Configure>")
-                self.Image_frame.destroy()
+                print("test6")
+                self.Image_frame.destroy() # bug here for mp4.
+                print("test7")
 
                 self.Image_frame = None
                 del self.Image_frame
@@ -1108,8 +1111,9 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
         # This makes sure the initial view is set up correctly
         if self.middlepane_frame.winfo_width() != 1:
             self.middlepane_width = self.middlepane_frame.winfo_width()
-
+        print("test2")
         if self.dock_view.get(): # This handles the middlepane viewer. Runs, IF second window is closed.
+            print("test3")
             geometry = str(self.middlepane_width) + "x" + str(self.winfo_height())
             self.new = CanvasImage(self.middlepane_frame, geometry, obj, self)
             self.new.grid(row = 0, column = 0, sticky = "NSEW")
@@ -1120,7 +1124,9 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
             self.focused_on_secondwindow = True
 
             self.new.canvas.focus_set()
+            print("test4")
             close_old()
+            print("test5")
         else: # Standalone image viewer
             if not hasattr(self, 'second_window') or not self.second_window or not self.second_window.winfo_exists():
                 # No window exists, create one
@@ -1353,7 +1359,7 @@ class GridManager:
         # 3. display them in grid (placeholders).
         # 4. generate thumbnails for them. (Threaded)
         filelist = self.fileManager.imagelist
-        items = min(amount, len(filelist)-len(self.gridsquarelist)) # How many we want to load or can load.
+        items = min(amount, len(filelist)) # How many we want to load or can load.
         if items == 0:
             self.gui.load_more_b.configure(text="No More Images!",background="#DD3333")
             return
@@ -1373,7 +1379,8 @@ class GridManager:
         self.fileManager.timer.start()
         self.fileManager.thumbs.generate(generated) # This thread shouldnt be stopped at any time. Used to get info on frames and such that reload wont do.
         self.gui.images_left_stats_strvar.set(
-            f"Left: {len(self.assigned)}/{len(self.gridsquarelist)-len(self.assigned)-len(self.moved)}/{len(filelist)-len(self.assigned)-len(self.moved)}")
+            f"Left: {len(self.assigned)}/{len(self.gridsquarelist)-len(self.assigned)-len(self.moved)}/{len(filelist)}")
+        print(len(filelist), len(self.assigned), len(self.moved))
     def change_view(self, squares) -> None:
         "Remove all squares from grid, but add them back without unloading according how they should be ordered."
         # This is called when the view is called to avoid old frames in the new list from not being deleted
