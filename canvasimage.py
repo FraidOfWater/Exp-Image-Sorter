@@ -9,7 +9,7 @@ from PIL import Image, ImageTk
 
 import tkinter as tk
 from tkinter import ttk
-from vlc import PlaybackMode
+from vlc import PlaybackMode, State
 
 logger = logging.getLogger("Canvasimage")
 logger.setLevel(logging.ERROR)
@@ -41,6 +41,7 @@ class CanvasImage:
         self.timer = gui.fileManager.timer
         self.timer.start()
         self.time1 = perf_counter()
+        self.time11 = perf_counter()
         self.obj = imageobj
         self.gui = gui
         self.gui.frametimeinfo.set("")
@@ -172,6 +173,10 @@ class CanvasImage:
         "Handles videos"
         def video_print_data():
             try:
+                if self.gui.dock_view.get():
+                    self.gui.bind("<Configure>", resize_video)
+                elif hasattr(self.gui, "second_window"):
+                    self.gui.second_window.bind("<Configure>", resize_video)
                 if hasattr(self, "media"):
                     self.media.parse()
                     total_seconds = int(self.media.get_duration()/1000)
@@ -184,24 +189,38 @@ class CanvasImage:
                 pass # thread closed
         def resize_video(*args):
             "Canvas resizer"
-            if self.gui.middlepane_frame.winfo_width() == 1:
-                return
-            time2 = perf_counter()
-            if time2 - self.time1 > 0.05:
-                self.time1 = time2
-            else:
-                return
-            if not hasattr(self, "imwidth"):
-                return
+            #print("ran")
             try:
+                if perf_counter()-self.time11 < 0.1:
+                    #print("ingored")
+                    return
+                if self.gui.middlepane_frame.winfo_width() == 1:
+                    return
+                time2 = perf_counter()
+                if time2 - self.time1 > 0.09:
+                    self.time1 = time2
+                else:
+                    return
+                if not hasattr(self, "imwidth"):
+                    return
+            except:
+                pass
+
+            try:
+                if not hasattr(self, "canvas_height") or not hasattr(self, "imwidth") or not hasattr(self, "imheight"):
+                    return
                 if self.gui.dock_view.get():
+
+                    
                     new_width = self.gui.middlepane_frame.winfo_width()+2
                     aspect_ratio = self.imwidth / self.imheight
                     new_height = int(new_width / aspect_ratio)
                     if self.video_frame.winfo_width() == new_width or self.video_frame.winfo_height() == new_height:
                         return
                     self.video_frame.config(width=new_width, height=new_height)
-                    self.video_frame.grid(pady=((self.canvas_height - new_height) // 2), sticky="nsew")
+                    pady1 = (self.canvas_height - new_height) // 2
+                    if pady1 > 0:
+                        self.video_frame.grid(pady=pady1, sticky="nsew")
                 else:
                     new_width = self.gui.second_window.winfo_width()+2
                     aspect_ratio = self.imwidth / self.imheight
@@ -211,7 +230,7 @@ class CanvasImage:
                         return
                     self.video_frame.config(width=new_width, height=new_height)
                     self.video_frame.grid(pady=((self.canvas_height - new_height) // 2), sticky="nsew")
-            except:
+            except Exception as e:
                 pass
         path = self.obj.path
         # Create a VLC instance
@@ -250,10 +269,14 @@ class CanvasImage:
         self.media_list_player.set_playback_mode(PlaybackMode.loop)
         self.media_list_player.play()
 
-        if self.gui.dock_view.get():
-            self.canvas.after(100, lambda: self.gui.bind("<Configure>", resize_video))
-        elif hasattr(self.gui, "second_window"):
-            self.canvas.after(100, lambda: self.gui.second_window.bind("<Configure>", resize_video))
+        # Will cause a crash when resizing, then loading another mp4. must bind before, but first 100 ms of config calls should be ignored.
+        #if self.gui.dock_view.get():
+        #    self.canvas.after(100, lambda: self.gui.bind("<Configure>", resize_video))
+        #elif hasattr(self.gui, "second_window"):
+        #    self.canvas.after(100, lambda: self.gui.second_window.bind("<Configure>", resize_video))
+        #Seems to cause freeze relating to unload (multithread3) in sortimages...?
+        #Seems to relate to auto_load functionality. Doesnt like simultaneous accesses to the grid? add and remove at the same time?
+        #Not even related to auto_load...?
         Thread(target=video_print_data, daemon=True).start()
 
     "Static"
@@ -689,17 +712,30 @@ class CanvasImage:
         if hasattr(self, "player"):
             
             try:
+                print("u1")
                 self.video_frame.grid_forget()
-                self.player.stop()
+                print("u2")
+                print(self.player.get_state())
+                if self.player.get_state() in [State.Playing, State.Paused]:
+                    self.player.stop() # bug here
+                print("u3")
                 self.player.release()
+                print("u4")
                 self.video_frame_id = None
+                print("u5")
                 self.player = None
+                print("u6")
                 self.video_frame = None
+                print("u7")
                 self.media_list_player = None
+                print("u8")
                 self.media_list = None
+                print("u9")
                 self.media = None
+                print("u10")
                 #self.vlc_instance
                 del self.player
+                print("u11")
                 #self.gui.update()
                 #self.canvas.update()
                 #self.canvas.after(2)
@@ -708,20 +744,27 @@ class CanvasImage:
                 logger.debug("Error closing player", e)
 
         if hasattr(self, "frames"):
+            print("u12")
             for x in self.frames:
                 del x
             self.frames.clear()
             del self.frames
+            
         if hasattr(self, "frametimes"):
+            print("u13")
             for x in self.frametimes:
                 del x
             self.frametimes.clear()
             del self.frametimes
+            
         if hasattr(self, "imageid"):
+            print("u14")
             del self.imageid
         if hasattr(self, "container"):
+            print("u15")
             del self.container
         if hasattr(self, "image"):
+            print("u16")
             try:
                 self.image.close()
             except Exception as e:
@@ -729,6 +772,7 @@ class CanvasImage:
             finally:
                 del self.image
         if hasattr(self, "__pyramid"):
+            print("u17")
             try:
                 self.__pyramid[0].close()
             except Exception as e:
@@ -737,15 +781,19 @@ class CanvasImage:
                 self.__pyramid.clear()
                 del self.__pyramid
         if hasattr(self, "pyramid"):
+            print("u18")
             self.pyramid.clear()
             del self.pyramid
         if hasattr(self, "hbar"):
+            print("u19")
             self.hbar.destroy()
             del self.hbar
         if hasattr(self, "vbar"):
+            print("u20")
             self.vbar.destroy()
             del self.vbar
         if hasattr(self, "canvas"):
+            print("u21")
             self.canvas.unbind('<ButtonPress-1>')  # Unbind left mouse button press
             self.canvas.unbind('<ButtonRelease-1>')  # Unbind left mouse button release
             self.canvas.unbind('<B1-Motion>')  # Unbind left mouse button motion
@@ -770,8 +818,11 @@ class CanvasImage:
             del self.canvas_height
             del self.canvas_width
             del self.imscale
+        print("u22")
         del self
+        print("u25")
         collect()
+        print("u23")
         #objects = gc.get_objects()
 #
         ## Specify the file name
