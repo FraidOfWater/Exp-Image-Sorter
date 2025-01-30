@@ -533,7 +533,7 @@ class SortImages:
         gui.destination_viewer.get_paths()
 
         self.gui.images_left_stats_strvar.set(
-            f"Left: {len(gridmanager.assigned)}/{len(gridmanager.gridsquarelist)-len(gridmanager.assigned)-len(gridmanager.moved)}/{len(self.imagelist)-len(gridmanager.assigned)-len(gridmanager.moved)}")
+            f"Left: {len(gridmanager.assigned)}/{len(gridmanager.gridsquarelist)-len(gridmanager.assigned)-len(gridmanager.moved)}/{len(self.imagelist)}")
  
         gui.images_sorted_strvar.set(f"Sorted: {gui.images_sorted.get()}")
     
@@ -571,7 +571,7 @@ class SortImages:
                 gui.gridmanager.assigned.remove(x)
                 gui.gridmanager.moved.append(x)
                 self.gui.images_left_stats_strvar.set(
-                    f"Left: {len(gridmanager.assigned)}/{len(gridmanager.gridsquarelist)-len(gridmanager.assigned)-len(gridmanager.moved)}/{len(self.imagelist)-len(gridmanager.assigned)-len(gridmanager.moved)}")
+                    f"Left: {len(gridmanager.assigned)}/{len(gridmanager.gridsquarelist)-len(gridmanager.assigned)-len(gridmanager.moved)}/{len(self.imagelist)}")
                 gui.images_sorted.set(gui.images_sorted.get()+1)
                 gui.images_sorted_strvar.set(f"Sorted: {gui.images_sorted.get()}")
                 successfull.append(x)
@@ -708,13 +708,14 @@ class SortImages:
             if gui.auto_load and gui.current_view.get() == "Show Unassigned": 
                 if gui.squares_per_page_intvar.get() > len(gridmanager.displayedlist):
                     to_load = gui.squares_per_page_intvar.get() - len(gridmanager.displayedlist)
-                    left = len(self.imagelist)-len(gridmanager.gridsquarelist)
+                    left = len(self.imagelist)
                     items = min(to_load, left)
-                    gridmanager.load_more(amount=items)
+                    print("load", len(self.imagelist), len(gridmanager.gridsquarelist), to_load, left, items)
+                    gridmanager.load_more(amount=items) # the unload thread might access stuff simultneous to this one.
 
             "Update stat tracker"
             self.gui.images_left_stats_strvar.set(
-                f"Left: {len(gridmanager.assigned)}/{len(gridmanager.gridsquarelist)-len(gridmanager.assigned)-len(gridmanager.moved)}/{len(self.imagelist)-len(gridmanager.assigned)-len(gridmanager.moved)}")
+                f"Left: {len(gridmanager.assigned)}/{len(gridmanager.gridsquarelist)-len(gridmanager.assigned)-len(gridmanager.moved)}/{len(self.imagelist)}")
                 
 
     def setup(self, dest): # scan the destination
@@ -784,7 +785,7 @@ class SortImages:
             gui.destination_entry_field.insert(0, "ERROR INVALID PATH")
 
     def walk(self, src):
-        supported_formats = {"png", "gif", "jpg", ".peg", "bmp", "pcx", "tiff", "webp", "psd", "jfif", "mp4", "webm"}
+        supported_formats = {"png", "gif", "jpg", "jpeg", "bmp", "pcx", "tiff", "webp", "psd", "jfif", "mp4", "webm"}
         animation_support = {"gif", "webp", "mp4", "webm"} # For clarity
 
         for root, dirs, files in os.walk(src, topdown=True):
@@ -856,8 +857,10 @@ class ThumbManager:
         mem = self.mem
         gui = self.gui
         def queue_trail():
+            
             fileManager = self.fileManager
             animation_queue = fileManager.animation_queue
+            print("test", len(animation_queue))
             temp = reversed(animation_queue)
             for x in temp:
                 if x.guidata.get("frame", None) or x.guidata.get("destframe", None):
@@ -1187,6 +1190,13 @@ class ThumbManager:
                 try:
                     if not queue:
                         max_workers = max(1,self.threads*2)
+
+                        with ThreadPoolExecutor(max_workers=max_workers) as executor: # NAMES
+                            executor.map(gen_name, gen_truncated_names)
+
+                        gui.manage_lines(f"Names shortened in: {self.fileManager.timer.stop()}")
+                        self.fileManager.timer.start()
+
                         with ThreadPoolExecutor(max_workers=max_workers) as executor: # THUMBS
                             executor.map(gen_thumb, static)
 
@@ -1194,11 +1204,7 @@ class ThumbManager:
                         gui.manage_lines(f"Private Line: {mem}")
                         self.fileManager.timer.start()
         
-                        with ThreadPoolExecutor(max_workers=max_workers) as executor: # NAMES
-                            executor.map(gen_name, gen_truncated_names)
-
-                        gui.manage_lines(f"Names generated in: {self.fileManager.timer.stop()}")
-                        self.fileManager.timer.start()
+                        
 
                         max_workers = max(1,self.threads)
                         with ThreadPoolExecutor(max_workers=max_workers) as executor: # FRAMES
@@ -1225,16 +1231,20 @@ class ThumbManager:
 
     def unload(self, gridsquares, dest=False): # thread? ### need thread because unload is very slow for 1000 pics.
         gui = self.gui
-        def multithread():
+        def multithread3():
             try:
                 max_workers = max(1,self.threads*2)
+                print("animated")
                 with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                   
                    executor.map(unload_animated, gridsquares)
                 max_workers = max(1,self.threads*2)
+                print("static")
                 with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                   executor.map(unload_static, gridsquares)              
-
-                self.generate(self.fileManager.animation_queue, queue=True)
+                   executor.map(unload_static, gridsquares)    
+                print("gen")          
+                if self.fileManager.animation_queue:
+                    self.generate(self.fileManager.animation_queue, queue=True)
             except Exception as e:
                 print("Error unloading thumbs and frames", e)
             finally:
@@ -1242,22 +1252,29 @@ class ThumbManager:
                 gui.manage_lines(f"Unloaded in: {self.fileManager.timer.stop()}")
 
         def unload_static(gridsquare):
-            if gridsquare in gui.gridmanager.displayedset: # needed?
-                return
             if dest == False:
-                gridsquare.canvas.itemconfig(gridsquare.canvas_image_id, image=None)
-                gridsquare.canvas.image = None
-
+                canvas = gridsquare.obj.guidata.get("canvas", None)
+                if canvas:
+                    print("next4")
+                    try:
+                        if hasattr(gridsquare, "canvas") and hasattr(gridsquare, "canvas_image_id"):
+                            print("next5")
+                            #gridsquare.canvas.itemconfig(gridsquare.canvas_image_id, image=None)
+                            print("next6")
+                            gridsquare.canvas.image = None
+                    except Exception as e:
+                        print(e)
+            print("beyond dest")
             frame = gridsquare.obj.guidata.get("frame", None) # remove frame  from guidata.
+            print("beyond dest1")
             destframe = gridsquare.obj.guidata.get("destframe", None)
-
+            print("beyond dest2")
+            
             if not frame and not destframe:
                 gridsquare.obj.guidata['img'] = None
+            print("done")
 
         def unload_animated(gridsquare):
-            if gridsquare in gui.gridmanager.displayedset: # needed ?
-                return
-
             if gridsquare.type == "GRID":
                 gridsquare.obj.guidata["frame"] = None
             elif gridsquare.type == "DEST":
@@ -1273,7 +1290,7 @@ class ThumbManager:
                 
         
         self.fileManager.timer.start()
-        new_thread = Thread(target=multithread, daemon=True)
+        new_thread = Thread(target=multithread3, daemon=True)
         new_thread.start()
 
 class Animate:
