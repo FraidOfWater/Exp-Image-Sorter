@@ -1076,7 +1076,7 @@ class ThumbManager:
                                 imagefile.frames.clear()
                                 imagefile.framecount = 0
                                 if imagefile not in self.fileManager.animation_queue:
-                                    self.fileManager.animation_queue.append(imagefile)
+                                    
                                     
                                     frame = imagefile.guidata.get("frame", None)
                                     destframe = imagefile.guidata.get("destframe", None)
@@ -1090,6 +1090,7 @@ class ThumbManager:
                                             destframe.canvas.image = im
                                             destframe.canvas.itemconfig(destframe.canvas_image_id, image=im)
                                 return
+                        
                             if self.fileManager.program_is_exiting:
                                 return
                             image = Image.fromarray(frame)
@@ -1101,6 +1102,7 @@ class ThumbManager:
                             if f:
                                 self.animate.add_animation(imagefile)
                                 f = False
+                        self.fileManager.animation_queue.append(imagefile)
                         imagefile.lazy_loading = False
                         if imagefile in self.fileManager.animation_queue:
                             self.fileManager.animation_queue.remove(imagefile)
@@ -1121,7 +1123,7 @@ class ThumbManager:
                                 imagefile.frames.clear()
                                 imagefile.framecount = 0
                                 if imagefile not in self.fileManager.animation_queue:
-                                    self.fileManager.animation_queue.append(imagefile)
+                                    
                                     frame = imagefile.guidata.get("frame", None)
                                     destframe = imagefile.guidata.get("destframe", None)
                                     im = imagefile.guidata.get("img", None)
@@ -1141,6 +1143,7 @@ class ThumbManager:
                             frame_pil.thumbnail((256,256), Image.Resampling.LANCZOS)
                             frame_tk = ImageTk.PhotoImage(frame_pil)
                             temp.append(frame_tk)
+                        self.fileManager.animation_queue.append(imagefile)
                         if len(temp) == 1:
                             if imagefile in self.fileManager.animation_queue:
                                 self.fileManager.animation_queue.remove(imagefile)
