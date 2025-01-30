@@ -277,7 +277,7 @@ class CanvasImage:
         #Seems to cause freeze relating to unload (multithread3) in sortimages...?
         #Seems to relate to auto_load functionality. Doesnt like simultaneous accesses to the grid? add and remove at the same time?
         #Not even related to auto_load...?
-        Thread(target=video_print_data, daemon=True).start()
+        #Thread(target=video_print_data, daemon=True).start()
 
     "Static"
     def handle_static(self):
@@ -715,9 +715,7 @@ class CanvasImage:
                 print("u1")
                 self.video_frame.grid_forget()
                 print("u2")
-                print(self.player.get_state())
-                if self.player.get_state() in [State.Playing, State.Paused]:
-                    self.player.stop() # bug here
+                Thread(target=lambda: self.player.stop(), daemon=True).start() # bug here
                 print("u3")
                 self.player.release()
                 print("u4")
