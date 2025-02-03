@@ -203,10 +203,12 @@ class Navigator:
             return
         if frame.obj.dest != "":
             alt = frame.obj.dest_color
-            frame.configure(highlightcolor = alt,  highlightbackground = alt) # Trying to access destroyed destsquare? # If dest is closed, remove self.old if any frame was there.
-            frame.canvas.configure(bg=alt, highlightcolor=alt, highlightbackground = alt)
-            frame.c.configure(style="Theme_square1.TCheckbutton")
-            frame.cf.configure(bg=self.gui.square_text_box_colour)
+            exists = frame.obj.guidata.get("destframe", None)
+            if exists:
+                frame.configure(highlightcolor = alt,  highlightbackground = alt) # Trying to access destroyed destsquare? # If dest is closed, remove self.old if any frame was there.
+                frame.canvas.configure(bg=alt, highlightcolor=alt, highlightbackground = alt)
+                frame.c.configure(style="Theme_square1.TCheckbutton")
+                frame.cf.configure(bg=self.gui.square_text_box_colour)
         else:
             frame.configure(highlightcolor = self.gui.square_default,  highlightbackground = self.gui.square_default)
             frame.canvas.configure(bg=self.gui.square_default, highlightcolor=self.gui.square_default, highlightbackground = self.gui.square_default)
