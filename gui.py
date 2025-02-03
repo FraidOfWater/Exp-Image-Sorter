@@ -24,6 +24,8 @@ from tktooltip import ToolTip
 from canvasimage import CanvasImage
 from destination_viewer import Destination_Viewer
 
+import objgraph
+
 logger = logging.getLogger("GUI")
 logger.setLevel(logging.WARNING)  # Set to the lowest level you want to handle
 handler = logging.StreamHandler()
@@ -164,6 +166,13 @@ class GUIManager(tk.Tk): #Main window
             # Return the RSS (Resident Set Size) in bytes
             return (memory_info.rss)
         self.current_ram_strvar.set(f"RAM: {get_memory_usage() / (1024 ** 2):.2f} MB")
+        print("")
+        print("")
+        print("")
+        objgraph.show_growth()
+        #print(len(objgraph.get_leaking_objects()))
+
+
 
         "Anim: displayedlist with frames/displayedlist with framecount/(queue)"
         temp = [x for x in self.gridmanager.displayedlist if x.obj.frametimes]
@@ -976,7 +985,6 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
         self.fileManager.navigator.view_change()   
     def change_theme(self, theme_name):
         def set_vals(dict):
-            print("test")
             # Text
             self.button_text_colour = dict["button_text_colour"]
             self.button_text_colour_when_pressed = dict["button_text_colour_when_pressed"]
@@ -1094,26 +1102,22 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
             self.last_time = perf_counter()
     def test(self, obj):
         "Display image in viewer"
-        print("test")
         def close_old():
             if hasattr(self, "Image_frame"):
                 self.middlepane_frame.grid_forget()
                 self.Image_frame.canvas.unbind("<Configure>")
-                print("test6")
                 self.Image_frame.destroy() # bug here for mp4.
-                print("test7")
 
                 self.Image_frame = None
                 del self.Image_frame
                 collect()
-            self.Image_frame = self.new
+            
 
         # This makes sure the initial view is set up correctly
         if self.middlepane_frame.winfo_width() != 1:
             self.middlepane_width = self.middlepane_frame.winfo_width()
-        print("test2")
+        close_old()
         if self.dock_view.get(): # This handles the middlepane viewer. Runs, IF second window is closed.
-            print("test3")
             geometry = str(self.middlepane_width) + "x" + str(self.winfo_height())
             self.new = CanvasImage(self.middlepane_frame, geometry, obj, self)
             self.new.grid(row = 0, column = 0, sticky = "NSEW")
@@ -1124,9 +1128,7 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
             self.focused_on_secondwindow = True
 
             self.new.canvas.focus_set()
-            print("test4")
-            close_old()
-            print("test5")
+            
         else: # Standalone image viewer
             if not hasattr(self, 'second_window') or not self.second_window or not self.second_window.winfo_exists():
                 # No window exists, create one
@@ -1158,6 +1160,7 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                 self.second_window.after(0, lambda: self.new.canvas.focus_set())
 
             close_old() 
+        self.Image_frame = self.new
     
     "Exit function" # How we exit the program and close windows
     def closeprogram(self):
@@ -1380,7 +1383,6 @@ class GridManager:
         self.fileManager.thumbs.generate(generated) # This thread shouldnt be stopped at any time. Used to get info on frames and such that reload wont do.
         self.gui.images_left_stats_strvar.set(
             f"Left: {len(self.assigned)}/{len(self.gridsquarelist)-len(self.assigned)-len(self.moved)}/{len(filelist)}")
-        print(len(filelist), len(self.assigned), len(self.moved))
     def change_view(self, squares) -> None:
         "Remove all squares from grid, but add them back without unloading according how they should be ordered."
         # This is called when the view is called to avoid old frames in the new list from not being deleted
