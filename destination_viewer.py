@@ -129,7 +129,6 @@ class Destination_Viewer():
                     unload_list.append(gridsquare)
         if unload:
             self.thumbs.unload(unload_list)
-            print("Unloading:", len(unload_list))
 
     def makedestsquare(self, imageobj):
 
