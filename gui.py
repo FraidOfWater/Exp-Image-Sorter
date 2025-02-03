@@ -24,7 +24,7 @@ from tktooltip import ToolTip
 from canvasimage import CanvasImage
 from destination_viewer import Destination_Viewer
 
-import objgraph
+#import objgraph
 
 logger = logging.getLogger("GUI")
 logger.setLevel(logging.WARNING)  # Set to the lowest level you want to handle
@@ -166,10 +166,10 @@ class GUIManager(tk.Tk): #Main window
             # Return the RSS (Resident Set Size) in bytes
             return (memory_info.rss)
         self.current_ram_strvar.set(f"RAM: {get_memory_usage() / (1024 ** 2):.2f} MB")
-        print("")
-        print("")
-        print("")
-        objgraph.show_growth()
+        #print("")
+        #print("")
+        #print("")
+        #objgraph.show_growth()
         #print(len(objgraph.get_leaking_objects()))
 
 
