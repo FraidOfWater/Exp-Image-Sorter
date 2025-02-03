@@ -1,5 +1,9 @@
 # Simple-Image-Sorter Fork
-This is a fork of Simple-Image-Sorter by Legendsmith https://github.com/Legendsmith/Simple-Image-Sorter. If author reads this, feel free to merge this?
+This is a fork of Simple-Image-Sorter by Legendsmith https://github.com/Legendsmith/Simple-Image-Sorter. ~~If author reads this, feel free to merge this?~~ 
+
+To do:
+1. Do some testing.
+2. Offer final compiled version of this fork to author's releases page.
 
 # Sorts images into destinations #
 This fork is a hobby, it adds new features and other tweaks, and removes some others. Light experimenting with threading and optimization. Tried to make it very customizable! Now supports animations!
