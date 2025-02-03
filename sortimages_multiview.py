@@ -58,7 +58,7 @@ logger.addHandler(handler)
 # To fix frame limiter, figure out framecount first and choose to allow loading upon that.
 # Sometimes frames animate on 1 or two frames.
 # Some kind of memory leak exists when sorting for a while. 
-# Seems like canvasimage destroy() breaks or something. Large delays. memory increase.
+# Seems like canvasimage destroy() breaks or something. Large delays. memory increase. Fixed?
 
 " Known issues "
 # Phantom shutdowns every once in a while. Reason unclear. (Was it the threads not shutting down bug? Sometimes I got thread unsynch thing. Not in sequence and such. Out of sequence)
@@ -1213,7 +1213,7 @@ class ThumbManager:
                             executor.map(gen_thumb, static)
 
                         gui.manage_lines(f"Thumbnails generated in: {self.fileManager.timer.stop()}")
-                        gui.manage_lines(f"Private Line: {mem}")
+                        #gui.manage_lines(f"Private Line: {mem}")
                         self.fileManager.timer.start()
         
                         
