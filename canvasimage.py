@@ -725,11 +725,9 @@ class CanvasImage:
             
             try:
                 self.video_frame.grid_forget()
-                print("u2")
                 aa = Thread(target=stop_player, args=(self.player,), daemon=True) # bug here
                 aa.start()
-                aa.join(timeout=1)
-                print("u3")
+                aa.join(timeout=1) ### bug here?
                 #self.player.release()
                 self.video_frame_id = None
                 self.player = None
