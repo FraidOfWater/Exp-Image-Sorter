@@ -60,7 +60,7 @@ class GUIManager(tk.Tk): #Main window
         self.fields = []
         "Debugging / Stats"
         if True: # move most to their dedicated spots next to their buttons.
-            self.do_anim_loading_colors = True
+            self.do_anim_loading_colors = False
             self.do_debug_terminal = True
 
             self.current_ram_strvar = tk.StringVar(value="RAM: 0 MB") # RAM: 95.34 MB
