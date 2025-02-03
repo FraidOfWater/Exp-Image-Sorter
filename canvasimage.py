@@ -42,6 +42,7 @@ class CanvasImage:
         self.timer.start()
         self.time1 = perf_counter()
         self.time11 = perf_counter()
+        self.imageid = None
         self.obj = imageobj
         self.gui = gui
         self.gui.frametimeinfo.set("")
@@ -534,6 +535,8 @@ class CanvasImage:
                             self.canvas.imagetk = imagetk
 
                         else:
+                            if self.imageid:
+                                self.canvas.delete(self.imageid)
                             image = self.__pyramid[(max(0, self.__curr_img))].crop(  # crop current img from pyramid
                                             (int(x1 / self.__scale), int(y1 / self.__scale),
                                              int(x2 / self.__scale), int(y2 / self.__scale)))
@@ -707,33 +710,35 @@ class CanvasImage:
             # Update the position of the image container
             self.canvas.coords(self.container, (x_offset), (y_offset), (x_offset + scaled_image_width), (y_offset + scaled_image_height))
     def destroy(self):
+        def stop_player(player):
+            try:
+                player.stop()
+            except Exception as e:
+                print("destroying error:", e)
+            try:
+                player.release()
+            except Exception as e:
+                print("destroying error:", e)
         "ImageFrame destructor"
         # Video
         if hasattr(self, "player"):
             
             try:
-                print("u1")
                 self.video_frame.grid_forget()
                 print("u2")
-                Thread(target=lambda: self.player.stop(), daemon=True).start() # bug here
+                aa = Thread(target=stop_player, args=(self.player,), daemon=True) # bug here
+                aa.start()
+                aa.join(timeout=1)
                 print("u3")
-                self.player.release()
-                print("u4")
+                #self.player.release()
                 self.video_frame_id = None
-                print("u5")
                 self.player = None
-                print("u6")
                 self.video_frame = None
-                print("u7")
                 self.media_list_player = None
-                print("u8")
                 self.media_list = None
-                print("u9")
                 self.media = None
-                print("u10")
                 #self.vlc_instance
                 del self.player
-                print("u11")
                 #self.gui.update()
                 #self.canvas.update()
                 #self.canvas.after(2)
@@ -742,27 +747,22 @@ class CanvasImage:
                 logger.debug("Error closing player", e)
 
         if hasattr(self, "frames"):
-            print("u12")
             for x in self.frames:
                 del x
             self.frames.clear()
             del self.frames
             
         if hasattr(self, "frametimes"):
-            print("u13")
             for x in self.frametimes:
                 del x
             self.frametimes.clear()
             del self.frametimes
             
         if hasattr(self, "imageid"):
-            print("u14")
             del self.imageid
         if hasattr(self, "container"):
-            print("u15")
             del self.container
         if hasattr(self, "image"):
-            print("u16")
             try:
                 self.image.close()
             except Exception as e:
@@ -770,7 +770,6 @@ class CanvasImage:
             finally:
                 del self.image
         if hasattr(self, "__pyramid"):
-            print("u17")
             try:
                 self.__pyramid[0].close()
             except Exception as e:
@@ -779,19 +778,15 @@ class CanvasImage:
                 self.__pyramid.clear()
                 del self.__pyramid
         if hasattr(self, "pyramid"):
-            print("u18")
             self.pyramid.clear()
             del self.pyramid
         if hasattr(self, "hbar"):
-            print("u19")
             self.hbar.destroy()
             del self.hbar
         if hasattr(self, "vbar"):
-            print("u20")
             self.vbar.destroy()
             del self.vbar
         if hasattr(self, "canvas"):
-            print("u21")
             self.canvas.unbind('<ButtonPress-1>')  # Unbind left mouse button press
             self.canvas.unbind('<ButtonRelease-1>')  # Unbind left mouse button release
             self.canvas.unbind('<B1-Motion>')  # Unbind left mouse button motion
@@ -816,11 +811,9 @@ class CanvasImage:
             del self.canvas_height
             del self.canvas_width
             del self.imscale
-        print("u22")
         del self
-        print("u25")
         collect()
-        print("u23")
+        # Garbage collection INFO
         #objects = gc.get_objects()
 #
         ## Specify the file name
