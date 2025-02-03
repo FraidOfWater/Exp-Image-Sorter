@@ -2,8 +2,8 @@
 This is a fork of Simple-Image-Sorter by Legendsmith https://github.com/Legendsmith/Simple-Image-Sorter. ~~If author reads this, feel free to merge this?~~ 
 
 To do:
-1. Do some testing.
-2. Offer final compiled version of this fork to author's releases page.
+1. Do some testing. (My fork is a bit bloated and not as polished as author's original. I will probably never get the zooming for animated content right, so I think I'll disable the mousewheel on this animated content    for the final release, as now it's doing some "undefined" behaviour.)
+2. Offer final compiled version of this fork to author's releases page (A link to this fork, or copy of this build in releases? Ask author). I don't think trying to push this would be smart anymore, as perhaps there is too many changes to original, and my commits are "Updated gui.py", 300 times.
 
 # Sorts images into destinations #
 This fork is a hobby, it adds new features and other tweaks, and removes some others. Light experimenting with threading and optimization. Tried to make it very customizable! Now supports animations!
