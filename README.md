@@ -10,7 +10,7 @@ About releasing:
       It would be cool to have a singular, compiled version of this fork released on the authors original releases page.
 
             I think this release should include each version separately for ease of navigation: 
-            sortimages-singleview, multiview and QOL (with a download in authors page, and a link to "external" source code, here)
+            sortimages-singleview, -multiview and -QOL (with a download in authors page, and a link to "external" source code, here)
 
             Here we should also compile a new version of original multiview, (latest pyvips and use latest source code)
 
