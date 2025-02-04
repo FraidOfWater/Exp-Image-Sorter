@@ -2,11 +2,28 @@
 This is a fork of Simple-Image-Sorter by Legendsmith https://github.com/Legendsmith/Simple-Image-Sorter. ~~If author reads this, feel free to merge this?~~ 
 
 To do:
-1. Do some testing. (My fork is a bit bloated and not as polished as author's original. I will probably never get the zooming for animated content right, so I think I'll disable the mousewheel on this animated content    for the final release, as now it's doing some "undefined" behaviour.)
-2. Offer final compiled version of this fork to author's releases page (A link to this fork, or copy of this build in releases? Ask author). I don't think trying to push this would be smart anymore, as perhaps there is too many changes to original, and my commits are "Updated gui.py", 300 times.
+
+      Do some testing.
+      Do some polish. (Disable scroll for canvasimage for animated)
+About releasing: 
+
+      It would be cool to have a singular, compiled version of this fork released on the authors original releases page.
+
+            I think this release should include each version separately for ease of navigation: 
+            sortimages-singleview, multiview and QOL (with a download in authors page, and a link to "external" source code, here)
+
+            Here we should also compile a new version of original multiview, (latest pyvips and use latest source code)
+
+      I should ask author about all this when I come to it first.
+
+On pushes upstream:
+
+      I fear pushing upstream. I rewrote so much on my way, but I'll look into it.
+      Maybe this should be moved as a new branch of author's original instead?
 
 # Sorts images into destinations #
 This fork is a hobby, it adds new features and other tweaks, and removes some others. Light experimenting with threading and optimization. Tried to make it very customizable! Now supports animations!
+This project is coming to an end as most features have been completed, and I wish to avoid further bloat.
 
 # Changelog: #
 
@@ -37,7 +54,7 @@ This fork is a hobby, it adds new features and other tweaks, and removes some ot
     Buffering: Buffers large images to reduce latency; configurable in Prefs.json.
     Memory limit: Due to memory requirements of animations, limit number of frames loaded to memory.
     Animation queue: Loads animations as the memory limit allows.
-    Removed: Dupechecking
+    Removed: Dupechecking (It confused me, haha!)
 
       IMG-VIEWER
 
