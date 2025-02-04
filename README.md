@@ -8,7 +8,7 @@ To do:
       Change this README to a GUIDE on all the features, much like author's version.
 About releasing: 
 
-      It would be cool to have a singular, compiled version of this fork released on the authors original releases page.
+      It would be cool to have a singular, compiled version of this fork released on the authors original releases page for more people to be able to find it.
 
             I think this release should include each version separately for ease of navigation: 
             sortimages-singleview, -multiview and -QOL (with a download in authors page, and a link to "external" source code, here)
