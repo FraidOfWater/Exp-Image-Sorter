@@ -5,6 +5,7 @@ To do:
 
       Do some testing.
       Do some polish. (Disable scroll for canvasimage for animated)
+      Change this README to a GUIDE on all the features, much like author's version.
 About releasing: 
 
       It would be cool to have a singular, compiled version of this fork released on the authors original releases page.
