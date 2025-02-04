@@ -1,33 +1,14 @@
-# Simple-Image-Sorter Fork
-This is a fork of Simple-Image-Sorter by Legendsmith https://github.com/Legendsmith/Simple-Image-Sorter. ~~If author reads this, feel free to merge this?~~ 
+## Simple-Image-Sorter Experimental
+Description:
+- Helps organize imagesets by sorting images into folders. This fork builds on the original by adding various features (see changelog).
 
-To do:
+Scenario:
+- Are you sorting images to specific folders via windows file-manager? Well no more, this program lets you preview images, animations and videos, and move them to preset folders using only your keyboard.
 
-      Do some testing.
-      Do some polish. (Disable scroll for canvasimage for animated)
-      Change this README to a GUIDE on all the features, much like author's version.
-About releasing: 
 
-      It would be cool to have a singular, compiled version of this fork released on the authors original releases page for more people to be able to find it.
 
-            I think this release should include each version separately for ease of navigation: 
-            sortimages-singleview, -multiview and -QOL (with a download in authors page, and a link to "external" source code, here)
 
-            Here we should also compile a new version of original multiview, (latest pyvips and use latest source code)
-
-      I should ask author about all this when I come to it first.
-
-On pushes upstream:
-
-      I fear pushing upstream. I rewrote so much on my way, perhaps it is best as a separate fork altogether.
-
-Considerations:
-
-      This fork removes dupechecking and may not support linux inputs.
-
-# Sorts images into destinations #
-This fork is a hobby, it adds new features and other tweaks, and removes some others. Light experimenting with threading and optimization. Tried to make it very customizable! Now supports animations!
-This project is coming to an end as most features have been completed, and I wish to avoid further bloat.
+This is a fork of Simple-Image-Sorter by Legendsmith https://github.com/Legendsmith/Simple-Image-Sorter. Code from this project may freely be added upstream.
 
 # Changelog: #
 
@@ -66,27 +47,24 @@ This project is coming to an end as most features have been completed, and I wis
     Centering Options: Customize centering behavior. (untested)
     Free Zooming: Zoom functionality no longer requires hovering over the image.
 
-# Warnings #
+# Warnings & Other info #
 
     Use tools like ANTIDUPL to remove duplicates.
     No guarantees of functionality; backup images before use. Largely untested for now.
     GIFs, WebPs, webm and mp4 do not support zooming due to implementation complexity.
 
-# How to run code #
-Download a compiled copy from releases.
- - Executable:
-   
-        Contains all dependencies.
- - Scripts:
-   
-       Install python, pip. Run install.bat, run start.bat.
-How to compile:
+How do I run it?
+- Download a compiled copy from releases. There are two versions: 1. Executable, 2. Script.
+- The executable acts as a standalone and you don't need anything else!
+- The script requires you to install python (latest), run install.bat (install dependencies) and to run start.bat.
 
-      Vips windows binaries:
+How do I compile from source?
+
+- Vips windows binaries:
             Can be found on github: https://github.com/libvips/libvips/releases
             File name: vips-dev-w64-web-8.16.0.zip (or newer)
             Place the whole folder into the program folder. This structure: SIME/vips/bin
-      VLC files (64-bit):
+- VLC files (64-bit):
             Can be found on the web: https://get.videolan.org/vlc/3.0.21/win64/vlc-3.0.21-win64.exe
             File name: vlc-3.0.21-win64.exe (or newer)
             Place following files and folders into the program folder.
@@ -103,20 +81,22 @@ How to compile:
             Run build.bat, executable will be in dist folder.
 
       To get the script working on your own:
+            Run install.bat
             Include vips windows binaries.
             Install VLC 64-bit on your system or include the VLC files.
-            
-       - (Note, you must run install.bat for script builds, you can then run by clicking on start.bat)
-      
- Create Shortcut / Use shortcut
-      
-            start.bat
-                  cd %~dp0
-                  python sortimages_multiview.py
-                  pause
-Note
 
-            To edit and run the source files in VSC, you must open the FOLDER with "Open with code". Opening only sortimages_multiview.py will make VSC's terminal use \Users\user path, which will fail to run the program. You must run from the right environment, the program folder.
-      
+To do:
+
+      Do some testing.
+      Do some polish. Ensure stability
+      Change this README to a GUIDE on all the features, much like author's version.
+
+On pushes upstream:
+
+      I fear pushing upstream. I rewrote so much on my way, perhaps it is best as a separate fork altogether.
+
+Considerations:
+
+      This fork removes dupechecking and may not support linux inputs.
       
 End of file congratz!
