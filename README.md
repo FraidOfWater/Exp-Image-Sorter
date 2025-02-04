@@ -19,9 +19,7 @@ About releasing:
 
 On pushes upstream:
 
-      I fear pushing upstream. I rewrote so much on my way, but I'll look into it.
-      Maybe this should be moved as a new branch of author's original instead?
-      Or perhaps it is best as a separate fork altogether.
+      I fear pushing upstream. I rewrote so much on my way, perhaps it is best as a separate fork altogether.
 
 Considerations:
 
