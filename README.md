@@ -23,6 +23,10 @@ On pushes upstream:
       Maybe this should be moved as a new branch of author's original instead?
       Or perhaps it is best as a separate fork altogether.
 
+Considerations:
+
+      This fork removes dupechecking and may not support linux inputs.
+
 # Sorts images into destinations #
 This fork is a hobby, it adds new features and other tweaks, and removes some others. Light experimenting with threading and optimization. Tried to make it very customizable! Now supports animations!
 This project is coming to an end as most features have been completed, and I wish to avoid further bloat.
