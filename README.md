@@ -41,12 +41,6 @@ This is a fork of Simple-Image-Sorter by Legendsmith https://github.com/Legendsm
     Animation queue: Loads animations as the memory limit allows.
     Removed: Dupechecking (It confused me, haha!)
 
-      IMG-VIEWER
-
-    Auto Scaling and Centering: Images automatically scale and center within the viewer.
-    Centering Options: Customize centering behavior. (untested)
-    Free Zooming: Zoom functionality no longer requires hovering over the image.
-
 # Warnings & Other info #
 
     Use tools like ANTIDUPL to remove duplicates.
