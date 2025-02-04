@@ -12,7 +12,7 @@ This is a fork of Simple-Image-Sorter by Legendsmith https://github.com/Legendsm
 
 # Changelog: #
 
-      GUI
+      FEATURES
 
     Theme Customization: Main theme is now "Midnight Blue"; customize using hex codes; themes.json. (Can also add your own, themes.json is parsed on each run, and themes added to options)
     Animation support: Added support for .gif, .webp, .webm and .mp4.
@@ -31,7 +31,7 @@ This is a fork of Simple-Image-Sorter by Legendsmith https://github.com/Legendsm
     Window Position Saving: Find it just how you left it.
     Scrollbar Override: Option to disable the white scrollbar.
 
-      CORE
+      PERFORMANCE
 
     Image Header Hashing: Faster image loading by reading headers instead of full binary data.
     Overwrite Safeguards: Prevents overwriting locked images or those assigned to others.
