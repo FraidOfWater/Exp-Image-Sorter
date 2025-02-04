@@ -110,7 +110,7 @@ class CanvasImage:
             self.file_type = self.file_type[1]
             self.imwidth, self.imheight = self.obj.dimensions
             self.handle_video()
-            self.binds()
+            self.binds(animated=True)
             return
 
         """Opening the image""" #fix
@@ -151,6 +151,7 @@ class CanvasImage:
                 self.pyramid_ready = Event()
                 self.first_rendered = Event()
                 self.handle_static()
+            self.binds(animated=True)
         # Handle static images
         else:
             self.__pyramid = [self.smaller()] if self.__huge else [Image.open(self.path)]
@@ -158,17 +159,18 @@ class CanvasImage:
             self.pyramid_ready = Event()
             self.first_rendered = Event()
             self.handle_static()
-        self.binds()
+            self.binds(animated=False)
         self.canvas.bind('<Configure>', lambda event: self.__show_image())  # canvas is resized from displayimage, time to show image.
 
-    def binds(self):
+    def binds(self, animated):
         # Bind events to the Canvas
         self.canvas.bind('<ButtonPress-1>', self.__move_from)  # remember canvas position / panning
         #self.canvas.bind('<ButtonRelease-1>', lambda event: self.time_set(event))  # remember canvas position / panning (navigator)
         self.canvas.bind('<B1-Motion>',     self.__move_to)  # move canvas to the new position / panning
-        self.canvas.bind('<MouseWheel>', self.__wheel)  # zoom for Windows and MacOS, but not Linux / zoom pyramid.
-        self.canvas.bind('<Button-5>',   self.__wheel)  # zoom for Linux, wheel scroll down
-        self.canvas.bind('<Button-4>',   self.__wheel)  # zoom for Linux, wheel scroll up
+        if not animated:
+            self.canvas.bind('<MouseWheel>', self.__wheel)  # zoom for Windows and MacOS, but not Linux / zoom pyramid.
+            self.canvas.bind('<Button-5>',   self.__wheel)  # zoom for Linux, wheel scroll down
+            self.canvas.bind('<Button-4>',   self.__wheel)  # zoom for Linux, wheel scroll up
     "Video"
     def handle_video(self):
         "Handles videos"
