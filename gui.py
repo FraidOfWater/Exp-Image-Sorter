@@ -1054,6 +1054,10 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                 if x.winfo_exists():
                     x.config(bg = self.field_colour, fg = self.field_text_colour)
             
+            #Name field
+            if self.name_field.winfo_exists():
+                self.name_field.config(bg = self.field_colour, fg = self.field_text_colour)
+
             #Gridsquares
             for x in self.gridmanager.gridsquarelist:
                 x.configure(background = self.square_default, highlightthickness = self.whole_box_size, highlightcolor=self.square_default,highlightbackground=self.square_default)
