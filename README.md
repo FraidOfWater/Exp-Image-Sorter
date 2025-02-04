@@ -20,6 +20,7 @@ On pushes upstream:
 
       I fear pushing upstream. I rewrote so much on my way, but I'll look into it.
       Maybe this should be moved as a new branch of author's original instead?
+      Or perhaps it is best as a separate fork altogether.
 
 # Sorts images into destinations #
 This fork is a hobby, it adds new features and other tweaks, and removes some others. Light experimenting with threading and optimization. Tried to make it very customizable! Now supports animations!
