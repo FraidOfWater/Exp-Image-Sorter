@@ -195,7 +195,7 @@ class GUIManager(tk.Tk): #Main window
         lines = self.text_widget.get("1.0", tk.END).strip().split("\n")
 
         if len(lines) > 5: # Remove old lines
-            del lines[1]
+            lines = lines[-5:]
             self.text_widget.delete("1.0", tk.END)
             self.text_widget.insert(tk.END, "\n".join(lines) + "\n")
 
@@ -211,7 +211,7 @@ class GUIManager(tk.Tk): #Main window
         if first == False:
             lines = self.text_widget2.get("1.0", tk.END).strip().split("\n")
             if len(lines) > 2: # Remove old lines
-                del lines[1]
+                lines = lines[-2:]
                 self.text_widget2.delete("1.0", tk.END)
                 self.text_widget2.insert(tk.END, "\n".join(lines) + "\n")
 
