@@ -287,8 +287,8 @@ class CanvasImage:
         def lazy_pyramid(w, h):
             "Generates zoom pyramid"
             def render_second():
-                self.pyramid_ready.wait()
-                self.first_rendered.wait()
+                self.pyramid_ready.wait(timeout=2)
+                self.first_rendered.wait(timeout=2)
                 self.replace_await = True
                 try:
                     self.__show_image()
@@ -307,6 +307,7 @@ class CanvasImage:
                     h = int(h)
                     self.pyramid.append(self.pyramid[-1].resize((w,h), self.__filter))
                     self.pyramid_ready.set()
+                self.pyramid_ready.set()
                 self.__pyramid = self.pyramid # pass the whole zoom pyramid when it is ready.
                 #self.pyramid.clear()
                 #del self.__pyramid
