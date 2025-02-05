@@ -565,7 +565,7 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
 
             self.name_field = tk.Entry(self.leftui, takefocus=False,
                 background=self.field_colour, foreground=self.field_text_colour, relief="solid")
-            self.name_field.grid(row = 4, column = 0, sticky="EW", pady=5, padx=5)
+            
 
             self.name_field.bind("<FocusIn>", lambda e: (self.name_field.config(bg=self.field_activated_colour, fg=self.field_text_activated_colour), setattr(self, "focused_on_field", True)))
             self.name_field.bind("<FocusOut>", lambda e: (self.name_field.config(bg=self.field_colour, fg=self.field_text_colour),setattr(self, "focused_on_field", False)) )
@@ -779,6 +779,8 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                 view_menu.config(bg=self.button_colour, fg=self.button_text_colour,activebackground=self.button_colour_when_pressed, activeforeground=self.button_text_colour_when_pressed, highlightbackground=self.button_colour, highlightthickness=1)
                 view_menu.grid(row = 2, column = 0, sticky = "EW")
 
+            self.name_field.grid(row = 4, column = 0, sticky="EW", pady=5, padx=5)
+            
             # Button to control how image is centered
             if self.centering_button:
                 options = ["Center", "Only x centering", "Only y centering", "No centering"]
