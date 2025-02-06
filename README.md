@@ -1,4 +1,4 @@
-## Simple-Image-Sorter Experimental
+## Experimental-Image-Sorter
 Description:
 - Helps organize imagesets by sorting images into folders. This fork builds on the original by adding various features (see changelog).
 
