@@ -767,7 +767,7 @@ class SortImages:
             print(f'Target:   "{self.ddp}"')
             
             self.walk(self.sdp)
-            gui.manage_lines(f"Files searched in: {self.timer.stop()}")
+            gui.manage_lines(f"Files searched in: {self.timer.stop()}", clear=True)
             self.timer.start()
 
             gui.gridmanager.load_more()
@@ -1203,7 +1203,7 @@ class ThumbManager:
                         with ThreadPoolExecutor(max_workers=max_workers) as executor: # NAMES
                             executor.map(gen_name, gen_truncated_names)
 
-                        gui.manage_lines(f"Names shortened in: {self.fileManager.timer.stop()}")
+                        gui.manage_lines(f"Names shortened in: {self.fileManager.timer.stop()}", clear=True)
                         self.fileManager.timer.start()
 
                         with ThreadPoolExecutor(max_workers=max_workers) as executor: # THUMBS
@@ -1255,7 +1255,6 @@ class ThumbManager:
                 print("Error unloading thumbs and frames", e)
             finally:
                 collect()
-                gui.manage_lines(f"Unloaded in: {self.fileManager.timer.stop()}")
 
         def unload_static(gridsquare):
             if dest == False:
