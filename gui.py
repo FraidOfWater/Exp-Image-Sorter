@@ -1156,10 +1156,11 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                 second_window.protocol("WM_DELETE_WINDOW", self.close_second_window)
                 second_window.obj = obj
                 second_window.transient(self)
+                second_window.update_idletasks()
 
             self.second_window.title("Image: " + obj.path)
-            geometry = self.viewer_geometry.split('+')[0]
-            x, y = geometry.split('x')
+            geometry = self.second_window.wm_geometry().split('+', 1)[0]
+            x, y = geometry.split("x")
             self.new = CanvasImage(self.second_window, geometry, obj, self)
             self.new.grid(row = 0, column = 0, sticky = "NSEW")  # Initialize Frame grid statement in canvasimage, Add to main window grid
             self.new.rescale(min(int(x) / self.new.imwidth, int(y) / self.new.imheight))  # Scales to the window
