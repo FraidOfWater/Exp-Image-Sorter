@@ -5,12 +5,9 @@ Description:
 Scenario:
 - Are you sorting images to specific folders via windows file-manager? Well no more, this program lets you preview images, animations and videos, and move them to preset folders using only your keyboard.
 
-
-
-
 This is a fork of Simple-Image-Sorter by Legendsmith https://github.com/Legendsmith/Simple-Image-Sorter. Code from this project may freely be added upstream.
 
-# Changelog: #
+# Changes: #
 
       FEATURES
 
@@ -19,14 +16,13 @@ This is a fork of Simple-Image-Sorter by Legendsmith https://github.com/Legendsm
     Docked Image Viewer: Choose between integrated or free-floating viewer.
 
     Navigation: Use arrow keys to navigate the grid.
-    Quick Assigning: Assign images directly from the viewer with a hotkey.
     Show Next: Automatically shows the next image upon assigning the current one.
+    Quick Assigning: Assign images directly from the viewer with a hotkey.
     Auto Load: Load more images up to a value, if below that value.
 
     Sorting Options: Added "Sort by date modified"-button.
     View Options: Introduced an option box to show unassigned, assigned, moved, or animations.
-    Name Truncation: Prevents overflow and misalignment in the grid / fixed root problem auto resizing gridboxes..
-    
+
     Transient Windows: Windows spawned by the main GUI now stay on top (consistency).
     Window Position Saving: Find it just how you left it.
     Scrollbar Override: Option to disable the white scrollbar.
@@ -88,6 +84,7 @@ To do:
 On pushes upstream:
 
       I fear pushing upstream. I rewrote so much on my way, perhaps it is best as a separate fork altogether.
+      Or perhaps we will move this to a new branch upstream.
 
 Considerations:
 
