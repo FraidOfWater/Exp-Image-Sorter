@@ -31,15 +31,15 @@ This is a fork of Simple-Image-Sorter by Legendsmith https://github.com/Legendsm
     Window Position Saving: Find it just how you left it.
     Scrollbar Override: Option to disable the white scrollbar.
 
+    Removed: Dupechecking (It confused me, haha!)
+
       PERFORMANCE
 
     Image Header Hashing: Faster image loading by reading headers instead of full binary data.
-    Overwrite Safeguards: Prevents overwriting locked images or those assigned to others.
     Threading: Implements threading for lazy loading of images and GIFs/WebPs.
     Buffering: Buffers large images to reduce latency; configurable in Prefs.json.
-    Memory limit: Due to memory requirements of animations, limit number of frames loaded to memory.
-    Animation queue: Loads animations as the memory limit allows.
-    Removed: Dupechecking (It confused me, haha!)
+
+    
 
 # Warnings & Other info #
 
@@ -50,7 +50,7 @@ This is a fork of Simple-Image-Sorter by Legendsmith https://github.com/Legendsm
 How do I run it?
 - Download a compiled copy from releases. There are two versions: 1. Executable, 2. Script.
 - The executable acts as a standalone and you don't need anything else!
-- The script requires you to install python (latest), run install.bat (install dependencies) and to run start.bat.
+- The script requires you to install python (latest), run install.bat (install dependencies), install vlc (64-bit via installer), and to run start.bat.
 
 How do I compile from source?
 
