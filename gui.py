@@ -1131,17 +1131,12 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
         if self.middlepane_frame.winfo_width() != 1:
             self.middlepane_width = self.middlepane_frame.winfo_width()
 
-        if self.dock_view.get(): # Dock viewer
-            test = perf_counter()
-            
+        if self.dock_view.get(): # Dock viewer            
             geometry = str(self.middlepane_width) + "x" + str(self.winfo_height())
             self.new = CanvasImage(self.middlepane_frame, geometry, obj, self)
             self.new.grid(row = 0, column = 0, sticky = "NSEW")
-            print(perf_counter()-test)
             self.new.rescale(min(self.middlepane_width / self.new.imwidth, self.winfo_height() / self.new.imheight))  # Scales to the window
-            print(perf_counter()-test)
             self.new.center_image(self.viewer_x_centering, self.viewer_y_centering)
-            print(perf_counter()-test)
             logger.debug("Rescaled and Centered")
 
             self.focused_on_secondwindow = True
