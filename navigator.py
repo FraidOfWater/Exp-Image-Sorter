@@ -40,8 +40,7 @@ class Navigator:
             self.index = self.displayedlist.index(new) #updates index
             self.gui.displayimage(new.obj)
             self.old = new #updates old
-            
-        
+                    
     def dest_select(self, new):
         "From a click event, removes highlight from previous frame, adds it to the clicked one"
         self.window_focused = "DEST"

@@ -3,7 +3,6 @@
 import os
 import json
 import logging
-import warnings
 
 from shutil import rmtree, move as shutilmove
 
@@ -690,7 +689,6 @@ class SortImages:
                     if x in gridmanager.displayedset:
                         gridmanager.assigned.append(x)
                         to_remove_from_grid.append(x)
-            
             "Add and remove from imagegrid"
 
             gridmanager.remove_squares(to_remove_from_grid, unload=True) # Moved/unassigned/animated scenarios
@@ -704,7 +702,6 @@ class SortImages:
                 gui.destination_viewer.remove_squares(remove, unload=True)
             if add:
                 gui.destination_viewer.add_squares(add)
-
             "If show next option checked, and next exists, and viewer is open, show next image"
             if self.navigator.old and gui.show_next.get() and len(gridmanager.displayedset) >= 1 and hasattr(gui, "Image_frame"):
                 self.navigator.select_next(gridmanager.displayedlist)
@@ -715,7 +712,6 @@ class SortImages:
                     left = len(self.imagelist)
                     items = min(to_load, left)
                     gridmanager.load_more(amount=items) # the unload thread might access stuff simultneous to this one.
-
             "Update stat tracker"
             self.gui.images_left_stats_strvar.set(
                 f"Left: {len(gridmanager.assigned)}/{len(gridmanager.gridsquarelist)-len(gridmanager.assigned)-len(gridmanager.moved)}/{len(self.imagelist)}")
@@ -771,7 +767,7 @@ class SortImages:
             print(f'Target:   "{self.ddp}"')
             
             self.walk(self.sdp)
-            gui.manage_lines(f"Files searched in: {self.timer.stop()}")
+            gui.manage_lines(f"Files searched in: {self.timer.stop()}", clear=True)
             self.timer.start()
 
             gui.gridmanager.load_more()
@@ -1119,11 +1115,12 @@ class ThumbManager:
                         return
                 else: # Load frames for GIF, WEBP
                     try:
-                        with warnings.catch_warnings(record=True) as w:
-                            warnings.simplefilter("always")  # Catch all warnings
+                        try:
                             frames = mimread(imagefile.path)
-                            if w:
-                                return
+                        except Exception as e:
+                            if imagefile in self.fileManager.animation_queue:
+                                self.fileManager.animation_queue.remove(imagefile)
+                            return
                         temp = []
                         for x in frames:
                             if not self.fileManager.gui.concurrent_frames < self.fileManager.max_concurrent_frames:
@@ -1206,7 +1203,7 @@ class ThumbManager:
                         with ThreadPoolExecutor(max_workers=max_workers) as executor: # NAMES
                             executor.map(gen_name, gen_truncated_names)
 
-                        gui.manage_lines(f"Names shortened in: {self.fileManager.timer.stop()}")
+                        gui.manage_lines(f"Names shortened in: {self.fileManager.timer.stop()}", clear=True)
                         self.fileManager.timer.start()
 
                         with ThreadPoolExecutor(max_workers=max_workers) as executor: # THUMBS
@@ -1258,7 +1255,6 @@ class ThumbManager:
                 print("Error unloading thumbs and frames", e)
             finally:
                 collect()
-                gui.manage_lines(f"Unloaded in: {self.fileManager.timer.stop()}")
 
         def unload_static(gridsquare):
             if dest == False:

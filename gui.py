@@ -188,34 +188,32 @@ class GUIManager(tk.Tk): #Main window
         self.concurrent_frames = c
 
         self.after(333, self.show_ram_usage)
-    def manage_lines(self, input):
+    def manage_lines(self, input, clear=False):
         self.text_widget.configure(state="normal")
-        self.text_widget.insert(tk.END, f"{input}\n") 
+        if clear:
+            self.text_widget.delete("1.0", tk.END)
+            self.text_widget.insert(tk.END, f"{input}\n") 
+            self.text_widget.configure(state="disabled")
+            return
 
+        self.text_widget.insert(tk.END, f"{input}\n") 
         lines = self.text_widget.get("1.0", tk.END).strip().split("\n")
 
         if len(lines) > 5: # Remove old lines
-            del lines[1]
+            lines = lines[-5:]
             self.text_widget.delete("1.0", tk.END)
             self.text_widget.insert(tk.END, "\n".join(lines) + "\n")
 
-        self.text_widget.see(tk.END)
+        #self.text_widget.see(tk.END)
         self.text_widget.configure(state="disabled")
     
     def manage_lines2(self, input, first=False):
         self.text_widget2.configure(state="normal")
         if first:
             self.text_widget2.delete("1.0", tk.END)
-        self.text_widget2.insert(tk.END, f"{input}\n") 
-
-        if first == False:
-            lines = self.text_widget2.get("1.0", tk.END).strip().split("\n")
-            if len(lines) > 2: # Remove old lines
-                del lines[1]
-                self.text_widget2.delete("1.0", tk.END)
-                self.text_widget2.insert(tk.END, "\n".join(lines) + "\n")
-
-        self.text_widget2.see(tk.END)
+            self.text_widget2.insert(tk.END, f"{input}\n")
+        else:
+            self.text_widget2.insert(tk.END, f"{input}\n")
         self.text_widget2.configure(state="disabled")
     
     def manage_name_field(self, input):
@@ -231,9 +229,15 @@ class GUIManager(tk.Tk): #Main window
                 self.Image_frame.destroy()
                 del self.Image_frame
                 self.after(500, lambda: obj.rename(self.saved_text, self.fileManager))
-                
+
+    
+
     def initialize(self): #
         "Initializating GUI after we get the prefs from filemanager."
+        def on_resize(*args):
+            if hasattr(self, "Image_frame"):
+                self.displayimage(self.Image_frame.obj)
+
         self.geometry(self.main_geometry)
 
         #Styles
@@ -294,6 +298,9 @@ class GUIManager(tk.Tk): #Main window
 
         self.toppane.grid(row=0, column=0, sticky="NSEW")
         self.toppane.configure(style='Theme_dividers.TPanedwindow')
+
+        self.toppane.bind("<ButtonRelease-1>", on_resize)
+        #self.imagegridframe.bind("<Configure>", self.on_resize)
 
         self.columnconfigure(0, weight=10)
         self.columnconfigure(1, weight=0)
@@ -538,16 +545,17 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
 
             # Actual labels: Middle
             #name_label = tk.Label(left_column, justify="left", bg="#03070b", fg="#6a858a", textvariable=self.name_ext_size) # INFO
-            name_label = tk.Label(left_column2, justify="left", bg="#03070b", fg="#6a858a", text="Viewer:") # INFO
+            self.info = tk.StringVar(value="Size:")
+            name_label = tk.Label(left_column2, width=13, anchor="w", bg="#03070b", fg="#6a858a", textvariable=self.info) # INFO
             name_label.grid(row = 0, column = 1, sticky = "W")
 
-            self.frameinfo = tk.StringVar(value="0/0/0")
+            self.frameinfo = tk.StringVar(value="F/D: 0/0/0")
             size_label = tk.Label(left_column2, justify="left", bg="#03070b", fg="#6a858a", textvariable=self.frameinfo) # FRAMEINFO
             size_label.grid(row = 1, column = 1, sticky = "W")
 
             self.frametimeinfo = tk.StringVar(value="0/0")
-            size_label = tk.Label(left_column2, justify="left", bg="#03070b", fg="#6a858a", textvariable=self.frametimeinfo) # FRAMETIME
-            size_label.grid(row = 2, column = 1, sticky = "W")
+            size_label2 = tk.Label(left_column2, justify="left", bg="#03070b", fg="#6a858a", textvariable=self.frametimeinfo) # FRAMETIME
+            size_label2.grid(row = 2, column = 1, sticky = "W")
                         
             # Create a Text widget for terminal output
             self.text_widget2 = tk.Text(left_column, height= 4, width=11, bg="#03070b", fg = "#6a858a")
@@ -1108,22 +1116,22 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
             self.last_time = perf_counter()
     def test(self, obj):
         "Display image in viewer"
-        def close_old():
-            if hasattr(self, "Image_frame"):
+        def close_old(Image_frame):
+            "Closes and cleanups the old canvasimage instance"
+            if Image_frame:
                 self.middlepane_frame.grid_forget()
-                self.Image_frame.canvas.unbind("<Configure>")
-                self.Image_frame.destroy() # bug here for mp4.
+                Image_frame.canvas.unbind("<Configure>")
+                Image_frame.destroy() # bug here for mp4.
 
-                self.Image_frame = None
-                del self.Image_frame
-                collect()
-            
+                Image_frame = None
+                del Image_frame
+                #collect() ###
 
-        # This makes sure the initial view is set up correctly
+        # Middlepane width refresh
         if self.middlepane_frame.winfo_width() != 1:
             self.middlepane_width = self.middlepane_frame.winfo_width()
-        close_old()
-        if self.dock_view.get(): # This handles the middlepane viewer. Runs, IF second window is closed.
+
+        if self.dock_view.get(): # Dock viewer            
             geometry = str(self.middlepane_width) + "x" + str(self.winfo_height())
             self.new = CanvasImage(self.middlepane_frame, geometry, obj, self)
             self.new.grid(row = 0, column = 0, sticky = "NSEW")
@@ -1160,13 +1168,16 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
             logger.debug("Rescaled and Centered")
             self.focused_on_secondwindow = True
 
-            if not self.show_next.get():
+            if not self.show_next.get(): # wait for window to initialize
                 self.second_window.after(0, lambda: self.new.canvas.focus_set())
             else:
                 self.second_window.after(0, lambda: self.new.canvas.focus_set())
-
-            close_old() 
-        self.Image_frame = self.new
+        if not hasattr(self, "Image_frame"):
+            self.Image_frame = self.new
+            return
+        else:
+            Thread(target=close_old, args=(self.Image_frame,), daemon=True).start()
+            self.Image_frame = self.new
     
     "Exit function" # How we exit the program and close windows
     def closeprogram(self):
@@ -1420,10 +1431,6 @@ class GridManager:
             if not frame: gridsquare.obj.guidata["frame"] = gridsquare
             if reload or gridsquare.obj.guidata['img'] == None: # Checks if img is unloaded
                 regen.append(gridsquare)
-        self.gui.manage_lines(f"Displayed grid in: {self.fileManager.timer.stop()}")
-
-        
-
 
         if reload and regen:
             self.fileManager.thumbs.generate(regen) # Threads the reloading process.

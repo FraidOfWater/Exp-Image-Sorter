@@ -39,6 +39,20 @@ set "folderCopyDestination=dist\SIME-QOL\_internal\vips-dev-8.16"  :: Change thi
 set "folderToCopy2=plugins"  :: Change this to your actual file name
 set "folderCopyDestination2=dist\SIME-QOL\_internal\plugins"  :: Change this to your actual destination folder
 
+:::: Copy the folder to the destination folder
+if exist "%folderToCopy%" (
+    xcopy "%folderToCopy%\*" "%folderCopyDestination%" /s /e /i /y
+    echo Copied folder: %folderToCopy% to %folderCopyDestination%
+) else (
+    echo Folder not found: %folderToCopy%
+)
+if exist "%folderToCopy2%" (
+    xcopy "%folderToCopy2%\*" "%folderCopyDestination2%" /s /e /i /y
+    echo Copied folder: %folderToCopy2% to %folderCopyDestination2%
+) else (
+    echo Folder not found: %folderToCopy2%
+)
+
 :::::: Copy the file to the destination folder
 if exist "%fileToCopy%" (
     copy "%fileToCopy%" "%fileDestination%"
@@ -57,20 +71,6 @@ if exist "%fileToCopy3%" (
     echo Copied file: %fileToCopy3% to %fileDestination3%
 ) else (
     echo File not found: %currentDir%\%fileToCopy3%
-)
-
-:::: Copy the folder to the destination folder
-if exist "%folderToCopy%" (
-    xcopy "%folderToCopy%\*" "%folderCopyDestination%" /s /e /i /y
-    echo Copied folder: %folderToCopy% to %folderCopyDestination%
-) else (
-    echo Folder not found: %folderToCopy%
-)
-if exist "%folderToCopy2%" (
-    xcopy "%folderToCopy2%\*" "%folderCopyDestination2%" /s /e /i /y
-    echo Copied folder: %folderToCopy2% to %folderCopyDestination2%
-) else (
-    echo Folder not found: %folderToCopy2%
 )
 
 endlocal
