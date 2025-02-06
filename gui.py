@@ -19,7 +19,7 @@ import tkinter.scrolledtext as tkst
 from tkinter.ttk import Panedwindow
 from tkinter.messagebox import askokcancel
 from tkinter import filedialog as tkFileDialog
-from tktooltip import ToolTip
+#from tktooltip import ToolTip
 
 from canvasimage import CanvasImage
 from destination_viewer import Destination_Viewer
@@ -739,7 +739,7 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                 self.load_more_b = tk.Button(second_frame, text="Load More Images", command=self.gridmanager.load_more,
                     bg=self.button_colour, fg=self.button_text_colour, activebackground = self.button_colour_when_pressed, activeforeground=self.button_text_colour_when_pressed)
                 self.load_more_b.grid(row=1, column=1, sticky="EW")
-                self.tooltip = ToolTip(self.load_more_b, msg="test", delay=1, x_offset=10, y_offset=2)
+                #self.tooltip = ToolTip(self.load_more_b, msg="test", delay=1, x_offset=10, y_offset=2)
                 # Move All BUTTON
                 move_all_b = tk.Button(second_frame, text="Move All", command=self.fileManager.moveall,
                     bg=self.button_colour, fg=self.button_text_colour, activebackground = self.button_colour_when_pressed, activeforeground=self.button_text_colour_when_pressed)
