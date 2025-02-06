@@ -63,6 +63,8 @@ class CanvasImage:
 
         "Gui stats"
         self.gui.name_ext_size.set(self.obj.name)
+        self.gui.frameinfo.set(f"F/D: -")
+        self.gui.info.set(f"Size: {self.file_size} MB")
         # The initial quality of placeholder image, used to display the image just a bit faster.
         accepted_modes = ["NEAREST", "BILINEAR", "BICUBIC", "LANCZOS"]
         if gui.filter_mode.upper() in accepted_modes:
@@ -143,7 +145,7 @@ class CanvasImage:
             self.framecount = self.image.n_frames
             if self.framecount > 1:
                 self.file_type = self.file_type[2]
-                self.gui.frameinfo.set(f"{0}/{0}/{self.obj.framecount}")
+                self.gui.frameinfo.set(f"F/D: {0}/{0}/{self.obj.framecount}")
                 self.handle_gif()
             else:
                 self.__pyramid = [self.smaller()] if self.__huge else [Image.open(self.path)]
@@ -185,9 +187,7 @@ class CanvasImage:
                     total_seconds = int(self.media.get_duration()/1000)
                     minutes = total_seconds // 60
                     seconds = total_seconds % 60
-                    self.gui.frameinfo.set(f"{minutes}:{seconds}")
-                    #self.gui.size.set({getsize(path)/(1024 * 1024):.2f} MB)
-                    self.gui.first_render.set(f"F: {self.timer.stop()}")
+                    self.gui.frameinfo.set(f"F/D: {minutes}:{seconds}")
             except:
                 pass # thread closed
         def resize_video(*args):
@@ -263,6 +263,7 @@ class CanvasImage:
                                         highlightthickness=0, borderwidth=0)
         #self.canvas.update()  # Wait until the canvas has finished creating.
         self.video_frame.grid(pady=((self.canvas_height - new_height) // 2), sticky="nsew")
+        self.video_frame.grid(padx=(((self.canvas_width+2) - new_width) // 2), sticky="nsew")
         self.player.set_fullscreen(True)
         self.video_frame_id = self.video_frame.winfo_id()
         self.player.set_hwnd(self.video_frame_id)
@@ -272,15 +273,14 @@ class CanvasImage:
         self.media_list_player.set_playback_mode(PlaybackMode.loop)
         self.media_list_player.play()
 
+        self.gui.first_render.set(f"F: {self.timer.stop()}")
+
         # Will cause a crash when resizing, then loading another mp4. must bind before, but first 100 ms of config calls should be ignored.
         #if self.gui.dock_view.get():
         #    self.canvas.after(100, lambda: self.gui.bind("<Configure>", resize_video))
         #elif hasattr(self.gui, "second_window"):
         #    self.canvas.after(100, lambda: self.gui.second_window.bind("<Configure>", resize_video))
-        #Seems to cause freeze relating to unload (multithread3) in sortimages...?
-        #Seems to relate to auto_load functionality. Doesnt like simultaneous accesses to the grid? add and remove at the same time?
-        #Not even related to auto_load...?
-        #Thread(target=video_print_data, daemon=True).start()
+        Thread(target=video_print_data, daemon=True).start()
 
     "Static"
     def handle_static(self):
@@ -369,7 +369,7 @@ class CanvasImage:
                         self.frametimes.append(frame_frametime)
                         self.frames.append(frame)
                         self.framecount += 1
-                        self.gui.frameinfo.set(f"{self.lazy_index}/{len(self.frames)}/{self.framecount}")
+                        self.gui.frameinfo.set(f"F/D: {self.lazy_index}/{len(self.frames)}/{self.framecount}")
                         self.gui.frametimeinfo.set(f"{self.frametimes[self.lazy_index]} ms")
                     if all(i == 0 for i in self.frametimes):
                         for i in range(len(self.frametimes)):
@@ -403,7 +403,7 @@ class CanvasImage:
                     self.canvas.itemconfig(self.imageid, image=self.frames[self.lazy_index])
                     self.canvas.after(self.frametimes[self.lazy_index], animate_image)
                     self.lazy_index = (self.lazy_index + 1) % len(self.frames)
-                    self.gui.frameinfo.set(f"{self.lazy_index}/{len(self.frames)}/{self.framecount}")
+                    self.gui.frameinfo.set(f"F/D: {self.lazy_index}/{len(self.frames)}/{self.framecount}")
                     self.gui.frametimeinfo.set(f"{self.frametimes[self.lazy_index]} ms")
                 except:
                     return
@@ -424,7 +424,7 @@ class CanvasImage:
                     self.canvas.after(self.frametimes[self.lazy_index], lazy_load)
                     self.lazy_index = (self.lazy_index + 1) % self.framecount
                     self.gui.frametimeinfo.set(f"{self.frametimes[self.lazy_index]} ms")
-                    self.gui.frameinfo.set(f"{self.lazy_index}/{len(self.frames)}/{self.framecount}")
+                    self.gui.frameinfo.set(f"F/D: {self.lazy_index}/{len(self.frames)}/{self.framecount}")
 
 
                     return
@@ -517,7 +517,7 @@ class CanvasImage:
                             self.imageid = self.canvas.create_image(max(box_canvas[0], box_img_int[0]),
                                                        max(box_canvas[1], box_img_int[1]),
                                                     anchor='nw', image=imagetk)
-
+                            
                             self.gui.first_render.set(f"F: {self.timer.stop()}")
 
                             self.canvas.lower(self.imageid)  # set image into background
