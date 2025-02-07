@@ -57,7 +57,7 @@ class CanvasImage:
         self.__band_width = 1024
         self.style = ttk.Style() ####
         self.style.configure("bg.TFrame", background=gui.viewer_bg) # no white flicker screens ####
-
+        self.load_frames_thread = None
         self.reset_values(imagewindowgeometry, imageobj, gui)
         
         """ Initialization of frame in master widget"""
@@ -80,10 +80,8 @@ class CanvasImage:
                 player.release()
             except Exception as e:
                 print("destroying error:", e)
-        "ImageFrame destructor"
         # Video
         if hasattr(self, "canvas"):
-            self.canvas.delete("all")
             if hasattr(self, "imageid"):
                 del self.imageid
             if hasattr(self, "container"):
@@ -110,19 +108,16 @@ class CanvasImage:
 
             except Exception as e:
                 logger.debug("Error closing player", e)
-
         if hasattr(self, "frames"):
             for x in self.frames:
                 del x
             self.frames.clear()
-            del self.frames
-            
+            del self.frames         
         if hasattr(self, "frametimes"):
             for x in self.frametimes:
                 del x
             self.frametimes.clear()
-            del self.frametimes
-            
+            del self.frametimes            
         if hasattr(self, "image"):
             try:
                 self.image.close()
@@ -141,26 +136,6 @@ class CanvasImage:
         if hasattr(self, "pyramid"):
             self.pyramid.clear()
             del self.pyramid
-        #if hasattr(self, "hbar"):
-        #    self.hbar.destroy()
-        #    del self.hbar
-        #if hasattr(self, "vbar"):
-        #    self.vbar.destroy()
-        #    del self.vbar
-        
-        #    self.canvas.unbind('<ButtonPress-1>')  # Unbind left mouse button press
-        #    self.canvas.unbind('<ButtonRelease-1>')  # Unbind left mouse button release
-        #    self.canvas.unbind('<B1-Motion>')  # Unbind left mouse button motion
-        #    self.canvas.unbind('<MouseWheel>')  # Unbind mouse wheel for zoom
-        #    self.canvas.unbind('<Button-5>')  # Unbind mouse wheel scroll down for Linux
-        #    self.canvas.unbind('<Button-4>')  # Unbind mouse wheel scroll up for Linux
-        #    self.canvas.destroy()
-        #    del self.canvas
-        #if hasattr(self, "__imframe"):
-        #    self.__imframe.destroy()
-        #    del self.__imframe
-        #if hasattr(self, "style"):
-        #    del self.style
         if hasattr(self, "__curr_img"):
             del self.__curr_img
         if hasattr(self, "obj"):
@@ -174,9 +149,6 @@ class CanvasImage:
             del self.imscale
         #del self
         collect()
-        if hasattr(self, "original_x"):
-            self.canvas.xview_moveto(self.original_x)
-            self.canvas.yview_moveto(self.original_y)
 
     def reset_values(self, imagewindowgeometry, imageobj, gui):
         ## These values must be reset each call
@@ -205,6 +177,7 @@ class CanvasImage:
         self.geometry_width, self.geometry_height = imagewindowgeometry.split('x',1) # Window ## (from here resize!)
         self.canvas_height = int(self.geometry_height)
         self.canvas_width = int(self.geometry_width)
+        self.randomid = 0
         pass
     def refresh_canvas(self):
         # Handle .mp4, .webm - VLC (audio)
@@ -360,7 +333,10 @@ class CanvasImage:
         else:
             new_height = int(new_width / aspect_ratio)
         new_width += 2 #divider
-
+        self.canvas.delete("all")
+        if hasattr(self, "original_x"):
+            self.canvas.xview_moveto(self.original_x)
+            self.canvas.yview_moveto(self.original_y)
         self.video_frame = tk.Canvas(self.canvas,width=new_width, height=new_height,
                                      bg=self.gui.viewer_bg, highlightbackground="black",
                                         highlightthickness=0, borderwidth=0)
@@ -372,7 +348,7 @@ class CanvasImage:
         self.player.set_hwnd(self.video_frame_id)
         #self.player.video_set_scale(ratio)
         self.imscale = ratio
-
+        
         self.media_list_player.set_playback_mode(PlaybackMode.loop)
         self.media_list_player.play()
 
@@ -422,6 +398,10 @@ class CanvasImage:
         #self.gui.size.set(f"{self.file_size} MB")
         Thread(target=lazy_pyramid, args=(w,h), daemon=True).start()
         c11.wait()
+        self.canvas.delete("all")
+        if hasattr(self, "original_x"):
+            self.canvas.xview_moveto(self.original_x)
+            self.canvas.yview_moveto(self.original_y)
         self.container = self.canvas.create_rectangle((0, 0, self.imwidth, self.imheight), width=0)
     def doit(self):
         self.__show_image()
@@ -430,11 +410,8 @@ class CanvasImage:
         "Handles gifs"
         def load_frames(image1, new_width, new_height, inp):
             "Generates frames for gif, webp"
-            if hasattr(self, "load_frames_thread"):
+            if hasattr(self, "load_frames_thread") and self.load_frames_thread:
                 self.load_frames_thread.join()
-                self.delay = 0
-                self.frames = []
-                self.frametimes = []
                 
             self.load_frames_thread = self.temp_thread
             try:
@@ -452,6 +429,10 @@ class CanvasImage:
                 
                 x_offset = (self.canvas_width - frame_width) // 2
                 y_offset = (self.canvas_height - frame_height) // 2
+                self.canvas.delete("all")
+                if hasattr(self, "original_x"):
+                    self.canvas.xview_moveto(self.original_x)
+                    self.canvas.yview_moveto(self.original_y)
                 self.imageid = self.canvas.create_image(x_offset, y_offset, anchor='nw', image=frame)
 
                 self.gui.first_render.set(f"F: {self.timer.stop()}")
@@ -512,7 +493,8 @@ class CanvasImage:
                     self.gui.frametimeinfo.set(f"{self.frametimes[self.lazy_index]} ms")
                 except:
                     return
-
+            if not inp == self.randomid:
+                return
             try:  
                 "Display new frames as soon as possible, when all loaded, switch to simple looping method"
                 if not self.lazy_loading: # When all frames are loaded, we switch to just looping
@@ -530,8 +512,6 @@ class CanvasImage:
                     self.lazy_index = (self.lazy_index + 1) % self.framecount_temp
                     self.gui.frametimeinfo.set(f"{self.frametimes[self.lazy_index]} ms")
                     self.gui.frameinfo.set(f"F/D: {self.lazy_index}/{len(self.frames)}/{self.framecount_temp}")
-
-
                     return
                 else:
                     logger.error("Error in lazy load, take a look")
@@ -549,13 +529,9 @@ class CanvasImage:
         else:
             new_height = int(new_width / aspect_ratio)
         self.imageid = None
-        if hasattr(self, "randomid"):
-            new = randint(0,9999999999)
-            if new != self.randomid:
-                self.randomid = new
-        else:
-            self.randomid = randint(0,9999999999)
 
+        self.randomid = randint(0,999999)
+        
         self.temp_thread = Thread(target=load_frames, args=(self.image, new_width, new_height, self.randomid), daemon=True)
         self.temp_thread.start()
         lazy_load(self.randomid)

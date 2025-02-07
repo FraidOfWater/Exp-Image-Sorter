@@ -1178,18 +1178,29 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
             self.second_window.title("Image: " + obj.path)
             geometry = self.second_window.wm_geometry().split('+', 1)[0]
             x, y = geometry.split("x")
-            self.new = CanvasImage(self.second_window, geometry, obj, self)
-            self.new.grid(row = 0, column = 0, sticky = "NSEW")  # Initialize Frame grid statement in canvasimage, Add to main window grid
-            self.new.rescale(min(int(x) / self.new.imwidth, int(y) / self.new.imheight))  # Scales to the window
-            self.new.center_image(self.viewer_x_centering, self.viewer_y_centering)
-
-            logger.debug("Rescaled and Centered")
+            if not hasattr(self, "Image_frame"):
+                self.Image_frame = CanvasImage(self.second_window, geometry, obj, self)
+                
+                print(self.Image_frame.imwidth)
+                self.Image_frame.rescale(min(int(x) / self.Image_frame.imwidth, int(y) / self.Image_frame.imheight))  # Scales to the window
+                self.Image_frame.center_image(self.viewer_x_centering, self.viewer_y_centering)
+                self.Image_frame.doit()
+                #self.Image_frame.canvas.update_idletasks()
+                logger.debug("Rescaled and Centered")
+            else:
+                self.Image_frame.scrub()
+                self.Image_frame.reset_values(geometry, obj, self) # geometry should be updated
+                self.Image_frame.refresh_canvas()
+                self.Image_frame.rescale(min(int(x) / self.Image_frame.imwidth, int(y) / self.Image_frame.imheight))  # Scales to the window
+                self.Image_frame.center_image(self.viewer_x_centering, self.viewer_y_centering)
+                self.Image_frame.doit()
+                
             self.focused_on_secondwindow = True
 
             if not self.show_next.get(): # wait for window to initialize
-                self.second_window.after(0, lambda: self.new.canvas.focus_set())
+                self.second_window.after(0, lambda: self.Image_frame.canvas.focus_set())
             else:
-                self.second_window.after(0, lambda: self.new.canvas.focus_set())
+                self.second_window.after(0, lambda: self.Image_frame.canvas.focus_set())
         #if not hasattr(self, "Image_frame"):
         #    self.Image_frame = self.new
         #    return
