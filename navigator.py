@@ -89,7 +89,8 @@ class Navigator:
         elif len(lista) > self.index: # new image enters index
             self.old = lista[self.index]
         self.selected(self.old)
-        self.gui.displayimage(self.old.obj)
+        if self.gui.show_next.get():
+            self.gui.displayimage(self.old.obj) ## omly display in viewer if show_next is on., otherwise allow this function to run.
 
     def bindhandler(self, event):
         #updownleftright = 38,40,37,39
@@ -120,7 +121,8 @@ class Navigator:
             self.selected(self.displayedlist[self.index])
             self.old = self.displayedlist[self.index]
             scroll_down()
-            self.gui.displayimage(self.old.obj)
+            if self.gui.show_next.get():
+                self.gui.displayimage(self.old.obj)
         def highlight_left():
             check_bound = self.index-1
             if check_bound < 0:
@@ -130,7 +132,8 @@ class Navigator:
             self.selected(self.displayedlist[self.index])
             self.old = self.displayedlist[self.index]
             scroll_up()
-            self.gui.displayimage(self.old.obj)
+            if self.gui.show_next.get():
+                self.gui.displayimage(self.old.obj)
         def highlight_up():
             columns = int(max(1, self.gui.imagegrid.winfo_width() / self.gui.actual_gridsquare_width))
             check_upper_bound = self.index-columns
@@ -141,7 +144,8 @@ class Navigator:
             self.selected(self.displayedlist[self.index])
             self.old = self.displayedlist[self.index]
             scroll_up()
-            self.gui.displayimage(self.old.obj)
+            if self.gui.show_next.get():
+                self.gui.displayimage(self.old.obj)
         def highlight_down():
             columns = int(max(1, self.gui.imagegrid.winfo_width() / self.gui.actual_gridsquare_width))
             check_lower_bound = self.index+columns
@@ -152,8 +156,13 @@ class Navigator:
             self.selected(self.displayedlist[self.index])
             self.old = self.displayedlist[self.index]
             scroll_down()
+            if self.gui.show_next.get():
+                self.gui.displayimage(self.old.obj)
+        def spacebar():
             self.gui.displayimage(self.old.obj)
-        
+        def enter():
+            self.gui.displayimage(self.old.obj)
+
         if self.gui.focused_on_field:
             return
         if not self.arrow_action:
@@ -161,14 +170,18 @@ class Navigator:
                 "Right": lambda: highlight_right(),
                 "Left": lambda: highlight_left(),
                 "Up": lambda: highlight_up(),
-                "Down": lambda: highlight_down()
+                "Down": lambda: highlight_down(),
+                "space": lambda: spacebar(),
+                "Return": lambda: enter()
             }
         if not self.arrow_action_reversed:
             self.arrow_action_reversed = {
                 "Left": lambda: highlight_right(),
                 "Right": lambda: highlight_left(),
                 "Down": lambda: highlight_up(),
-                "Up": lambda: highlight_down()
+                "Up": lambda: highlight_down(),
+                "space": lambda: spacebar(),
+                "Return": lambda: enter()
             }
 
         
