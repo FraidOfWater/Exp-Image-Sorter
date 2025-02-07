@@ -947,7 +947,7 @@ class ThumbManager:
                     buffer = None
                     pyvips_image = None
 
-                    imagetk = ImageTk.PhotoImage(pillows_image)
+                    imagetk = ImageTk.PhotoImage(pillows_image) # hangs here
                     if imagefile.ext in self.video_formats:
                         imagefile.dimensions = (imagetk.width(), imagetk.height())
 
