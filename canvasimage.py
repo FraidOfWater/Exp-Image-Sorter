@@ -50,6 +50,10 @@ class CanvasImage:
         self.gui = gui
         self.file_types = ["STATIC", "VIDEO", "ANIMATION"]
         accepted_modes = ["NEAREST", "BILINEAR", "BICUBIC", "LANCZOS"]
+        self.delay = 0
+        self.frames = []            # Stores loaded frames for .Gif, .Webp
+        self.frametimes = []
+        self.framecount_temp = 0
         if gui.filter_mode.upper() in accepted_modes: self.__first_filter = getattr(Image.Resampling, gui.filter_mode.upper()) 
         else: self.__first_filter = Image.Resampling.BILINEAR
         self.__filter = Image.Resampling.LANCZOS  # The end qualtiy of the image. #NEAREST, BILINEAR, BICUBIC ###
@@ -58,17 +62,15 @@ class CanvasImage:
         self.style = ttk.Style() ####
         self.style.configure("bg.TFrame", background=gui.viewer_bg) # no white flicker screens ####
         self.load_frames_thread = None
+        self.render_close = False
+        self.render2 = None
         self.reset_values(imagewindowgeometry, imageobj, gui)
         
         """ Initialization of frame in master widget"""
         self.__imframe = ttk.Frame(master, style="bg.TFrame") ###
         self.hbar = AutoScrollbar(self.__imframe, orient='horizontal') ###
         self.vbar = AutoScrollbar(self.__imframe, orient='vertical') ###
-        self.canvas = tk.Canvas(self.__imframe, bg=gui.viewer_bg,
-            highlightthickness=0, xscrollcommand=self.hbar.set,
-            yscrollcommand=self.vbar.set, width=self.geometry_width, height = self.geometry_height)  # Set canvas dimensions to remove scrollbars
-        self.canvas.grid(row=0, column=0, sticky='nswe')
-        self.grid(row = 0, column = 0, sticky = "NSEW")
+
         self.refresh_canvas()
     def scrub(self):
         def stop_player(player):
@@ -81,6 +83,9 @@ class CanvasImage:
             except Exception as e:
                 print("destroying error:", e)
         # Video
+        if self.render2 and self.render2.is_alive():
+            self.randomid = 0
+
         if hasattr(self, "canvas"):
             if hasattr(self, "imageid"):
                 del self.imageid
@@ -112,12 +117,12 @@ class CanvasImage:
             for x in self.frames:
                 del x
             self.frames.clear()
-            del self.frames         
+            #del self.frames         
         if hasattr(self, "frametimes"):
             for x in self.frametimes:
                 del x
             self.frametimes.clear()
-            del self.frametimes            
+            #del self.frametimes            
         if hasattr(self, "image"):
             try:
                 self.image.close()
@@ -147,6 +152,15 @@ class CanvasImage:
             del self.canvas_height
             del self.canvas_width
             del self.imscale
+        if hasattr(self, "canvas"):
+            self.canvas.unbind('<ButtonPress-1>')  # Unbind left mouse button press
+            self.canvas.unbind('<ButtonRelease-1>')  # Unbind left mouse button release
+            self.canvas.unbind('<B1-Motion>')  # Unbind left mouse button motion
+            self.canvas.unbind('<MouseWheel>')  # Unbind mouse wheel for zoom
+            self.canvas.unbind('<Button-5>')  # Unbind mouse wheel scroll down for Linux
+            self.canvas.unbind('<Button-4>')  # Unbind mouse wheel scroll up for Linux
+            self.canvas.destroy()
+            del self.canvas
         #del self
         collect()
 
@@ -178,10 +192,16 @@ class CanvasImage:
         self.canvas_height = int(self.geometry_height)
         self.canvas_width = int(self.geometry_width)
         self.randomid = 0
+        self.randomid = randint(0,999999)
         pass
     def refresh_canvas(self):
         # Handle .mp4, .webm - VLC (audio)
-        
+        self.canvas = tk.Canvas(self.__imframe, bg=self.gui.viewer_bg,
+            highlightthickness=0, xscrollcommand=self.hbar.set,
+            yscrollcommand=self.vbar.set, width=self.geometry_width, height = self.geometry_height)  # Set canvas dimensions to remove scrollbars
+        self.canvas.grid(row=0, column=0, sticky='nswe')
+        self.grid(row = 0, column = 0, sticky = "NSEW")
+
         self.canvas.config(width=self.geometry_width, height=self.geometry_height)
         self.canvas.grid(row=0, column=0, sticky='nswe')
         if self.obj.path.lower().endswith((".mp4",".webm")): # Is video
@@ -365,10 +385,12 @@ class CanvasImage:
     def handle_static(self):
         def lazy_pyramid(w, h):
             "Generates zoom pyramid"
-            def render_second():
+            def render_second(inp):
                 self.pyramid_ready.wait(timeout=2)
                 self.first_rendered.wait(timeout=2)
                 self.replace_await = True
+                if inp != self.randomid:
+                    return
                 try:
                     self.__show_image()
                 except Exception as e:
@@ -376,7 +398,8 @@ class CanvasImage:
 
             try:
                 if self.file_size > self.gui.quick_preview_size_threshold:
-                    Thread(target=render_second, daemon=True).start()
+                    self.render2 = Thread(target=render_second, args=(self.randomid,), daemon=True)
+                    self.render2.start()
                 self.pyramid = [Image.open(self.path)]
                 c11.set()
                 while w > 512 and h > 512: # stop this if program closing
@@ -397,11 +420,13 @@ class CanvasImage:
         c11 = Event()
         #self.gui.size.set(f"{self.file_size} MB")
         Thread(target=lazy_pyramid, args=(w,h), daemon=True).start()
-        c11.wait()
         self.canvas.delete("all")
         if hasattr(self, "original_x"):
             self.canvas.xview_moveto(self.original_x)
             self.canvas.yview_moveto(self.original_y)
+        c11.wait()
+        
+        
         self.container = self.canvas.create_rectangle((0, 0, self.imwidth, self.imheight), width=0)
     def doit(self):
         self.__show_image()
@@ -412,6 +437,9 @@ class CanvasImage:
             "Generates frames for gif, webp"
             if hasattr(self, "load_frames_thread") and self.load_frames_thread:
                 self.load_frames_thread.join()
+            self.delay = 0
+            self.frames = []            # Stores loaded frames for .Gif, .Webp
+            self.frametimes = []
                 
             self.load_frames_thread = self.temp_thread
             try:
@@ -422,6 +450,8 @@ class CanvasImage:
                 else:
                     self.delay = frame_frametime
                 self.frametimes.append(frame_frametime)
+                if inp != self.randomid:
+                    return
                 frame = ImageTk.PhotoImage(image1.resize((new_width, new_height)), Image.Resampling.LANCZOS)
                 self.frames.append(frame)
                 frame_width = frame.width()
@@ -429,11 +459,15 @@ class CanvasImage:
                 
                 x_offset = (self.canvas_width - frame_width) // 2
                 y_offset = (self.canvas_height - frame_height) // 2
+                if inp != self.randomid:
+                    return
                 self.canvas.delete("all")
                 if hasattr(self, "original_x"):
                     self.canvas.xview_moveto(self.original_x)
                     self.canvas.yview_moveto(self.original_y)
+                self.canvas.update()
                 self.imageid = self.canvas.create_image(x_offset, y_offset, anchor='nw', image=frame)
+                lazy_load(self.randomid)
 
                 self.gui.first_render.set(f"F: {self.timer.stop()}")
                 temp = self.framecount
@@ -445,20 +479,26 @@ class CanvasImage:
                             return
                         image1.seek(i)
                         frame_frametime = image1.info.get('duration', self.delay)
+                        if inp != self.randomid:
+                            return
                         frame = ImageTk.PhotoImage(image1.resize((new_width, new_height)), Image.Resampling.LANCZOS)
                         if inp != self.randomid:
                             return
                         self.frametimes.append(frame_frametime)
                         self.frames.append(frame)
                         self.framecount_temp += 1
-                        self.gui.frameinfo.set(f"F/D: {self.lazy_index}/{len(self.frames)}/{self.framecount_temp}")
-                        self.gui.frametimeinfo.set(f"{self.frametimes[self.lazy_index]} ms")
+                        try:
+                            self.gui.frameinfo.set(f"F/D: {self.lazy_index}/{len(self.frames)}/{self.framecount_temp}")
+                            self.gui.frametimeinfo.set(f"{self.frametimes[self.lazy_index]} ms")
+                        except:
+                            pass
                     if all(i == 0 for i in self.frametimes):
                         for i in range(len(self.frametimes)):
                             if inp != self.randomid:
                                 return
                             self.frametimes[i] = self.delay
-                except:
+                except Exception as e:
+                    print("tryloop", e)
                     pass
 
                 self.gui.buffered.set(f"L: {self.timer.stop()}")
@@ -481,17 +521,18 @@ class CanvasImage:
                 collect()
                 logger.debug(f"Error loading frames: {e}")
         def lazy_load(inp):
-            def animate_image(inp):
+            def animate_image(inp, index):
                 "Simple gif looper"
                 if not inp == self.randomid:
                     return
                 try:
-                    self.canvas.itemconfig(self.imageid, image=self.frames[self.lazy_index])
-                    self.canvas.after(self.frametimes[self.lazy_index], lambda: animate_image(inp))
-                    self.lazy_index = (self.lazy_index + 1) % len(self.frames)
-                    self.gui.frameinfo.set(f"F/D: {self.lazy_index}/{len(self.frames)}/{self.framecount_temp}")
-                    self.gui.frametimeinfo.set(f"{self.frametimes[self.lazy_index]} ms")
-                except:
+                    self.canvas.itemconfig(self.imageid, image=self.frames[index])
+                    self.canvas.after(self.frametimes[index], lambda: animate_image(inp, index))
+                    index = (index + 1) % len(self.frames)
+                    self.gui.frameinfo.set(f"F/D: {index}/{len(self.frames)}/{self.framecount_temp}")
+                    self.gui.frametimeinfo.set(f"{self.frametimes[index]} ms")
+                except Exception as e:
+                    print("animateloop", e, index, len(self.frames), len(self.frametimes), self.framecount_temp, inp == self.randomid)
                     return
             if not inp == self.randomid:
                 return
@@ -499,7 +540,7 @@ class CanvasImage:
                 "Display new frames as soon as possible, when all loaded, switch to simple looping method"
                 if not self.lazy_loading: # When all frames are loaded, we switch to just looping
                     logger.debug("All frames loaded, stopping lazy_load")
-                    animate_image(inp)
+                    animate_image(inp, self.lazy_index)
                     return
                 elif not self.frames or not len(self.frames) > self.lazy_index: #if the list is still empty. Wait.
                     logger.debug("Buffering") #Ideally 0 buffering, update somethng so frames is initialzied quaranteed.
@@ -516,11 +557,10 @@ class CanvasImage:
                 else:
                     logger.error("Error in lazy load, take a look")
                     self.canvas.after(self.delay, lambda: lazy_load(inp))
-            except:
+            except Exception as e:
+                print("lazyload", e, self.lazy_index, self.framecount_temp, len(self.frames), len(self.frametimes))
                 return
-        self.frametimes = []
-        self.delay = 0
-        self.frames = []            # Stores loaded frames for .Gif, .Webp
+        
         new_width = self.canvas_width
         new_height = self.canvas_height
         aspect_ratio = self.imwidth / self.imheight
@@ -530,11 +570,8 @@ class CanvasImage:
             new_height = int(new_width / aspect_ratio)
         self.imageid = None
 
-        self.randomid = randint(0,999999)
-        
         self.temp_thread = Thread(target=load_frames, args=(self.image, new_width, new_height, self.randomid), daemon=True)
         self.temp_thread.start()
-        lazy_load(self.randomid)
         self.container = self.canvas.create_rectangle((0, 0, self.imwidth, self.imheight), width=0)
 
     "Display"
@@ -844,13 +881,13 @@ class CanvasImage:
             for x in self.frames:
                 del x
             self.frames.clear()
-            del self.frames
+            #del self.frames
             
         if hasattr(self, "frametimes"):
             for x in self.frametimes:
                 del x
             self.frametimes.clear()
-            del self.frametimes
+            #del self.frametimes
             
         if hasattr(self, "imageid"):
             del self.imageid
