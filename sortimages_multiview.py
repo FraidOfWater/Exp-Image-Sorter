@@ -703,7 +703,7 @@ class SortImages:
             if add:
                 gui.destination_viewer.add_squares(add)
             "If show next option checked, and next exists, and viewer is open, show next image"
-            if self.navigator.old and len(gridmanager.displayedset) >= 1:
+            if self.navigator.old and gui.show_next.get() and len(gridmanager.displayedset) >= 1:
                 self.navigator.select_next(gridmanager.displayedlist)
 
             if gui.auto_load and gui.current_view.get() == "Show Unassigned": 
@@ -947,7 +947,7 @@ class ThumbManager:
                     buffer = None
                     pyvips_image = None
 
-                    imagetk = ImageTk.PhotoImage(pillows_image) # hangs here
+                    imagetk = ImageTk.PhotoImage(pillows_image)
                     if imagefile.ext in self.video_formats:
                         imagefile.dimensions = (imagetk.width(), imagetk.height())
 

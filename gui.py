@@ -24,6 +24,7 @@ from tkinter import filedialog as tkFileDialog
 from canvasimage import CanvasImage
 from destination_viewer import Destination_Viewer
 
+import objgraph
 #import objgraph
 
 logger = logging.getLogger("GUI")
@@ -58,6 +59,10 @@ class GUIManager(tk.Tk): #Main window
         self.buttons1 = []
         self.menus = []
         self.fields = []
+
+        self.imframe = None
+        self.hbar = None
+        self.vbar = None
         "Debugging / Stats"
         if True: # move most to their dedicated spots next to their buttons.
             self.do_anim_loading_colors = False
@@ -166,11 +171,11 @@ class GUIManager(tk.Tk): #Main window
             # Return the RSS (Resident Set Size) in bytes
             return (memory_info.rss)
         self.current_ram_strvar.set(f"RAM: {get_memory_usage() / (1024 ** 2):.2f} MB")
-        #print("")
-        #print("")
-        #print("")
-        #objgraph.show_growth()
-        #print(len(objgraph.get_leaking_objects()))
+        print("")
+        print("")
+        print("")
+        objgraph.show_growth()
+        print(len(objgraph.get_leaking_objects()))
 
 
 
@@ -1123,42 +1128,29 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
         def close_old(Image_frame):
             "Closes and cleanups the old canvasimage instance"
             if Image_frame:
-                return
-                #self.middlepane_frame.grid_forget()
-                #Image_frame.canvas.unbind("<Configure>")
-                #Image_frame.destroy() # bug here for mp4.  #hangs, passed to main thread, then the unbinding hangs for some reason.
+                self.middlepane_frame.grid_forget()
+                Image_frame.canvas.unbind("<Configure>")
+                Image_frame.destroy() # bug here for mp4.
 
-                #Image_frame = None
-                #del Image_frame
+                Image_frame = None
+                del Image_frame
                 #collect() ###
 
         # Middlepane width refresh
         if self.middlepane_frame.winfo_width() != 1:
             self.middlepane_width = self.middlepane_frame.winfo_width()
 
-        if self.dock_view.get(): # Dock viewer
+        if self.dock_view.get(): # Dock viewer            
             geometry = str(self.middlepane_width) + "x" + str(self.winfo_height())
-            if not hasattr(self, "Image_frame"):
-                self.Image_frame = CanvasImage(self.middlepane_frame, geometry, obj, self)
-                
-                print(self.Image_frame.imwidth)
-                self.Image_frame.rescale(min(self.middlepane_width / self.Image_frame.imwidth, self.winfo_height() / self.Image_frame.imheight))  # Scales to the window
-                self.Image_frame.center_image(self.viewer_x_centering, self.viewer_y_centering)
-                self.Image_frame.doit()
-                #self.Image_frame.canvas.update_idletasks()
-                logger.debug("Rescaled and Centered")
-            else:
-                self.Image_frame.scrub()
-                self.Image_frame.reset_values(geometry, obj, self) # geometry should be updated
-                self.Image_frame.refresh_canvas()
-                self.Image_frame.rescale(min(self.middlepane_width / self.Image_frame.imwidth, self.winfo_height() / self.Image_frame.imheight))  # Scales to the window
-                
-                self.Image_frame.center_image(self.viewer_x_centering, self.viewer_y_centering)
-                self.Image_frame.doit()
-                
+            self.new = CanvasImage(self.middlepane_frame, geometry, obj, self)
+            self.new.grid(row = 0, column = 0, sticky = "NSEW")
+            self.new.rescale(min(self.middlepane_width / self.new.imwidth, self.winfo_height() / self.new.imheight))  # Scales to the window
+            self.new.center_image(self.viewer_x_centering, self.viewer_y_centering)
+            logger.debug("Rescaled and Centered")
+
             self.focused_on_secondwindow = True
 
-            self.Image_frame.canvas.focus_set()
+            self.new.canvas.focus_set()
             
         else: # Standalone image viewer
             if not hasattr(self, 'second_window') or not self.second_window or not self.second_window.winfo_exists():
@@ -1178,35 +1170,24 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
             self.second_window.title("Image: " + obj.path)
             geometry = self.second_window.wm_geometry().split('+', 1)[0]
             x, y = geometry.split("x")
-            if not hasattr(self, "Image_frame"):
-                self.Image_frame = CanvasImage(self.second_window, geometry, obj, self)
-                
-                print(self.Image_frame.imwidth)
-                self.Image_frame.rescale(min(int(x) / self.Image_frame.imwidth, int(y) / self.Image_frame.imheight))  # Scales to the window
-                self.Image_frame.center_image(self.viewer_x_centering, self.viewer_y_centering)
-                self.Image_frame.doit()
-                #self.Image_frame.canvas.update_idletasks()
-                logger.debug("Rescaled and Centered")
-            else:
-                self.Image_frame.scrub()
-                self.Image_frame.reset_values(geometry, obj, self) # geometry should be updated
-                self.Image_frame.refresh_canvas()
-                self.Image_frame.rescale(min(int(x) / self.Image_frame.imwidth, int(y) / self.Image_frame.imheight))  # Scales to the window
-                self.Image_frame.center_image(self.viewer_x_centering, self.viewer_y_centering)
-                self.Image_frame.doit()
-                
+            self.new = CanvasImage(self.second_window, geometry, obj, self)
+            self.new.grid(row = 0, column = 0, sticky = "NSEW")  # Initialize Frame grid statement in canvasimage, Add to main window grid
+            self.new.rescale(min(int(x) / self.new.imwidth, int(y) / self.new.imheight))  # Scales to the window
+            self.new.center_image(self.viewer_x_centering, self.viewer_y_centering)
+
+            logger.debug("Rescaled and Centered")
             self.focused_on_secondwindow = True
 
             if not self.show_next.get(): # wait for window to initialize
-                self.second_window.after(0, lambda: self.Image_frame.canvas.focus_set())
+                self.second_window.after(0, lambda: self.new.canvas.focus_set())
             else:
-                self.second_window.after(0, lambda: self.Image_frame.canvas.focus_set())
-        #if not hasattr(self, "Image_frame"):
-        #    self.Image_frame = self.new
-        #    return
-        #else:
-        #    #Thread(target=close_old, args=(self.Image_frame,), daemon=True).start()
-        #    #self.Image_frame = self.new
+                self.second_window.after(0, lambda: self.new.canvas.focus_set())
+        if not hasattr(self, "Image_frame"):
+            self.Image_frame = self.new
+            return
+        else:
+            Thread(target=close_old, args=(self.Image_frame,), daemon=True).start()
+            self.Image_frame = self.new
     
     "Exit function" # How we exit the program and close windows
     def closeprogram(self):
