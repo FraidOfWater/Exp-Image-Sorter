@@ -37,6 +37,7 @@ class AutoScrollbar(ttk.Scrollbar):
 class CanvasImage:
     """ Display and zoom image """
     "Initialization"
+    
     def __init__(self, master, imagewindowgeometry, imageobj, gui):
         self.timer = gui.fileManager.timer
         self.timer.start()
@@ -93,14 +94,13 @@ class CanvasImage:
         """ Initialization of frame in master widget"""
         if self.gui.imframe == None:
             self.gui.imframe = ttk.Frame(master, style="bg.TFrame")
-            self.gui.hbar1 = AutoScrollbar(self.gui.imframe, orient='horizontal')
-            self.gui.vbar1 = AutoScrollbar(self.gui.imframe, orient='vertical')
+            self.gui.hbar1 = None
+            self.gui.vbar1 = None
         # Vertical and horizontal scrollbars for __imframe
         
         # Create canvas and bind it with scrollbars. Public for outer classes
         self.canvas = tk.Canvas(self.gui.imframe, bg=gui.viewer_bg,
-                                highlightthickness=0, xscrollcommand=self.gui.hbar1.set,
-                                yscrollcommand=self.gui.vbar1.set, width=geometry_width, height = geometry_height)  # Set canvas dimensions to remove scrollbars
+                                highlightthickness=0, width=geometry_width, height = geometry_height)  # Set canvas dimensions to remove scrollbars
         self.canvas.grid(row=0, column=0, sticky='nswe') # Place into grid
         #self.canvas.grid_propagate(True) #Experimental
         self.canvas_height = int(geometry_height)
@@ -153,7 +153,7 @@ class CanvasImage:
                 self.pyramid_ready = Event()
                 self.first_rendered = Event()
                 self.handle_static()
-            #self.binds(animated=True)
+            self.binds(animated=True)
         # Handle static images
         else:
             self.__pyramid = [self.smaller()] if self.__huge else [Image.open(self.path)]
@@ -161,29 +161,28 @@ class CanvasImage:
             self.pyramid_ready = Event()
             self.first_rendered = Event()
             self.handle_static()
-            #self.binds(animated=False)
+            self.binds(animated=False)
         
         self.canvas.bind('<Configure>', lambda event: self.__show_image())  # canvas is resized from displayimage, time to show image.
-
+    
     def binds(self, animated):
-        return
         # Bind events to the Canvas
-        #self.canvas.bind('<ButtonPress-1>', self.__move_from)  # remember canvas position / panning
+        self.canvas.bind('<ButtonPress-1>', self.__move_from)  # remember canvas position / panning
         #self.canvas.bind('<ButtonRelease-1>', lambda event: self.time_set(event))  # remember canvas position / panning (navigator)
-        #self.canvas.bind('<B1-Motion>',     self.__move_to)  # move canvas to the new position / panning
-        #if not animated:
-        #    self.canvas.bind('<MouseWheel>', self.__wheel)  # zoom for Windows and MacOS, but not Linux / zoom pyramid.
-        #    self.canvas.bind('<Button-5>',   self.__wheel)  # zoom for Linux, wheel scroll down
-        #    self.canvas.bind('<Button-4>',   self.__wheel)  # zoom for Linux, wheel scroll up
+        self.canvas.bind('<B1-Motion>',     self.__move_to)  # move canvas to the new position / panning
+        if not animated:
+            self.canvas.bind('<MouseWheel>', self.__wheel)  # zoom for Windows and MacOS, but not Linux / zoom pyramid.
+            self.canvas.bind('<Button-5>',   self.__wheel)  # zoom for Linux, wheel scroll down
+            self.canvas.bind('<Button-4>',   self.__wheel)  # zoom for Linux, wheel scroll up
     "Video"
     def handle_video(self):
         "Handles videos"
         def video_print_data():
             try:
-                if self.gui.dock_view.get():
-                    self.gui.bind("<Configure>", resize_video)
-                elif hasattr(self.gui, "second_window"):
-                    self.gui.second_window.bind("<Configure>", resize_video)
+                #if self.gui.dock_view.get():
+                #    self.gui.bind("<Configure>", resize_video)
+                #elif hasattr(self.gui, "second_window"):
+                #    self.gui.second_window.bind("<Configure>", resize_video)
                 if hasattr(self, "media"):
                     self.media.parse()
                     total_seconds = int(self.media.get_duration()/1000)
@@ -285,6 +284,7 @@ class CanvasImage:
         Thread(target=video_print_data, daemon=True).start()
 
     "Static"
+    
     def handle_static(self):
         def lazy_pyramid(w, h):
             "Generates zoom pyramid"
@@ -322,19 +322,6 @@ class CanvasImage:
         Thread(target=lazy_pyramid, args=(w,h), daemon=True).start()
         c11.wait()
         self.container = self.canvas.create_rectangle((0, 0, self.imwidth, self.imheight), width=0)
-    def resize_static(self, *args):
-        if perf_counter() - self.time1 < 0.1:
-            return
-        new_width = self.gui.middlepane_frame.winfo_width()
-        aspect_ratio = self.imwidth / self.imheight
-        new_height = int(new_width / aspect_ratio)
-        if self.gui.middlepane_frame.winfo_width() != 1:
-            try:
-                if not self.canvas.winfo_width() == new_width or not self.canvas.winfo_height() == new_height:
-                    pass
-            except Exception as e:
-                logger.debug(f"Error in resize_static {e}")
-                pass
 
     "GIF"
     def handle_gif(self):
@@ -478,7 +465,7 @@ class CanvasImage:
                     box_scroll[1]  = box_img_int[1]
                     box_scroll[3]  = box_img_int[3]
                 # Convert scroll region to tuple and to integer
-                self.canvas.configure(scrollregion=tuple(map(int, box_scroll)))  # set scroll region
+                #self.canvas.configure(scrollregion=tuple(map(int, box_scroll)))  # set scroll region
                 x1 = max(box_canvas[0] - box_image[0], 0)  # get coordinates (x1,y1,x2,y2) of the image tile
                 y1 = max(box_canvas[1] - box_image[1], 0)
                 x2 = min(box_canvas[2], box_image[2]) - box_image[0]

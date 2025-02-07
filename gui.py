@@ -174,11 +174,11 @@ class GUIManager(tk.Tk): #Main window
             # Return the RSS (Resident Set Size) in bytes
             return (memory_info.rss)
         self.current_ram_strvar.set(f"RAM: {get_memory_usage() / (1024 ** 2):.2f} MB")
-        print("")
-        print("")
-        print("")
-        objgraph.show_growth()
-        print(len(objgraph.get_leaking_objects()))
+        #print("")
+        #print("")
+        #print("")
+        #objgraph.show_growth()
+        #print(len(objgraph.get_leaking_objects()))
 
 
 
@@ -1151,6 +1151,7 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
             self.new.grid(row = 0, column = 0, sticky = "NSEW")
             self.new.rescale(min(self.middlepane_width / self.new.imwidth, self.winfo_height() / self.new.imheight))  # Scales to the window
             self.new.center_image(self.viewer_x_centering, self.viewer_y_centering)
+            
             logger.debug("Rescaled and Centered")
 
             self.focused_on_secondwindow = True
