@@ -66,8 +66,7 @@ class CanvasImage:
         self.gui.frameinfo.set(f"F/D: -")
         self.gui.info.set(f"Size: {self.file_size} MB")
         # The initial quality of placeholder image, used to display the image just a bit faster.
-        accepted_modes = ["NEAREST", "BILINEAR", "BICUBIC", "LANCZOS"]
-        if gui.filter_mode.upper() in accepted_modes:
+        if gui.filter_mode.upper() in self.gui.accepted_modes:
             self.__first_filter = getattr(Image.Resampling, gui.filter_mode.upper())
         else:
             self.__first_filter = Image.Resampling.BILINEAR
@@ -94,24 +93,23 @@ class CanvasImage:
         """ Initialization of frame in master widget"""
         if self.gui.imframe == None:
             self.gui.imframe = ttk.Frame(master, style="bg.TFrame")
-            self.gui.hbar = AutoScrollbar(self.gui.imframe, orient='horizontal')
-            self.gui.vbar = AutoScrollbar(self.gui.imframe, orient='vertical')
+            self.gui.hbar1 = AutoScrollbar(self.gui.imframe, orient='horizontal')
+            self.gui.vbar1 = AutoScrollbar(self.gui.imframe, orient='vertical')
         # Vertical and horizontal scrollbars for __imframe
         
         # Create canvas and bind it with scrollbars. Public for outer classes
         self.canvas = tk.Canvas(self.gui.imframe, bg=gui.viewer_bg,
-                                highlightthickness=0, xscrollcommand=self.gui.hbar.set,
-                                yscrollcommand=self.gui.vbar.set, width=geometry_width, height = geometry_height)  # Set canvas dimensions to remove scrollbars
+                                highlightthickness=0, xscrollcommand=self.gui.hbar1.set,
+                                yscrollcommand=self.gui.vbar1.set, width=geometry_width, height = geometry_height)  # Set canvas dimensions to remove scrollbars
         self.canvas.grid(row=0, column=0, sticky='nswe') # Place into grid
         #self.canvas.grid_propagate(True) #Experimental
         self.canvas_height = int(geometry_height)
         self.canvas_width = int(geometry_width)
         #self.canvas.update() #profile
 
-        self.file_type = ["STATIC", "VIDEO", "ANIMATION"]
         # Handle .mp4, .webm - VLC (audio)
         if self.obj.path.lower().endswith((".mp4",".webm")): # Is video
-            self.file_type = self.file_type[1]
+            self.file_type = self.gui.file_types[1]
             self.imwidth, self.imheight = self.obj.dimensions
             self.handle_video()
             self.binds(animated=True)
@@ -146,12 +144,12 @@ class CanvasImage:
         if self.obj.path.lower().endswith((".gif",".webp")):
             self.framecount = self.image.n_frames
             if self.framecount > 1:
-                self.file_type = self.file_type[2]
+                self.file_type = self.gui.file_types[2]
                 self.gui.frameinfo.set(f"F/D: {0}/{0}/{self.obj.framecount}")
                 self.handle_gif()
             else:
                 self.__pyramid = [self.smaller()] if self.__huge else [Image.open(self.path)]
-                self.file_type = self.file_type[0]
+                self.file_type = self.gui.file_types[0]
                 self.pyramid_ready = Event()
                 self.first_rendered = Event()
                 self.handle_static()
@@ -159,7 +157,7 @@ class CanvasImage:
         # Handle static images
         else:
             self.__pyramid = [self.smaller()] if self.__huge else [Image.open(self.path)]
-            self.file_type = self.file_type[0]
+            self.file_type = self.gui.file_types[0]
             self.pyramid_ready = Event()
             self.first_rendered = Event()
             self.handle_static()
@@ -735,18 +733,14 @@ class CanvasImage:
                 aa = Thread(target=stop_player, args=(self.player,), daemon=True) # bug here
                 aa.start()
                 aa.join(timeout=1) ### bug here?
-                #self.player.release()
                 self.video_frame_id = None
                 self.player = None
                 self.video_frame = None
                 self.media_list_player = None
                 self.media_list = None
                 self.media = None
-                #self.vlc_instance
                 del self.player
-                #self.gui.update()
-                #self.canvas.update()
-                #self.canvas.after(2)
+
 
             except Exception as e:
                 logger.debug("Error closing player", e)
@@ -785,12 +779,6 @@ class CanvasImage:
         if hasattr(self, "pyramid"):
             self.pyramid.clear()
             del self.pyramid
-        #if hasattr(self, "hbar"):
-        #    self.hbar.destroy()
-        #    del self.hbar
-        #if hasattr(self, "vbar"):
-        #    self.vbar.destroy()
-        #    del self.vbar
         if hasattr(self, "canvas"):
             self.canvas.unbind('<ButtonPress-1>')  # Unbind left mouse button press
             self.canvas.unbind('<ButtonRelease-1>')  # Unbind left mouse button release
@@ -800,10 +788,6 @@ class CanvasImage:
             self.canvas.unbind('<Button-4>')  # Unbind mouse wheel scroll up for Linux
             self.canvas.destroy()
             del self.canvas
-        #if hasattr(self, "__imframe"):
-        #    self.__imframe.destroy()
-        #    self.__imframe=None
-        #    del self.__imframe
         if hasattr(self, "style"):
             del self.style
         if hasattr(self, "__curr_img"):
@@ -819,6 +803,16 @@ class CanvasImage:
             del self.imscale
         del self
         collect()
+    def destroy_imframe(self):
+        if hasattr(self.gui, "imframe") and self.gui.imframe != None:
+            self.gui.imframe.destroy()
+            self.gui.imframe=None
+            if hasattr(self, "hbar"):
+                self.gui.hbar1.destroy()
+                del self.gui.hbar1
+            if hasattr(self, "vbar"):
+                self.gui.vbar1.destroy()
+                del self.gui.vbar1
         # Garbage collection INFO
         #objects = gc.get_objects()
 #

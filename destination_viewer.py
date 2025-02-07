@@ -167,7 +167,7 @@ class Destination_Viewer():
 
             #Create different dest for destinations to control view better. These also call a command to cancel the viewer image from being moved by keypresses, if we interact with other gridsquares first.
             check = ttk.Checkbutton(check_frame, textvariable=truncated_name_var, variable=imageobj.checked, onvalue=True, offvalue=False, command=lambda: (setattr(self.gui, 'focused_on_secondwindow', False)), style="Theme_square.TCheckbutton")
-            check.grid(sticky="NSEW")
+            check.grid(sticky="EW")
 #
             ## save the data to the image obj to both store a reference and for later manipulation
             imageobj.guidata["destframe"] = frame

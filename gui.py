@@ -61,8 +61,11 @@ class GUIManager(tk.Tk): #Main window
         self.fields = []
 
         self.imframe = None
-        self.hbar = None
-        self.vbar = None
+        self.hbar1 = None
+        self.vbar1 = None
+
+        self.accepted_modes = ["NEAREST", "BILINEAR", "BICUBIC", "LANCZOS"]
+        self.file_types = ["STATIC", "VIDEO", "ANIMATION"]
         "Debugging / Stats"
         if True: # move most to their dedicated spots next to their buttons.
             self.do_anim_loading_colors = False
@@ -179,6 +182,7 @@ class GUIManager(tk.Tk): #Main window
 
 
 
+
         "Anim: displayedlist with frames/displayedlist with framecount/(queue)"
         temp = [x for x in self.gridmanager.displayedlist if x.obj.frametimes]
         self.animation_stats.set(f"Anim: {len(self.fileManager.animate.running)}/{len(temp)}")
@@ -233,7 +237,7 @@ class GUIManager(tk.Tk): #Main window
                 self.Image_frame.canvas.unbind("<Configure>")
                 self.Image_frame.destroy()
                 del self.Image_frame
-                self.after(500, lambda: obj.rename(self.saved_text, self.fileManager))
+                self.after(0, lambda: obj.rename(self.saved_text, self.fileManager)) ######testing
 
     
 
@@ -930,6 +934,7 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                         self.middlepane_frame.grid_forget()
                         self.Image_frame.canvas.unbind("<Configure>")
                         self.Image_frame.destroy()
+                        self.Image_frame.destroy_imframe()
                         
                         del self.Image_frame
                         self.displayimage(self.fileManager.navigator.old.obj) # If something was displayed, we want to display it in standalone viewer.
@@ -1216,7 +1221,7 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
             self.middlepane_frame.grid_forget()
             self.Image_frame.canvas.unbind("<Configure>")
             self.Image_frame.destroy()
-            
+            self.Image_frame.destroy_imframe()
             del self.Image_frame
         if hasattr(self, 'second_window') and self.second_window and self.second_window.winfo_exists():
             self.viewer_geometry = self.second_window.winfo_geometry()
@@ -1311,30 +1316,23 @@ class GridManager:
 
             # Super expensive? 95 % of loadsession time is used on this XD...
             check = ttk.Checkbutton(check_frame, textvariable=truncated_name_var, variable=imageobj.checked, onvalue=True, offvalue=False, command=lambda: (setattr(self.gui, 'focused_on_secondwindow', False)), style="Theme_square.TCheckbutton")
-            check.grid(sticky="NSEW")
+            check.grid(sticky="EW")
 
+            frame['background'] = self.gui.square_default
+            canvas['background'] = self.gui.square_default
             # save the data to the image obj to both store a reference and for later manipulation
-            imageobj.guidata = {"img": img, "frame": frame, "destframe": None, "canvas": canvas, "check": check, "show": True} #"tooltip":tooltiptext
+            imageobj.guidata = {"img": img, "frame": frame, "destframe": None, "color": (frame)} #"tooltip":tooltiptext
             frame.c = check
             # anything other than rightclicking toggles the checkbox, as we want.
-            canvas.bind("<Button-1>", partial(bindhandler, check, "invoke"))
+            canvas.bind("<Button-1>", lambda e: bindhandler(check, "invoke"))
             canvas.bind("<Button-3>", lambda e: (self.fileManager.navigator.select(frame)))
             check.bind("<Button-3>", lambda e: (self.fileManager.navigator.select(frame)))
             check_frame.bind("<Button-3>", lambda e: (self.fileManager.navigator.select(frame)))
 
             #make blue if only one that is blue, must remove other blue ones. blue ones are stored the gridsquare in a global list.
-            canvas.bind("<MouseWheel>", partial(
-                bindhandler, parent, "scroll"))
-            frame.bind("<MouseWheel>", partial(
-                bindhandler, self.gui.imagegrid, "scroll"))
-            check.bind("<MouseWheel>", partial(
-                bindhandler, self.gui.imagegrid, "scroll"))
-            check_frame.bind("<MouseWheel>", partial(
-                bindhandler, self.gui.imagegrid, "scroll"))
-
-
-            frame['background'] = self.gui.square_default
-            canvas['background'] = self.gui.square_default
+            canvas.bind("<MouseWheel>", lambda e: bindhandler(parent, "scroll", e))
+            check.bind("<MouseWheel>", lambda e: bindhandler(self.gui.imagegrid, "scroll",e))
+            check_frame.bind("<MouseWheel>", lambda e: bindhandler(self.gui.imagegrid, "scroll",e))
         except Exception as e:
             logger.error(e)
         return frame
@@ -1368,15 +1366,15 @@ class GridManager:
             for dest in self.fileManager.destinations:
                 if square.obj.dest == dest['path']:
                     square.obj.setdest(dest)
-                    square.obj.guidata["frame"]['background'] = dest['color']
-                    square.obj.guidata["canvas"]['background'] = dest['color']
+                    square.obj.guidata["frame"].bg = dest['color']
+                    square.obj.guidata["canvas"].bg = dest['color']
                     break
         for square in self.moved:
             for dest in self.fileManager.destinations:
                 if dest['path'] in square.obj.path: #if dest["path"] in folder
                     square.obj.setdest(dest)
-                    square.obj.guidata["frame"]['background'] = dest['color']
-                    square.obj.guidata["canvas"]['background'] = dest['color']
+                    square.obj.guidata["frame"].bg = dest['color']
+                    square.obj.guidata["canvas"].bg = dest['color']
                     break
     def load_more(self, amount=None) -> None:
         if not self.gui.current_view.get() == "Show Unassigned":

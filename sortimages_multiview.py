@@ -96,6 +96,7 @@ class Imagefile:
         self.index = 0              # Used to control what frame is displayed (for imgagegrid).
         self.delay = 100            #Default delay. Used to fill frametimes if speed can't be extracted from file.
 
+        self.saved_color = None
         "Canvasimage, video support"
         self.dimensions = None      # Used by canvasimage. VLC must know aspect ratio.
 
@@ -638,10 +639,12 @@ class SortImages:
             add = []
             for x in marked: #set background to button colour
                 x.obj.setdest(dest)
-                temp = x.obj.guidata.get("frame", None)
+                temp = x.obj.guidata.get("color", None)
                 if temp:
                     temp['background'] = dest['color']
-                    x.obj.guidata["canvas"]['background'] = dest['color']
+                    temp.canvas['background'] = dest['color']
+                    #save info to file
+                    
                 x.obj.checked.set(False)
 
 
@@ -898,8 +901,8 @@ class ThumbManager:
                     frame.canvas.itemconfig(frame.canvas_image_id, image=im)
                     return
                 elif load:
-                    canvas = imagefile.guidata['canvas']
                     frame = imagefile.guidata['frame']
+                    canvas = frame.canvas
                     canvas.image = im
                     canvas.itemconfig(frame.canvas_image_id, image=im)
                     return
@@ -911,8 +914,8 @@ class ThumbManager:
 
 
                 imagefile.guidata['img'] = im
-                canvas = imagefile.guidata['canvas']
                 frame = imagefile.guidata['frame']
+                canvas = frame.canvas
                 canvas.image = im
                 canvas.itemconfig(frame.canvas_image_id, image=im)
             
@@ -1258,14 +1261,12 @@ class ThumbManager:
 
         def unload_static(gridsquare):
             if dest == False:
-                canvas = gridsquare.obj.guidata.get("canvas", None)
-                if canvas:
-                    try:
-                        if hasattr(gridsquare, "canvas") and hasattr(gridsquare, "canvas_image_id"):
-                            gridsquare.canvas.itemconfig(gridsquare.canvas_image_id, image=None)
-                            gridsquare.canvas.image = None
-                    except Exception as e:
-                        print(e)
+                try:
+                    if hasattr(gridsquare, "canvas_image_id"):
+                        gridsquare.canvas.itemconfig(gridsquare.canvas_image_id, image=None)
+                        gridsquare.canvas.image = None
+                except Exception as e:
+                    print(e)
             frame = gridsquare.obj.guidata.get("frame", None) # remove frame  from guidata.
             destframe = gridsquare.obj.guidata.get("destframe", None)
             
@@ -1316,8 +1317,8 @@ class Animate:
     def start_animations(self, obj):
         def lazy(obj): # d0 th9s
             if self.gui.do_anim_loading_colors:
-                if obj.guidata.get("canvas", None):
-                    obj.guidata["canvas"]['background'] = "red" # note this points to gridsquare canvas.
+                if obj.guidata.get("frame", None):
+                    obj.guidata["frame"].canvas['background'] = "red" # note this points to gridsquare canvas.
             if obj not in self.running: # Stop if not in "view" or in self.running
                 return
             if not obj.frames: # No frames have been initialized. Or were removed.
@@ -1329,8 +1330,8 @@ class Animate:
                 return
             if not obj.lazy_loading and len(obj.frames) == obj.framecount: # All frames ready. (second part only webm, dead)
                 if self.gui.do_anim_loading_colors:
-                    if obj.guidata.get("canvas", None):
-                        obj.guidata["canvas"]['background'] = "green"
+                    if obj.guidata.get("frame", None):
+                        obj.guidata["frame"].canvas['background'] = "green"
                 loop(obj)
             else:
                 animate_these = []
