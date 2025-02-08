@@ -95,6 +95,8 @@ class Imagefile:
         self.framecount = 0         # could use len(frames) instead? ###
         self.index = 0              # Used to control what frame is displayed (for imgagegrid).
         self.delay = 100            #Default delay. Used to fill frametimes if speed can't be extracted from file.
+        self.frame = None
+        self.destframe = None
 
         self.saved_color = None
         "Canvasimage, video support"
@@ -112,8 +114,7 @@ class Imagefile:
         self.path = new_path
         self.name = name
         self.truncated_filename = fileManager.thumbs.truncate_text(self)
-        frame = self.guidata["frame"]
-        frame.obj2.set(self.truncated_filename)
+        self.frame.obj2.set(self.truncated_filename)
         fileManager.gui.displayimage(fileManager.navigator.select(fileManager.navigator.old))
 
     def move(self, fileManager) -> None:
@@ -184,7 +185,7 @@ class SortImages:
         "Normal attributes"
         self.autosave=True
         self.threads = 4 # Roughly how much computing power you use. Thumbs use twice this amount, frames half.
-        self.max_concurrent_frames = 6000 #6200 # memory overflow / bitmap allocation fix. Too many tkinter animations will crash the program. Use this to limit the amount of frames in memory.
+        self.max_concurrent_frames = 4000 #6200 # memory overflow / bitmap allocation fix. Too many tkinter animations will crash the program. Use this to limit the amount of frames in memory.
         self.animation_queue = []
         "Start modules"
         self.gui = GUIManager(self) # loadprefs() edits self.gui attributes. Create self.gui and attributes for loadprefs() to manipulate.
@@ -808,7 +809,7 @@ class SortImages:
 
         # Sort by date modificated
         if self.gui.sort_by_date_boolvar.get():
-            self.imagelist.sort(key=lambda img: os.path.getmtime(img.path), reverse=False) # 65
+            self.imagelist.sort(key=lambda img: os.path.getmtime(img.path), reverse=False) # 65 ######## false
         #elif self.gui.sort_by_size_boolvar.get():
         #    self.imagelist.sort(key=lambda img: os.path.getsize(img.path), reverse=False)
 
@@ -864,9 +865,9 @@ class ThumbManager:
             
             fileManager = self.fileManager
             animation_queue = fileManager.animation_queue
-            temp = reversed(animation_queue)
+            temp = animation_queue.copy()
             for x in temp:
-                if x.guidata.get("frame", None) or x.guidata.get("destframe", None):
+                if x.frame or x.destframe:
                     gen_frames(x)
                 else:
                     animation_queue.remove(x)
@@ -898,25 +899,25 @@ class ThumbManager:
             def load_thumb(im, load=False):
                 #copy over if img exists
                 if load and dest:
-                    frame = imagefile.guidata['destframe']
+                    frame = imagefile.destframe
                     frame.canvas.image = im
                     frame.canvas.itemconfig(frame.canvas_image_id, image=im)
                     return
                 elif load:
-                    frame = imagefile.guidata['frame']
+                    frame = imagefile.frame
                     canvas = frame.canvas
                     canvas.image = im
                     canvas.itemconfig(frame.canvas_image_id, image=im)
                     return
                 if dest:
-                    frame = imagefile.guidata['destframe']
+                    frame = imagefile.destframe
                     frame.canvas.image = im
                     frame.canvas.itemconfig(frame.canvas_image_id, image=im)
                     return
 
 
                 imagefile.guidata['img'] = im
-                frame = imagefile.guidata['frame']
+                frame = imagefile.frame
                 canvas = frame.canvas
                 canvas.image = im
                 canvas.itemconfig(frame.canvas_image_id, image=im)
@@ -1039,157 +1040,127 @@ class ThumbManager:
 
                     except Exception as e:
                         print(f"Pillows couldn't create thumbnail: {imagefile.name} : Error: {e}")
-
         def gen_name(imagefile):
         
             #---------
             imagefile.truncated_filename = self.truncate_text(imagefile)
-            if imagefile.guidata.get("frame", None) != None:
-                frame = imagefile.guidata['frame'] # Gen it once to imagefile. Check if frame and dest exists, load it in those gridsquares, if trunc not set.
-                frame.obj2.set(imagefile.truncated_filename)
-            if imagefile.guidata.get("destframe", None) != None:
-                destframe = imagefile.guidata['destframe']
-                destframe.obj2.set(imagefile.truncated_filename)
+            if imagefile.frame:
+                imagefile.frame.obj2.set(imagefile.truncated_filename)
+            if imagefile.destframe:
+                imagefile.destframe.obj2.set(imagefile.truncated_filename)
         def gen_frames(imagefile): # session just calls this for displayedlist -> called only after gen_anim_data for all. Now this has framecounts.
-            if imagefile.frames:
-                #print("frames already exist")
+            if self.fileManager.program_is_exiting:
                 return
-            
-            while not self.fileManager.program_is_exiting and self.fileManager.gui.concurrent_frames < self.fileManager.max_concurrent_frames:
-                # Clear frames just in case.
-                if not isinstance(imagefile.frames, list):
-                    imagefile.frames = []
-                if not isinstance(imagefile.frametimes, list):
-                    imagefile.frametimes = []
-                if imagefile.ext in self.video_formats: #webm
-                    try:
-                        imagefile.frametimes.clear()
-                        imagefile.index = 0
-                        imagefile.frames.clear()
-                        imagefile.framecount = 0
-                        reader = get_reader(imagefile.path)
-                        fps = (reader.get_meta_data().get('fps', 24))
-                        imagefile.delay = int(round((1 / fps)*1000))
-                        if round(imagefile.file_size/1.048576/1000000,2) > 10:
-                            #print(f"{imagefile.name} is too big for grid animation.")
-                            imagefile.framecount = 2 # to register as "animated"
-                            if imagefile in self.fileManager.animation_queue:
-                                self.fileManager.animation_queue.remove(imagefile)
-                            return
-                        f = True
-                        for frame in reader:
-                            if not self.fileManager.gui.concurrent_frames < self.fileManager.max_concurrent_frames:
-                                imagefile.frametimes.clear()
-                                imagefile.frames.clear()
-                                imagefile.index = 0
-                                imagefile.framecount = 0
-                                if imagefile not in self.fileManager.animation_queue:
-                                    frame = imagefile.guidata.get("frame", None)
-                                    destframe = imagefile.guidata.get("destframe", None)
-                                    im = imagefile.guidata.get("img", None)
-                                    if frame:
-                                        if im:
-                                            frame.canvas.image = im
-                                            frame.canvas.itemconfig(frame.canvas_image_id, image=im)
-                                    if destframe:
-                                        if im:
-                                            destframe.canvas.image = im
-                                            destframe.canvas.itemconfig(destframe.canvas_image_id, image=im)
-                                return
-                        
-                            if self.fileManager.program_is_exiting:
-                                return
-                            image = Image.fromarray(frame)
-                            image.thumbnail((gui.thumbnailsize,gui.thumbnailsize))
-                            tk_image = ImageTk.PhotoImage(image)
-                            imagefile.frames.append(tk_image)
-                            imagefile.framecount += 1
-                            imagefile.frametimes.append(imagefile.delay)
-                            if f:
-                                self.animate.add_animation(imagefile)
-                                f = False
-                        self.fileManager.animation_queue.append(imagefile)
-                        imagefile.lazy_loading = False
+            "If at framelimit, add to animation queue if not there already."
+
+            if self.fileManager.gui.concurrent_frames >= self.fileManager.max_concurrent_frames:
+                return
+
+            # dont remove newcoming from queue, as we want to maintain order.
+            # remove only when gen is complete. lazy_load = False
+
+            # gen_frames is only called once if succesfull.
+            # On completion, imagefile is removed from animation queue and added to running.
+
+            if not isinstance(imagefile.frames, list): imagefile.frames = []
+            if not isinstance(imagefile.frametimes, list): imagefile.frametimes = []
+
+            #self.fileManager.animate.remove_animation(imagefile) # replace with a thumbnail?
+            imagefile.frames.clear()
+            imagefile.frametimes.clear()
+            imagefile.framecount = 0
+            imagefile.index = 0
+            imagefile.lazy_loading = True
+
+            if imagefile.ext in self.video_formats: #webm
+                try:
+                    reader = get_reader(imagefile.path)
+                    fps = (reader.get_meta_data().get('fps', 24))
+                    imagefile.delay = int(round((1 / fps)*1000))
+                    if round(imagefile.file_size/1.048576/1000000,2) > 10:
+                        #print(f"{imagefile.name} is too big for grid animation.")
+                        imagefile.framecount = 2 # to register as "animated"
                         if imagefile in self.fileManager.animation_queue:
                             self.fileManager.animation_queue.remove(imagefile)
-                    except Exception as e:
-                        print(f"Error in frame generation for grid: {e}")
-                    finally:
-                        if reader:
-                            reader.close()
+                            imagefile.lazy_loading = False
                         return
-                else: # Load frames for GIF, WEBP
-                    try:
-                        try:
-                            frames = mimread(imagefile.path)
-                        except Exception as e:
-                            if imagefile in self.fileManager.animation_queue:
-                                self.fileManager.animation_queue.remove(imagefile)
+ 
+                    for frame in reader:
+                        if self.fileManager.program_is_exiting:
                             return
-                        temp = []
-                        for x in frames:
-                            if not self.fileManager.gui.concurrent_frames < self.fileManager.max_concurrent_frames:
-                                imagefile.frametimes.clear()
-                                imagefile.index = 0
-                                imagefile.frames.clear()
-                                imagefile.framecount = 0
-                                if imagefile not in self.fileManager.animation_queue:
-                                    
-                                    frame = imagefile.guidata.get("frame", None)
-                                    destframe = imagefile.guidata.get("destframe", None)
-                                    im = imagefile.guidata.get("img", None)
-                                    if frame:
-                                        if im:
-                                            frame.canvas.image = im
-                                            frame.canvas.itemconfig(frame.canvas_image_id, image=im)
-                                    if destframe:
-                                        if im:
-                                            destframe.canvas.image = im
-                                            destframe.canvas.itemconfig(destframe.canvas_image_id, image=im)
-                                return
-                            if self.fileManager.program_is_exiting:
-                                return
-                            frame_rgb = np.array(x)
-                            frame_pil = Image.fromarray(frame_rgb)
-                            frame_pil.thumbnail((256,256), Image.Resampling.LANCZOS)
-                            frame_tk = ImageTk.PhotoImage(frame_pil)
-                            temp.append(frame_tk)
-                        self.fileManager.animation_queue.append(imagefile)
-                        if len(temp) == 1:
-                            if imagefile in self.fileManager.animation_queue:
-                                self.fileManager.animation_queue.remove(imagefile)
-                                return
-                        if not len(temp) == len(imagefile.frames):
-                            imagefile.frames = temp # If you clear the original list, the old list pointers will dissappear for a while and the loop will be interrupted.
-                            imagefile.frametimes = [frame.meta['duration'] for frame in get_reader(imagefile.path)]
-                            imagefile.framecount = len(imagefile.frames)
-                        imagefile.lazy_loading = False
-                        if len(imagefile.frames) > 1:
-                            if imagefile in self.fileManager.animation_queue:
-                                self.fileManager.animation_queue.remove(imagefile)
-                            self.animate.add_animation(imagefile)
-                        return
-                    except Exception as e:
-                        print(e)
-                break
-            imagefile.frametimes.clear()
-            imagefile.index = 0
-            imagefile.frames.clear()
-            imagefile.framecount = 0
-            if imagefile not in self.fileManager.animation_queue:
-                self.fileManager.animation_queue.append(imagefile)
-                frame = imagefile.guidata.get("frame", None)
-                destframe = imagefile.guidata.get("destframe", None)
-                im = imagefile.guidata.get("img", None)
-                if frame:
-                    if im:
-                        frame.canvas.image = im
-                        frame.canvas.itemconfig(frame.canvas_image_id, image=im)
-                if destframe:
-                    if im:
-                        destframe.canvas.image = im
-                        destframe.canvas.itemconfig(destframe.canvas_image_id, image=im)
+                        elif self.fileManager.gui.concurrent_frames > self.fileManager.max_concurrent_frames:
+                            return
+                    
+                        image = Image.fromarray(frame)
+                        image.thumbnail((gui.thumbnailsize,gui.thumbnailsize))
+                        tk_image = ImageTk.PhotoImage(image)
+                        imagefile.frames.append(tk_image)
+                        imagefile.framecount += 1
+                        imagefile.frametimes.append(imagefile.delay)
 
+                except Exception as e:
+                    print(f"Error in frame generation for grid: {e}")
+                    if imagefile in self.fileManager.animation_queue:
+                        imagefile.framecount = 2
+                        self.fileManager.animation_queue.remove(imagefile)
+                        imagefile.lazy_loading = False
+                    return
+                finally:
+                    if reader:
+                        reader.close()
+            else: # Load frames for GIF, WEBP
+                try:
+                    try:
+                        frames = mimread(imagefile.path, memtest="2000MB")
+                    except Exception as e:
+                        if imagefile in self.fileManager.animation_queue: # too big, we should never animate this again. old thumbnail is in place.
+                            imagefile.framecount = 2
+                            self.fileManager.animation_queue.remove(imagefile)
+                            imagefile.lazy_loading = False
+                        return
+                    temp = []
+                    for x in frames:
+                        if self.fileManager.program_is_exiting:
+                            return
+                        elif self.fileManager.gui.concurrent_frames > self.fileManager.max_concurrent_frames: #add to queue / full
+                            return
+                                    
+                        frame_rgb = np.array(x)
+                        frame_pil = Image.fromarray(frame_rgb)
+                        frame_pil.thumbnail((256,256), Image.Resampling.LANCZOS)
+                        frame_tk = ImageTk.PhotoImage(frame_pil)
+                        temp.append(frame_tk)
+
+                    if not len(temp) == len(imagefile.frames):
+                        imagefile.frames = temp # If you clear the original list, the old list pointers will dissappear for a while and the loop will be interrupted.
+                        imagefile.frametimes = [frame.meta['duration'] for frame in get_reader(imagefile.path)]
+                        imagefile.framecount = len(imagefile.frames)
+
+                except Exception as e:
+                    print(e)
+                    if imagefile in self.fileManager.animation_queue:
+                        imagefile.framecount = 2
+                        self.fileManager.animation_queue.remove(imagefile)
+                        imagefile.lazy_loading = False
+                    return                    
+
+            if imagefile in self.fileManager.animation_queue:
+                self.fileManager.animation_queue.remove(imagefile)
+            imagefile.lazy_loading = False
+            self.animate.add_animation(imagefile)
+            #if imagefile not in self.fileManager.animation_queue:
+            #    self.fileManager.animation_queue.append(imagefile)
+            #    frame = imagefile.guidata.get("frame", None) #static image is rendered, so if animate fails, there is something.
+            #    destframe = imagefile.guidata.get("destframe", None)
+            #    im = imagefile.guidata.get("img", None)
+            #    if frame:
+            #        if im:
+            #            frame.canvas.image = im
+            #            frame.canvas.itemconfig(frame.canvas_image_id, image=im)
+            #    if destframe:
+            #        if im:
+            #            destframe.canvas.image = im
+            #            destframe.canvas.itemconfig(destframe.canvas_image_id, image=im)
 
         def multithread():
             if self.gen_thread != None:
@@ -1202,32 +1173,33 @@ class ThumbManager:
             animated = [x for x in objects if x.ext in self.animated_thumb_formats]
             while not self.fileManager.program_is_exiting:
                 try:
-                    if not queue:
-                        max_workers = max(1,self.threads*2)
-
-                        with ThreadPoolExecutor(max_workers=max_workers) as executor: # NAMES
-                            executor.map(gen_name, gen_truncated_names)
-
-                        gui.manage_lines(f"Names shortened in: {self.fileManager.timer.stop()}", clear=True)
-                        self.fileManager.timer.start()
-
-                        with ThreadPoolExecutor(max_workers=max_workers) as executor: # THUMBS
-                            executor.map(gen_thumb, static)
-
-                        gui.manage_lines(f"Thumbnails generated in: {self.fileManager.timer.stop()}")
-                        #gui.manage_lines(f"Private Line: {mem}")
-                        self.fileManager.timer.start()
-        
-                        
-
-                        max_workers = max(1,self.threads)
-                        with ThreadPoolExecutor(max_workers=max_workers) as executor: # FRAMES
-                            executor.map(gen_frames, animated)
-
-                        gui.manage_lines(f"Thumbframes generated in: {self.fileManager.timer.stop()}")
-                        self.fileManager.timer.start()
-                    else:
+                    if queue:
                         queue_trail()
+                        return
+                    max_workers = max(1,self.threads*2)
+            
+                    with ThreadPoolExecutor(max_workers=max_workers) as executor: # NAMES
+                        executor.map(gen_name, gen_truncated_names)
+
+                    gui.manage_lines(f"Names shortened in: {self.fileManager.timer.stop()}", clear=True)
+                    self.fileManager.timer.start()
+
+                    with ThreadPoolExecutor(max_workers=max_workers) as executor: # THUMBS
+                        executor.map(gen_thumb, static)
+
+                    gui.manage_lines(f"Thumbnails generated in: {self.fileManager.timer.stop()}")
+                    #gui.manage_lines(f"Private Line: {mem}")
+                    self.fileManager.timer.start()
+
+
+                    for x in animated:
+                        self.fileManager.animation_queue.append(x)
+                    max_workers = max(1,self.threads)
+                    with ThreadPoolExecutor(max_workers=max_workers) as executor: # FRAMES
+                        executor.map(gen_frames, animated)
+
+                    gui.manage_lines(f"Thumbframes generated in: {self.fileManager.timer.stop()}")
+                    self.fileManager.timer.start()
 
                 except Exception as e:
                     print("Error in generating thumbs and frames", e)
@@ -1255,7 +1227,7 @@ class ThumbManager:
                 with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix = "unload-static") as executor:
                    executor.map(unload_static, gridsquares)    
                 if self.fileManager.animation_queue:
-                    self.generate(self.fileManager.animation_queue, queue=True)
+                    self.generate(self.fileManager.animation_queue, queue=True) # calls queue_trail()
             except Exception as e:
                 print("Error unloading thumbs and frames", e)
             finally:
@@ -1269,22 +1241,17 @@ class ThumbManager:
                         gridsquare.canvas.image = None
                 except Exception as e:
                     print(e)
-            frame = gridsquare.obj.guidata.get("frame", None) # remove frame  from guidata.
-            destframe = gridsquare.obj.guidata.get("destframe", None)
             
-            if not frame and not destframe:
+            if not gridsquare.obj.frame and not gridsquare.obj.destframe:
                 gridsquare.obj.guidata['img'] = None
 
         def unload_animated(gridsquare):
             if gridsquare.type == "GRID":
-                gridsquare.obj.guidata["frame"] = None
+                gridsquare.obj.frame = None
             elif gridsquare.type == "DEST":
-                gridsquare.obj.guidata["destframe"] = None
-            
-            frame = gridsquare.obj.guidata.get("frame", None) # remove frame  from guidata.
-            destframe = gridsquare.obj.guidata.get("destframe", None)
+                gridsquare.obj.destframe = None
 
-            if gridsquare.obj.frames and not frame and not destframe:
+            if gridsquare.obj.frames and not gridsquare.obj.frame and not gridsquare.obj.destframe:
                 gridsquare.obj.index = 0
                 gridsquare.obj.frames = []
                 gridsquare.obj.lazy_loading = True
@@ -1319,8 +1286,8 @@ class Animate:
     def start_animations(self, obj):
         def lazy(obj): # d0 th9s
             if self.gui.do_anim_loading_colors:
-                if obj.guidata.get("frame", None):
-                    obj.guidata["frame"].canvas['background'] = "red" # note this points to gridsquare canvas.
+                if obj.frame:
+                    obj.frame.canvas['background'] = "red" # note this points to gridsquare canvas.
             if obj not in self.running: # Stop if not in "view" or in self.running
                 return
             if not obj.frames: # No frames have been initialized. Or were removed.
@@ -1332,16 +1299,14 @@ class Animate:
                 return
             if not obj.lazy_loading and len(obj.frames) == obj.framecount: # All frames ready. (second part only webm, dead)
                 if self.gui.do_anim_loading_colors:
-                    if obj.guidata.get("frame", None):
-                        obj.guidata["frame"].canvas['background'] = "green"
+                    if obj.frame:
+                        obj.frame.canvas['background'] = "green"
                 loop(obj)
             else:
                 animate_these = []
-                frame = obj.guidata.get("frame", None)
-                destframe = obj.guidata.get("destframe", None)
 
-                if frame: animate_these.append(frame)
-                if destframe: animate_these.append(destframe)
+                if obj.frame: animate_these.append(obj.frame)
+                if obj.destframe: animate_these.append(obj.destframe)
 
                 if not animate_these:
                     self.remove_animation(obj)
@@ -1360,32 +1325,26 @@ class Animate:
                         print("Error in lazy:", e)
         def loop(obj):
             "Indefinite loop on a seperate thread until it just ends"
+            if not obj.frame and not obj.destframe: # if no instances, exit loop
+                self.remove_animation(obj)
+                return
+            #if not obj.frames or not obj.frametimes or (len(obj.frames) != len(obj.frames)): # we are missing frames or frametimes.
+            #    self.remove_animation(obj)
+            #    return
             animate_these = []
-            frame = obj.guidata.get("frame", None)
-            destframe = obj.guidata.get("destframe", None) 
-            # could just do "shown in dest show in grid flags" much simpler. guidata is just a dict attribute anyway.
-            if not frame and not destframe:
-                self.remove_animation(obj)
-                return
-            if not obj.frames:
-                self.remove_animation(obj)
-                return
+            if obj.frame:
+                animate_these.append(obj.frame) # but how would I retrieve the dests? # maybe attribute in_grids = {} could iterate over that simply.
+            if obj.destframe: 
+                animate_these.append(obj.destframe)
 
-            if frame: animate_these.append(frame) # but how would I retrieve the dests? # maybe attribute in_grids = {} could iterate over that simply.
-            if destframe: animate_these.append(destframe)
-
-            if not animate_these:
-                self.remove_animation(obj)
-                return
-            
             for i in animate_these:
                 try:
-                    if len(obj.frames) >= obj.index:
-                        i.canvas.itemconfig(i.canvas_image_id, image=obj.frames[obj.index]) #change the frame
+                    i.canvas.itemconfig(i.canvas_image_id, image=obj.frames[obj.index]) #change the frame
+                    obj.index = (obj.index + 1) % obj.framecount
+                    self.fileManager.gui.after(obj.frametimes[obj.index], lambda: loop(obj)) #run again.
                 except:
-                    pass
-            obj.index = (obj.index + 1) % obj.framecount
-            self.fileManager.gui.after(obj.frametimes[obj.index], lambda: loop(obj)) #run again.
+                    return
+            
 
         lazy(obj) # Non threaded
 

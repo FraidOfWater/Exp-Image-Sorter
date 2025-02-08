@@ -170,7 +170,7 @@ class Destination_Viewer():
             check.grid(sticky="EW")
 #
             ## save the data to the image obj to both store a reference and for later manipulation
-            imageobj.guidata["destframe"] = frame
+            imageobj.destframe = frame
             frame.c = check
             # anything other than rightclicking toggles the checkbox, as we want.
             canvas.bind("<Button-1>", lambda e: check.invoke())
@@ -201,15 +201,14 @@ class Destination_Viewer():
         self.window_is_closing = True
 
         for x in self.displayedlist:
-            frame = x.obj.guidata.get("frame", None) # remove frame  from guidata.
-            if not frame:
+            if not x.obj.frame:
                 x.obj.guidata['img'] = None
                 if x.obj.frames:
                     self.fileManager.animate.remove_animation(x.obj)
                     x.obj.index = 0
                     x.obj.frames = []
                     x.obj.lazy_loading = True
-            x.obj.guidata["destframe"] = None
+            x.obj.destframe = None
         
         if self.fileManager.navigator.old in self.displayedset:
             self.fileManager.navigator.old = None

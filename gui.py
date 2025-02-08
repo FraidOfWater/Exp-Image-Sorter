@@ -8,7 +8,6 @@ from functools import partial
 
 import logging
 import psutil
-from gc import collect
 
 from vlc import Instance
 
@@ -135,7 +134,7 @@ class GUIManager(tk.Tk): #Main window
             #autosave # Exlusively for fileManager
 
             #GUI CONTROLLED PREFRENECES
-            self.squares_per_page_intvar = tk.IntVar(value=120)
+            self.squares_per_page_intvar = tk.IntVar(value=40)
             self.sort_by_date_boolvar = tk.BooleanVar()
             self.viewer_x_centering = True
             self.viewer_y_centering = True
@@ -179,6 +178,7 @@ class GUIManager(tk.Tk): #Main window
         #print("")
         #objgraph.show_growth()
         #print(len(objgraph.get_leaking_objects()))
+        #print(len(self.fileManager.animate.running), len(self.fileManager.animation_queue))
 
 
 
@@ -1215,7 +1215,9 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                 self.quit()
                 #self.destroy() - leaves threads running
                 #os._exit(0) # This works too, but doesn't do cleanup
+        self.fileManager.animation_queue.clear()
         self.fileManager.program_is_exiting = True
+        self.fileManager.animate.running.clear()
         Thread(target=test, daemon=True).start()   
     def close_second_window(self, event=None):
         if hasattr(self, 'Image_frame'):
@@ -1322,7 +1324,8 @@ class GridManager:
             frame['background'] = self.gui.square_default
             canvas['background'] = self.gui.square_default
             # save the data to the image obj to both store a reference and for later manipulation
-            imageobj.guidata = {"img": img, "frame": frame, "destframe": None, "color": (frame)} #"tooltip":tooltiptext
+            imageobj.guidata = {"img": img, "color": (frame)} #"tooltip":tooltiptext #color is a bit wonkily logicly set here. not much sense, but basically works.
+            imageobj.frame = frame
             frame.c = check
             # anything other than rightclicking toggles the checkbox, as we want.
             canvas.bind("<Button-1>", lambda e: bindhandler(check, "invoke"))
@@ -1367,15 +1370,15 @@ class GridManager:
             for dest in self.fileManager.destinations:
                 if square.obj.dest == dest['path']:
                     square.obj.setdest(dest)
-                    square.obj.guidata["frame"].bg = dest['color']
-                    square.obj.guidata["canvas"].bg = dest['color']
+                    square.obj.frame["background"] = dest['color']
+                    square.obj.frame.canvas["background"] = dest['color']
                     break
         for square in self.moved:
             for dest in self.fileManager.destinations:
                 if dest['path'] in square.obj.path: #if dest["path"] in folder
                     square.obj.setdest(dest)
-                    square.obj.guidata["frame"].bg = dest['color']
-                    square.obj.guidata["canvas"].bg = dest['color']
+                    square.obj.frame["background"] = dest['color']
+                    square.obj.frame.canvas["background"] = dest['color']
                     break
     def load_more(self, amount=None) -> None:
         if not self.gui.current_view.get() == "Show Unassigned":
@@ -1414,6 +1417,7 @@ class GridManager:
         # This is called when the view is called to avoid old frames in the new list from not being deleted
         # Squares is the whole new list to be displayed
         self.fileManager.animation_queue.clear()
+        self.fileManager.animate.running.clear()
         self.fileManager.program_is_exiting = True
         not_in_new_list = [x for x in self.displayedset if x not in squares] # Unload their thumbs and frames.
         in_both_lists = [x for x in self.displayedset if x in squares] # Remove them from gridview. But dont unload
@@ -1436,8 +1440,8 @@ class GridManager:
                     "insert", window=gridsquare, padx=self.gui.gridsquare_padx, pady=self.gui.gridsquare_pady)
             self.displayedlist.append(gridsquare)
             self.displayedset.add(gridsquare)
-            frame = gridsquare.obj.guidata.get("frame", None) # remove frame  from guidata.
-            if not frame: gridsquare.obj.guidata["frame"] = gridsquare
+            if not gridsquare.obj.frame: 
+                gridsquare.obj.frame = gridsquare
             if reload or gridsquare.obj.guidata['img'] == None: # Checks if img is unloaded
                 regen.append(gridsquare)
 
