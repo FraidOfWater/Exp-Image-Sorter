@@ -809,6 +809,8 @@ class SortImages:
         # Sort by date modificated
         if self.gui.sort_by_date_boolvar.get():
             self.imagelist.sort(key=lambda img: os.path.getmtime(img.path), reverse=False) # 65
+        #elif self.gui.sort_by_size_boolvar.get():
+        #    self.imagelist.sort(key=lambda img: os.path.getsize(img.path), reverse=False)
 
         return self.imagelist
     def clear(self, *args):
