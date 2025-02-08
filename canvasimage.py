@@ -9,7 +9,7 @@ from PIL import Image, ImageTk
 
 import tkinter as tk
 from tkinter import ttk
-from vlc import PlaybackMode, State
+from vlc import PlaybackMode
 
 logger = logging.getLogger("Canvasimage")
 logger.setLevel(logging.ERROR)
