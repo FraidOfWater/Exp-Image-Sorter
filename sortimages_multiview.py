@@ -253,6 +253,11 @@ class SortImages:
        
     def loadprefs(self):
         "Loads prefs.json. Needs self.gui to be created. This edits self.gui attributes."
+        def safe_set(command, pref_name):
+            try:
+                command()
+            except Exception as e:
+                print(f"Error loading {pref_name}: {e}")
         gui = self.gui
         hotkeys = "" # manual checking at end of this method
 
@@ -263,45 +268,91 @@ class SortImages:
                 jprefs = json.loads(jdata)
 
                 "Paths"
-                gui.source_folder = jprefs["paths"]["source"]
-                gui.destination_folder = jprefs["paths"]["destination"]
-                gui.sessionpathvar.set(jprefs["paths"]['lastsession'])
-                self.exclude = jprefs["paths"]["exclude"]
+                #if this was a large operation, id do a list, and then just feed that list into the helper function via a loop.
+                #the values set would have to be uniform about where they are located, no intermixing of self, gui and local.
+                #also if it was a tkinter var, id just save that vaal to a local func, and set the val later in the file manually.
+                #safe_set(lambda: setattr(gui,"",val),val)
+                #safe_set(lambda: gui.sessionpathvar.set(jprefs["paths"]['lastsession']),"sessionpathvar")
+
+                safe_set(lambda: setattr(gui,"source_folder",jprefs["paths"]["source"]),"source_folder")
+                safe_set(lambda: setattr(gui,"destination_folder",jprefs["paths"]["destination"]),"destination_folder")
+                safe_set(lambda: gui.sessionpathvar.set(jprefs["paths"]['lastsession']),"sessionpathvar")
+                safe_set(lambda: setattr(self,"exclude",jprefs["paths"]["exclude"]),"exclude")
+
+                #gui.source_folder = jprefs["paths"]["source"]
+                #gui.destination_folder = jprefs["paths"]["destination"]
+                #gui.sessionpathvar.set(jprefs["paths"]['lastsession'])
+                #self.exclude = jprefs["paths"]["exclude"]
         
                 "Preferences"
-                gui.thumbnailsize = int(jprefs["preferences"]["user"]["thumbnailsize"])
-                hotkeys = jprefs["preferences"]["user"]["hotkeys"]
-                gui.centering_button = jprefs["preferences"]["user"]["centering_button"]
-                gui.force_scrollbar = jprefs["preferences"]["user"]["force_scrollbar"]
-                gui.auto_load = jprefs["preferences"]["user"]["auto_load"]
-                gui.do_anim_loading_colors = jprefs["preferences"]["user"]["do_anim_loading_colors"]
-                gui.do_debug_terminal = jprefs["preferences"]["user"]["do_debug_terminal"]
+                safe_set(lambda: setattr(gui,"thumbnailsize",int(jprefs["preferences"]["user"]["thumbnailsize"])),"thumbnailsize")
+                #safe_set(lambda: setattr(gui,"hotkeys",jprefs["preferences"]["user"]["hotkeys"]),"hotkeys")
+                try:
+                    hotkeys = jprefs["preferences"]["user"]["hotkeys"]
+                except Exception as e:
+                    print("Error loading hotkeys:", e)
+                safe_set(lambda: setattr(gui,"centering_button",jprefs["preferences"]["user"]["centering_button"]),"centering_button")
+                safe_set(lambda: setattr(gui,"force_scrollbar",jprefs["preferences"]["user"]["force_scrollbar"]),"force_scrollbar")
+                safe_set(lambda: setattr(gui,"auto_load",jprefs["preferences"]["user"]["auto_load"]),"auto_load")
+                safe_set(lambda: setattr(gui,"do_anim_loading_colors",jprefs["preferences"]["user"]["do_anim_loading_colors"]),"do_anim_loading_colors")
+                safe_set(lambda: setattr(gui,"do_debug_terminal",jprefs["preferences"]["user"]["do_debug_terminal"]),"do_debug_terminal")
+
+                #gui.thumbnailsize = int(jprefs["preferences"]["user"]["thumbnailsize"])
+                #hotkeys = jprefs["preferences"]["user"]["hotkeys"]
+                #gui.centering_button = jprefs["preferences"]["user"]["centering_button"]
+                #gui.force_scrollbar = jprefs["preferences"]["user"]["force_scrollbar"]
+                #gui.auto_load = jprefs["preferences"]["user"]["auto_load"]
+                #gui.do_anim_loading_colors = jprefs["preferences"]["user"]["do_anim_loading_colors"]
+                #gui.do_debug_terminal = jprefs["preferences"]["user"]["do_debug_terminal"]
 
                 "Technical preferences"
-                gui.filter_mode = jprefs["preferences"]["technical"]["quick_preview_filter"]
-                gui.quick_preview_size_threshold = int(jprefs["preferences"]["technical"]["quick_preview_size_threshold"])
-                self.threads = jprefs["preferences"]["technical"]['threads']
-                self.max_concurrent_frames = int(jprefs["preferences"]["technical"]['max_concurrent_frames'])
-                self.autosave = jprefs["preferences"]["technical"]['autosave_session']
+                safe_set(lambda: setattr(gui,"filter_mode",jprefs["preferences"]["technical"]["quick_preview_filter"]),"filter_mode")
+                safe_set(lambda: setattr(gui,"quick_preview_size_threshold",int(jprefs["preferences"]["technical"]["quick_preview_size_threshold"])),"quick_preview_size_threshold")
+                safe_set(lambda: setattr(self,"threads",jprefs["preferences"]["technical"]['threads']),"threads")
+                safe_set(lambda: setattr(self,"max_concurrent_frames",int(jprefs["preferences"]["technical"]['max_concurrent_frames'])),"max_concurrent_frames")
+                safe_set(lambda: setattr(self,"autosave",jprefs["preferences"]["technical"]['autosave_session']),"autosave")
+                
+                #gui.filter_mode = jprefs["preferences"]["technical"]["quick_preview_filter"]
+                #gui.quick_preview_size_threshold = int(jprefs["preferences"]["technical"]["quick_preview_size_threshold"])
+                #self.threads = jprefs["preferences"]["technical"]['threads']
+                #self.max_concurrent_frames = int(jprefs["preferences"]["technical"]['max_concurrent_frames'])
+                #self.autosave = jprefs["preferences"]["technical"]['autosave_session']
 
                 "GUI CONTROLLED PREFRENECES"
-                gui.squares_per_page_intvar.set(jprefs["qui"]["squares_per_page"])
-                gui.sort_by_date_boolvar.set(jprefs["qui"]["sort_by_date"])
-                gui.viewer_x_centering = jprefs["qui"]["viewer_x_centering"]
-                gui.viewer_y_centering = jprefs["qui"]["viewer_y_centering"]
-                gui.show_next.set(jprefs["qui"]["show_next"])
-                gui.dock_view.set(jprefs["qui"]["dock_view"])
-                gui.dock_side.set(jprefs["qui"]["dock_side"])
-                gui.theme.set(jprefs["qui"]["theme"])
+                safe_set(lambda: gui.squares_per_page_intvar.set(jprefs["qui"]["squares_per_page"]),"squares_per_page_intvar")
+                safe_set(lambda: gui.sort_by_date_boolvar.set(jprefs["qui"]["sort_by_date"]),"sort_by_date_boolvar")
+                safe_set(lambda: setattr(gui,"viewer_x_centering",jprefs["qui"]["viewer_x_centering"]),"viewer_x_centering")
+                safe_set(lambda: setattr(gui,"viewer_y_centering",jprefs["qui"]["viewer_y_centering"]),"viewer_y_centering")
+                safe_set(lambda: gui.show_next.set(jprefs["qui"]["show_next"]),"show_next")
+                safe_set(lambda: gui.dock_view.set(jprefs["qui"]["dock_view"]),"dock_view")
+                safe_set(lambda: gui.dock_side.set(jprefs["qui"]["dock_side"]),"dock_side")
+                safe_set(lambda: gui.theme.set(jprefs["qui"]["theme"]),"theme")
+
+                #gui.squares_per_page_intvar.set(jprefs["qui"]["squares_per_page"])
+                #gui.sort_by_date_boolvar.set(jprefs["qui"]["sort_by_date"])
+                #gui.viewer_x_centering = jprefs["qui"]["viewer_x_centering"]
+                #gui.viewer_y_centering = jprefs["qui"]["viewer_y_centering"]
+                #gui.show_next.set(jprefs["qui"]["show_next"])
+                #gui.dock_view.set(jprefs["qui"]["dock_view"])
+                #gui.dock_side.set(jprefs["qui"]["dock_side"])
+                #gui.theme.set(jprefs["qui"]["theme"])
 
                 "Window positions"
-                gui.main_geometry = jprefs["window_settings"]["main_geometry"]
-                gui.viewer_geometry = jprefs["window_settings"]["viewer_geometry"]
-                gui.destpane_geometry = jprefs["window_settings"]["destpane_geometry"]
-                gui.leftpane_width = int(jprefs["window_settings"]["leftpane_width"])
-                gui.middlepane_width = int(jprefs["window_settings"]["middlepane_width"])
-                gui.images_sorted.set(str(jprefs["window_settings"]["images_sorted"]))
-                gui.images_sorted_strvar.set(f"Sorted: {gui.images_sorted.get()}")
+                safe_set(lambda: setattr(gui,"main_geometry",jprefs["window_settings"]["main_geometry"]),"main_geometry")
+                safe_set(lambda: setattr(gui,"viewer_geometry",jprefs["window_settings"]["viewer_geometry"]),"viewer_geometry")
+                safe_set(lambda: setattr(gui,"destpane_geometry",jprefs["window_settings"]["destpane_geometry"]),"destpane_geometry")
+                safe_set(lambda: setattr(gui,"leftpane_width",int(jprefs["window_settings"]["leftpane_width"])),"leftpane_width")
+                safe_set(lambda: setattr(gui,"middlepane_width",int(jprefs["window_settings"]["middlepane_width"])),"middlepane_width")
+
+                safe_set(lambda: gui.images_sorted.set(str(jprefs["window_settings"]["images_sorted"])),"images_sorted")
+                safe_set(lambda: gui.images_sorted_strvar.set(f"Sorted: {gui.images_sorted.get()}"),"images_sorted_strvar")
+                #gui.main_geometry = jprefs["window_settings"]["main_geometry"]
+                #gui.viewer_geometry = jprefs["window_settings"]["viewer_geometry"]
+                #gui.destpane_geometry = jprefs["window_settings"]["destpane_geometry"]
+                #gui.leftpane_width = int(jprefs["window_settings"]["leftpane_width"])
+                #gui.middlepane_width = int(jprefs["window_settings"]["middlepane_width"])
+                #gui.images_sorted.set(str(jprefs["window_settings"]["images_sorted"]))
+                #gui.images_sorted_strvar.set(f"Sorted: {gui.images_sorted.get()}")
                 gui.actual_gridsquare_width = gui.thumbnailsize + gui.gridsquare_padx + gui.square_border_size*2 + gui.whole_box_size*2
                 gui.actual_gridsquare_height = gui.thumbnailsize + gui.gridsquare_pady + gui.square_border_size*2 + gui.whole_box_size*2 + gui.checkbox_height
 
@@ -862,15 +913,18 @@ class ThumbManager:
         mem = self.mem
         gui = self.gui
         def queue_trail():
-            
             fileManager = self.fileManager
             animation_queue = fileManager.animation_queue
             temp = animation_queue.copy()
+            t = []
             for x in temp:
                 if x.frame or x.destframe:
-                    gen_frames(x)
+                    t.append(x)
                 else:
                     animation_queue.remove(x)
+            max_workers = max(1,self.threads)
+            with ThreadPoolExecutor(max_workers=max_workers) as executor: # FRAMES
+                executor.map(gen_frames, t)
         def gen_thumb(imagefile): # session just calls this for displayedlist
             def get_mode(vips_img):
                 pformat = str(vips_img.interpretation).lower()
@@ -1052,16 +1106,14 @@ class ThumbManager:
             if self.fileManager.program_is_exiting:
                 return
             "If at framelimit, add to animation queue if not there already."
-
             if self.fileManager.gui.concurrent_frames >= self.fileManager.max_concurrent_frames:
                 return
-
             # dont remove newcoming from queue, as we want to maintain order.
             # remove only when gen is complete. lazy_load = False
 
             # gen_frames is only called once if succesfull.
             # On completion, imagefile is removed from animation queue and added to running.
-
+            # Clear frames just in case.
             if not isinstance(imagefile.frames, list): imagefile.frames = []
             if not isinstance(imagefile.frametimes, list): imagefile.frametimes = []
 
@@ -1082,7 +1134,6 @@ class ThumbManager:
                         imagefile.framecount = 2 # to register as "animated"
                         if imagefile in self.fileManager.animation_queue:
                             self.fileManager.animation_queue.remove(imagefile)
-                            imagefile.lazy_loading = False
                         return
  
                     for frame in reader:
@@ -1097,13 +1148,13 @@ class ThumbManager:
                         imagefile.frames.append(tk_image)
                         imagefile.framecount += 1
                         imagefile.frametimes.append(imagefile.delay)
+                        imagefile.lazy_loading = False
 
                 except Exception as e:
                     print(f"Error in frame generation for grid: {e}")
                     if imagefile in self.fileManager.animation_queue:
                         imagefile.framecount = 2
                         self.fileManager.animation_queue.remove(imagefile)
-                        imagefile.lazy_loading = False
                     return
                 finally:
                     if reader:
@@ -1116,7 +1167,7 @@ class ThumbManager:
                         if imagefile in self.fileManager.animation_queue: # too big, we should never animate this again. old thumbnail is in place.
                             imagefile.framecount = 2
                             self.fileManager.animation_queue.remove(imagefile)
-                            imagefile.lazy_loading = False
+                        print(imagefile.name, e)
                         return
                     temp = []
                     for x in frames:
@@ -1130,37 +1181,22 @@ class ThumbManager:
                         frame_pil.thumbnail((256,256), Image.Resampling.LANCZOS)
                         frame_tk = ImageTk.PhotoImage(frame_pil)
                         temp.append(frame_tk)
-
                     if not len(temp) == len(imagefile.frames):
                         imagefile.frames = temp # If you clear the original list, the old list pointers will dissappear for a while and the loop will be interrupted.
                         imagefile.frametimes = [frame.meta['duration'] for frame in get_reader(imagefile.path)]
                         imagefile.framecount = len(imagefile.frames)
-
+                    imagefile.lazy_loading = False
+                    
                 except Exception as e:
                     print(e)
                     if imagefile in self.fileManager.animation_queue:
                         imagefile.framecount = 2
                         self.fileManager.animation_queue.remove(imagefile)
-                        imagefile.lazy_loading = False
-                    return                    
-
-            if imagefile in self.fileManager.animation_queue:
-                self.fileManager.animation_queue.remove(imagefile)
-            imagefile.lazy_loading = False
-            self.animate.add_animation(imagefile)
-            #if imagefile not in self.fileManager.animation_queue:
-            #    self.fileManager.animation_queue.append(imagefile)
-            #    frame = imagefile.guidata.get("frame", None) #static image is rendered, so if animate fails, there is something.
-            #    destframe = imagefile.guidata.get("destframe", None)
-            #    im = imagefile.guidata.get("img", None)
-            #    if frame:
-            #        if im:
-            #            frame.canvas.image = im
-            #            frame.canvas.itemconfig(frame.canvas_image_id, image=im)
-            #    if destframe:
-            #        if im:
-            #            destframe.canvas.image = im
-            #            destframe.canvas.itemconfig(destframe.canvas_image_id, image=im)
+                    return
+            if len(imagefile.frames) > 1:
+                if imagefile in self.fileManager.animation_queue:
+                    self.fileManager.animation_queue.remove(imagefile)
+                self.animate.add_animation(imagefile)
 
         def multithread():
             if self.gen_thread != None:
@@ -1226,12 +1262,13 @@ class ThumbManager:
                 max_workers = max(1,self.threads*2)
                 with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix = "unload-static") as executor:
                    executor.map(unload_static, gridsquares)    
-                if self.fileManager.animation_queue:
-                    self.generate(self.fileManager.animation_queue, queue=True) # calls queue_trail()
+                
             except Exception as e:
                 print("Error unloading thumbs and frames", e)
             finally:
                 collect()
+                if self.fileManager.animation_queue:
+                    self.generate(self.fileManager.animation_queue, queue=True) # calls queue_trail()
 
         def unload_static(gridsquare):
             if dest == False:
