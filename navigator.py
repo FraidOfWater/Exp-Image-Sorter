@@ -94,25 +94,31 @@ class Navigator:
 
     def bindhandler(self, event):
         #updownleftright = 38,40,37,39
-        def scroll_up():
+        def scroll_up(reverse=None):
             columns = int(max(1, self.gui.imagegrid.winfo_width() / self.gui.actual_gridsquare_width))
             rows = ceil(len(lista) / columns)
-            current_row = self.index // columns
+            if reverse:
+                current_row = (len(lista)-self.index-1) // columns
+            else:
+                current_row = self.index // columns
             first_visible_row = round(self.gui.imagegrid.yview()[0] * rows)  # Index of the first visible item
             #print(f"In a row: {columns}, rows: {rows}, current_row: {current_row}, first visible row: {first_visible_row}, last visible row: {last_visible_row}")
             if first_visible_row > current_row: # Scroll up
                 target_scroll = (first_visible_row-1) / rows
                 self.gui.imagegrid.yview_moveto(target_scroll)
-        def scroll_down():
+        def scroll_down(reverse=None):
             columns = int(max(1, self.gui.imagegrid.winfo_width() / self.gui.actual_gridsquare_width))
             rows = ceil(len(lista) / columns)
-            current_row = self.index // columns
+            if reverse:
+                current_row = (len(lista)-self.index-1) // columns
+            else:
+                current_row = self.index // columns
             first_visible_row = round(self.gui.imagegrid.yview()[0] * rows)  # Index of the first visible item
             last_visible_row = round(self.gui.imagegrid.yview()[1] * rows)  # Index of the last visible item
             if last_visible_row <= current_row: # Scroll down
                 target_scroll = (first_visible_row+1) / rows
                 self.gui.imagegrid.yview_moveto(target_scroll)
-        def highlight_right():
+        def highlight_right(reverse=None):
             check_bound = self.index+1
             if check_bound >= len(self.displayedlist):
                 return
@@ -120,10 +126,11 @@ class Navigator:
             self.index = check_bound
             self.selected(self.displayedlist[self.index])
             self.old = self.displayedlist[self.index]
-            scroll_down()
+            if reverse: scroll_up(reverse=True)
+            else: scroll_down()
             if self.gui.show_next.get():
                 self.gui.displayimage(self.old.obj)
-        def highlight_left():
+        def highlight_left(reverse=None):
             check_bound = self.index-1
             if check_bound < 0:
                 return
@@ -131,10 +138,11 @@ class Navigator:
             self.default(self.old)
             self.selected(self.displayedlist[self.index])
             self.old = self.displayedlist[self.index]
-            scroll_up()
+            if reverse: scroll_down(reverse=True)
+            else: scroll_up()
             if self.gui.show_next.get():
                 self.gui.displayimage(self.old.obj)
-        def highlight_up():
+        def highlight_up(reverse=None):
             columns = int(max(1, self.gui.imagegrid.winfo_width() / self.gui.actual_gridsquare_width))
             check_upper_bound = self.index-columns
             if check_upper_bound < 0:
@@ -143,10 +151,11 @@ class Navigator:
             self.default(self.old)
             self.selected(self.displayedlist[self.index])
             self.old = self.displayedlist[self.index]
-            scroll_up()
+            if reverse: scroll_down(reverse=True)
+            else: scroll_up()
             if self.gui.show_next.get():
                 self.gui.displayimage(self.old.obj)
-        def highlight_down():
+        def highlight_down(reverse=None):
             columns = int(max(1, self.gui.imagegrid.winfo_width() / self.gui.actual_gridsquare_width))
             check_lower_bound = self.index+columns
             if check_lower_bound > len(self.displayedlist)-1:
@@ -155,7 +164,8 @@ class Navigator:
             self.default(self.old)
             self.selected(self.displayedlist[self.index])
             self.old = self.displayedlist[self.index]
-            scroll_down()
+            if reverse: scroll_up(reverse=True)
+            else: scroll_down()
             if self.gui.show_next.get():
                 self.gui.displayimage(self.old.obj)
         def spacebar():
@@ -176,10 +186,10 @@ class Navigator:
             }
         if not self.arrow_action_reversed:
             self.arrow_action_reversed = {
-                "Left": lambda: highlight_right(),
-                "Right": lambda: highlight_left(),
-                "Down": lambda: highlight_up(),
-                "Up": lambda: highlight_down(),
+                "Left": lambda: highlight_right(reverse=True),
+                "Right": lambda: highlight_left(reverse=True),
+                "Down": lambda: highlight_up(reverse=True),
+                "Up": lambda: highlight_down(reverse=True),
                 "space": lambda: spacebar(),
                 "Return": lambda: enter()
             }
@@ -213,22 +223,18 @@ class Navigator:
         "Reverts colour back to default"
         if not frame:
             return
-        if frame.obj.dest != "":
-            alt = frame.obj.dest_color
-            exists = frame.obj.guidata.get("destframe", None)
-            if exists:
-                frame.configure(highlightcolor = alt,  highlightbackground = alt) # Trying to access destroyed destsquare? # If dest is closed, remove self.old if any frame was there.
-                frame.canvas.configure(bg=alt, highlightcolor=alt, highlightbackground = alt)
-                frame.c.configure(style="Theme_square1.TCheckbutton")
-                frame.cf.configure(bg=self.gui.square_text_box_colour)
-        else:
-            frame.configure(highlightcolor = self.gui.square_default,  highlightbackground = self.gui.square_default)
-            frame.canvas.configure(bg=self.gui.square_default, highlightcolor=self.gui.square_default, highlightbackground = self.gui.square_default)
-            frame.c.configure(style="Theme_square1.TCheckbutton")
-            frame.cf.configure(bg=self.gui.square_text_box_colour)
+        
+        f_color = frame.obj.dest_color if frame.obj.dest != "" else self.gui.square_default
+        #exists = frame.obj.guidata.get("destframe", None)
+        frame.configure(highlightcolor = f_color,  highlightbackground = f_color) # Trying to access destroyed destsquare? # If dest is closed, remove self.old if any frame was there.
+        frame.canvas.configure(bg=f_color, highlightcolor=f_color, highlightbackground = f_color)
+        frame.c.configure(style="Theme_square1.TCheckbutton")
+        frame.cf.configure(bg=self.gui.square_text_box_colour)
     def selected(self, frame):
-        if frame:
-            frame.configure(highlightbackground = self.gui.square_selected, highlightcolor = self.gui.square_selected)
-            frame.canvas.configure(bg=self.gui.square_selected, highlightbackground = self.gui.square_selected, highlightcolor = self.gui.square_selected)
-            frame.c.configure(style="Theme_square2.TCheckbutton")
-            frame.cf.configure(bg=self.gui.square_text_box_selection_colour)
+        if not frame:
+            return
+
+        frame.configure(highlightbackground = self.gui.square_selected, highlightcolor = self.gui.square_selected)
+        frame.canvas.configure(bg=self.gui.square_selected, highlightbackground = self.gui.square_selected, highlightcolor = self.gui.square_selected)
+        frame.c.configure(style="Theme_square2.TCheckbutton")
+        frame.cf.configure(bg=self.gui.square_text_box_selection_colour)
