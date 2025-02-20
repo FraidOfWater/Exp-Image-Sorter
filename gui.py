@@ -340,37 +340,30 @@ All subfolders will be scanned as well.
                 Set the Destination Directory:
 Choose a folder to sort into,
 The folder must contain subfolders, these are the folders you sort into.
+You can now press "New Session".
 
                 Exclusions:
-One per line, no commas.
+Full path. One path per line, no commas.
 
-                Loading Images:
-To load more images, press the "Add Files" button. Choose how many images are added in the program settings.
+                Amount of images:
+Input a number in the smaller box after pressing New Session.
+The grid will be populated by this amount at all times. (if you want to load manually, turn off "auto_load" in prefs.json)
 
-                Right-Click:
-on Destination Buttons,
-to see which images are assigned to them,
-(Does not include moved)
+                Assigning:
+Right-Click to highlight and view an image.
+Arrowkeys to highlight and view an image (viewing only when "Show Next" is on) (Enter / Space, When "Show Next" is off)
+Hotkeys to assign to destinations, or left-click the destination button.
 
-                Right-Click:
-on Thumbnails,
-to view a zoomable full-size image,
-(Note that you cannot zoom gifs or webps.)
-
-                Enter / Left-Click:
-on thumbnails or in viewer,
-to lock the image, so you can
-zoom and pan using navigation keys.
-(ctrl, shift)
-
+                Viewing destinations:
+Right-click on a destination button to see what is assigned there.
+Moved images do not show here.
+       
                 Preferences:
 Choose preferences inside prefs.json,
+This file will be generated on each run, if missing.
 You can change the hotkeys.
-You can customize most elements.
 You can change thumbnailsize
-(Adjust maximum name length suit to you).
-You can force scrollbars on/off for the imagegrid.
-You can do scrolling by pages.
+You can force scrollbars on/off for the grid.
 
                 Acknowledgments:
 Special thanks to FooBar167 on Stack Overflow for the advanced and memory-efficient Zoom and Pan Tkinter class.
