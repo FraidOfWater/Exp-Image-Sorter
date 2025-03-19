@@ -95,29 +95,38 @@ class Navigator:
     def bindhandler(self, event):
         #updownleftright = 38,40,37,39
         def scroll_up(reverse=None):
-            columns = int(max(1, self.gui.imagegrid.winfo_width() / self.gui.actual_gridsquare_width))
-            rows = ceil(len(lista) / columns)
+            if self.window_focused == "GRID":
+                target_grid = self.gui.imagegrid
+            elif self.window_focused == "DEST":
+                target_grid = self.gui.destination_viewer.destgrid
+            columns = int(max(1, target_grid.winfo_width() / self.gui.actual_gridsquare_width))
+            rows = ceil(len(self.displayedlist) / columns)
             if reverse:
-                current_row = (len(lista)-self.index-1) // columns
+                current_row = (len(self.displayedlist)-self.index-1) // columns
             else:
                 current_row = self.index // columns
-            first_visible_row = round(self.gui.imagegrid.yview()[0] * rows)  # Index of the first visible item
+            first_visible_row = round(target_grid.yview()[0] * rows)  # Index of the first visible item
             #print(f"In a row: {columns}, rows: {rows}, current_row: {current_row}, first visible row: {first_visible_row}, last visible row: {last_visible_row}")
             if first_visible_row > current_row: # Scroll up
                 target_scroll = (first_visible_row-1) / rows
-                self.gui.imagegrid.yview_moveto(target_scroll)
+                target_grid.yview_moveto(target_scroll)
         def scroll_down(reverse=None):
-            columns = int(max(1, self.gui.imagegrid.winfo_width() / self.gui.actual_gridsquare_width))
-            rows = ceil(len(lista) / columns)
+            if self.window_focused == "GRID":
+                target_grid = self.gui.imagegrid
+            elif self.window_focused == "DEST":
+                target_grid = self.gui.destination_viewer.destgrid
+
+            columns = int(max(1, target_grid.winfo_width() / self.gui.actual_gridsquare_width))
+            rows = ceil(len(self.displayedlist) / columns)
             if reverse:
-                current_row = (len(lista)-self.index-1) // columns
+                current_row = (len(self.displayedlist)-self.index-1) // columns
             else:
                 current_row = self.index // columns
-            first_visible_row = round(self.gui.imagegrid.yview()[0] * rows)  # Index of the first visible item
-            last_visible_row = round(self.gui.imagegrid.yview()[1] * rows)  # Index of the last visible item
+            first_visible_row = round(target_grid.yview()[0] * rows)  # Index of the first visible item
+            last_visible_row = round(target_grid.yview()[1] * rows)  # Index of the last visible item
             if last_visible_row <= current_row: # Scroll down
                 target_scroll = (first_visible_row+1) / rows
-                self.gui.imagegrid.yview_moveto(target_scroll)
+                target_grid.yview_moveto(target_scroll)
         def highlight_right(reverse=None):
             check_bound = self.index+1
             if check_bound >= len(self.displayedlist):
@@ -128,8 +137,7 @@ class Navigator:
             self.old = self.displayedlist[self.index]
             if reverse: scroll_up(reverse=True)
             else: scroll_down()
-            if self.gui.show_next.get():
-                self.gui.displayimage(self.old.obj)
+
         def highlight_left(reverse=None):
             check_bound = self.index-1
             if check_bound < 0:
@@ -140,10 +148,14 @@ class Navigator:
             self.old = self.displayedlist[self.index]
             if reverse: scroll_down(reverse=True)
             else: scroll_up()
-            if self.gui.show_next.get():
-                self.gui.displayimage(self.old.obj)
+
         def highlight_up(reverse=None):
-            columns = int(max(1, self.gui.imagegrid.winfo_width() / self.gui.actual_gridsquare_width))
+            # consider also destgrid bounds for this to function on destgrid.
+            if self.window_focused == "GRID":
+                columns = int(max(1, self.gui.imagegrid.winfo_width() / self.gui.actual_gridsquare_width))
+            elif self.window_focused == "DEST":
+                columns = int(max(1, self.gui.destination_viewer.destgrid.winfo_width() / self.gui.actual_gridsquare_width))
+
             check_upper_bound = self.index-columns
             if check_upper_bound < 0:
                 return
@@ -153,10 +165,13 @@ class Navigator:
             self.old = self.displayedlist[self.index]
             if reverse: scroll_down(reverse=True)
             else: scroll_up()
-            if self.gui.show_next.get():
-                self.gui.displayimage(self.old.obj)
+
         def highlight_down(reverse=None):
-            columns = int(max(1, self.gui.imagegrid.winfo_width() / self.gui.actual_gridsquare_width))
+            if self.window_focused == "GRID":
+                columns = int(max(1, self.gui.imagegrid.winfo_width() / self.gui.actual_gridsquare_width))
+            elif self.window_focused == "DEST":
+                columns = int(max(1, self.gui.destination_viewer.destgrid.winfo_width() / self.gui.actual_gridsquare_width))
+
             check_lower_bound = self.index+columns
             if check_lower_bound > len(self.displayedlist)-1:
                 return
@@ -166,8 +181,7 @@ class Navigator:
             self.old = self.displayedlist[self.index]
             if reverse: scroll_up(reverse=True)
             else: scroll_down()
-            if self.gui.show_next.get():
-                self.gui.displayimage(self.old.obj)
+
         def spacebar():
             self.gui.displayimage(self.old.obj)
         def enter():
@@ -194,30 +208,20 @@ class Navigator:
                 "Return": lambda: enter()
             }
 
-        
-
         if self.gui.current_view.get() == "Show Assigned":
             arrow_action = self.arrow_action_reversed
         else:
             arrow_action = self.arrow_action
 
         if self.window_focused == "DEST":
-            lista = self.gui.destination_viewer.displayedlist
             self.displayedlist = self.gui.destination_viewer.displayedlist
             arrow_action = self.arrow_action_reversed
         else:
             self.displayedlist = self.gridmanager.displayedlist
-            lista = self.gridmanager.displayedlist
         key = event.keysym
-        try:
-            arrow_action[key]()
-        except:
-            if lista:
-                if self.gui.current_view.get() in ("Show Assigned", "Show Moved"):
-                    gridsquare = lista[-1]
-                else:
-                    gridsquare = lista[0]
-                self.select(gridsquare)
+        arrow_action[key]()
+        if self.gui.show_next.get():
+            self.gui.displayimage(self.old.obj)
 
     def default(self, frame):
         "Reverts colour back to default"
