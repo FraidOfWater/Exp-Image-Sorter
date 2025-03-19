@@ -453,10 +453,12 @@ class SortImages:
 
         "Prompt"
         if asksavelocation:
+            custom_session_name = f"{os.path.basename(self.sdp)}-{os.path.basename(self.ddp)}.json" 
             filet=[("Javascript Object Notation","*.json")]
-            savelocation=tkFileDialog.asksaveasfilename(confirmoverwrite=True,defaultextension=filet,filetypes=filet,initialdir=os.getcwd(),initialfile=gui.sessionpathvar.get())
+            savelocation=tkFileDialog.asksaveasfilename(confirmoverwrite=True,defaultextension=filet,filetypes=filet,
+                                                        initialdir=os.getcwd(),initialfile=custom_session_name)
         else:
-            savelocation = gui.sessionpathvar.get()
+            savelocation = "last_session.json"
         
         "Construct save file"
         "Save imagefile attributes"
@@ -506,7 +508,7 @@ class SortImages:
         gridmanager = gui.gridmanager
         "Loads session"
         sessionpath = gui.sessionpathvar.get()
-
+        print(sessionpath)
         "If there is no last session, early exit"
         if not (os.path.exists(sessionpath) and os.path.isfile(sessionpath)):
             logger.warning("No Last Session!")
@@ -526,7 +528,9 @@ class SortImages:
         gui.initial_dock_setup()
 
         print("")
-        print(f'Using session:  "{sessionpath}"')
+        #gui.sessionpathvar.set(os.path.basename(
+            #    self.sdp)+"-"+os.path.basename(self.ddp)+".json")
+        print(f'Using session:  "{os.path.basename(sessionpath)}"')
         print(f'Source:   "{self.sdp}"')
         print(f'Target:   "{self.ddp}"')
 
@@ -806,7 +810,6 @@ class SortImages:
                     self.destinationsraw.append(entry.path)
     def validate(self):
         gui = self.gui
-        gridmanager = gui
         self.timer.start()
         self.sdp = gui.source_entry_field.get()
         self.ddp = gui.destination_entry_field.get()
@@ -818,11 +821,12 @@ class SortImages:
             gui.initial_dock_setup()
 
             gui.destination_viewer.get_paths()
-            gui.sessionpathvar.set(os.path.basename(
-                self.sdp)+"-"+os.path.basename(self.ddp)+".json")
-
+            gui.sessionpathvar.set("last_session.json")
+            #gui.sessionpathvar.set(os.path.basename(
+            #    self.sdp)+"-"+os.path.basename(self.ddp)+".json")
+            
             print("")
-            print(f'New session:  "{gui.sessionpathvar.get()}"')
+            print(f'New session:  "{"last_session.json"}"')
             print(f'Source:   "{self.sdp}"')
             print(f'Target:   "{self.ddp}"')
             
