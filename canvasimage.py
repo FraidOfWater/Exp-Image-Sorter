@@ -81,8 +81,7 @@ class CanvasImage:
         self.__huge_size = 14000 # define size of the huge image
         self.__band_width = 1024 # width of the tile band
         # Fix for lag in first image that is placed!
-        self.count = 0
-        self.count1 = 3
+        self.lag_prevention = True
         # Video handling (if path points to video file, we must use its thumb to get its size.)
         self.path = self.obj.path
         # Window
@@ -486,13 +485,7 @@ class CanvasImage:
                                                        max(box_canvas[1], box_img_int[1]),
                                                     anchor='nw', image=imagetk)
                     else:  # show normal image
-                        if self.count < self.count1: # fixes lag on movign rescaled picture.
-
-                                #logger.debug(f"scroll event {self.__curr_img}, {(max(0, self.__curr_img))} {self.count} {self.count1}")
-                                self.count += 1
                         if self.first:
-                            #for i in range(3):
-                            #    self.manual_wheel()
                             self.first = False
                             image = self.__pyramid[(max(0, self.__curr_img))]
                             if self.file_size < self.gui.quick_preview_size_threshold: # if small render high quality
@@ -512,7 +505,6 @@ class CanvasImage:
                             self.canvas.lower(self.imageid)  # set image into background
                             self.canvas.imagetk = imagetk  # keep an extra reference to prevent garbage-collection
                             self.first_rendered.set() #tell threading that second picture is allowed to render.
-
                         elif self.replace_await: # only render second time if needed.
                             self.replace_await = False
                             image = self.__pyramid[(max(0, self.__curr_img))]
@@ -527,6 +519,12 @@ class CanvasImage:
                             self.canvas.imagetk = imagetk
 
                         else:
+                            if self.lag_prevention:
+                                self.manual_wheel() ## Initially displays pos 0 from pyramid, this fixes it. Probably needed because the later entries to the pyramid arent created yet when rendering the first picture!
+                                # Would it load faster if we waited for generation of the third image for example, and render that, since it is smaller than the first?
+                                # Interestng optimization opportunity, but eh...
+                                self.lag_prevention = False
+
                             if self.imageid:
                                 self.canvas.delete(self.imageid)
                             image = self.__pyramid[(max(0, self.__curr_img))].crop(  # crop current img from pyramid
@@ -538,6 +536,7 @@ class CanvasImage:
                                                     anchor='nw', image=imagetk)
                             self.canvas.lower(self.imageid)  # set image into background
                             self.canvas.imagetk = imagetk
+                            
         except AttributeError as e:
             logger.debug("Failed to render image to canvasimage. Err1. (Safe)", e)
         except Exception as e:
@@ -596,14 +595,10 @@ class CanvasImage:
         #logger.debug(f"after scroll event {self.__curr_img}, {(max(0, self.__curr_img))}")
     def manual_wheel(self):
         "Fixes laggy panning on first picture"
-        x = self.canvas_width
-        y = self.canvas_height
-        scale = 1.0
-
         k = self.imscale * self.__ratio # temporary coefficient
         self.__curr_img = min((-1) * int(log(k, self.__reduction)), len(self.__pyramid) - 1) #presumably changes the displayed image. Yes. We need pyramid to change the iterated frames.
         self.__scale = k * pow(self.__reduction, max(0, self.__curr_img)) #positioning dont change
-        self.canvas.scale('all', x, y, scale, scale)  # rescale all objects
+
     def smaller(self):
         "Resize image proportionally and return smaller image"
         w1, h1 = float(self.imwidth), float(self.imheight)
