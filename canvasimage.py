@@ -523,6 +523,7 @@ class CanvasImage:
                                 self.manual_wheel() ## Initially displays pos 0 from pyramid, this fixes it. Probably needed because the later entries to the pyramid arent created yet when rendering the first picture!
                                 # Would it load faster if we waited for generation of the third image for example, and render that, since it is smaller than the first?
                                 # Interestng optimization opportunity, but eh...
+                                # From brief testing, it didnt look promising, generating a lower pyramid image delays the initial render too long.
                                 self.lag_prevention = False
 
                             if self.imageid:
@@ -536,7 +537,6 @@ class CanvasImage:
                                                     anchor='nw', image=imagetk)
                             self.canvas.lower(self.imageid)  # set image into background
                             self.canvas.imagetk = imagetk
-                            
         except AttributeError as e:
             logger.debug("Failed to render image to canvasimage. Err1. (Safe)", e)
         except Exception as e:
