@@ -1204,6 +1204,14 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                 if hasattr(self.destination_viewer, "destwindow"):
                     self.destination_viewer.close_window()
                 self.fileManager.saveprefs(self)
+                moved = self.gridmanager.moved
+                # Purge data cache of old images.
+                for gridsquare in moved:
+                    if os.path.isdir(self.fileManager.data_dir) and os.path.exists(gridsquare.obj.thumbnail):
+                        try:
+                            os.remove(gridsquare.obj.thumbnail)
+                        except Exception as e:
+                            print("Failed to remove cached thumbnail from the data directory.", e)
                 self.quit()
                 #self.destroy() - leaves threads running
                 #os._exit(0) # This works too, but doesn't do cleanup
