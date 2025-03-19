@@ -178,7 +178,7 @@ class GUIManager(tk.Tk): #Main window
         #print("")
         #objgraph.show_growth()
         #print(len(objgraph.get_leaking_objects()))
-        #print(len(self.fileManager.animate.running), len(self.fileManager.animation_queue))
+        print(len(self.fileManager.animate.running), len(self.fileManager.animation_queue))
 
 
 
@@ -1198,20 +1198,36 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                     if hasattr(self.destination_viewer, "destwindow"):
                         self.destination_viewer.close_window()
                     self.fileManager.saveprefs(self)
+                    # Purge data cache of old images.
+                    data_dir = self.fileManager.data_dir
+                    if os.path.isdir(data_dir):
+                        gridsquares = {x.obj.id for x in self.gridmanager.gridsquarelist}
+                        cache = os.listdir(data_dir)
+                        thumbs = [x.rsplit(".",1)[0] for x in cache]
+                        for thumbnail in thumbs:
+                            if thumbnail not in gridsquares:
+                                try:
+                                    os.remove(os.path.join(data_dir, f"{thumbnail}.webp"))
+                                except Exception as e:
+                                    print("Failed to remove old cached thumbnails from the data directory.", e)
                     self.destroy()
             else:
                 self.close_second_window()
                 if hasattr(self.destination_viewer, "destwindow"):
                     self.destination_viewer.close_window()
                 self.fileManager.saveprefs(self)
-                moved = self.gridmanager.moved
                 # Purge data cache of old images.
-                for gridsquare in moved:
-                    if os.path.isdir(self.fileManager.data_dir) and os.path.exists(gridsquare.obj.thumbnail):
-                        try:
-                            os.remove(gridsquare.obj.thumbnail)
-                        except Exception as e:
-                            print("Failed to remove cached thumbnail from the data directory.", e)
+                data_dir = self.fileManager.data_dir
+                if os.path.isdir(data_dir):
+                    gridsquares = {x.obj.id for x in self.gridmanager.gridsquarelist}
+                    cache = os.listdir(data_dir)
+                    thumbs = [x.rsplit(".",1)[0] for x in cache]
+                    for thumbnail in thumbs:
+                        if thumbnail not in gridsquares:
+                            try:
+                                os.remove(os.path.join(data_dir, f"{thumbnail}.webp"))
+                            except Exception as e:
+                                print("Failed to remove old cached thumbnails from the data directory.", e)
                 self.quit()
                 #self.destroy() - leaves threads running
                 #os._exit(0) # This works too, but doesn't do cleanup
