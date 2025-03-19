@@ -182,7 +182,7 @@ class GUIManager(tk.Tk): #Main window
 
 
 
-
+        
         "Anim: displayedlist with frames/displayedlist with framecount/(queue)"
         temp = [x for x in self.gridmanager.displayedlist if x.obj.frametimes]
         self.animation_stats.set(f"Anim: {len(self.fileManager.animate.running)}/{len(temp)}")
@@ -1215,7 +1215,10 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
     def close_second_window(self, event=None):
         if hasattr(self, 'Image_frame'):
             self.middlepane_frame.grid_forget()
-            self.Image_frame.canvas.unbind("<Configure>")
+            try:
+                self.Image_frame.canvas.unbind("<Configure>")
+            except:
+                pass
             self.Image_frame.destroy()
             self.Image_frame.destroy_imframe()
             del self.Image_frame
