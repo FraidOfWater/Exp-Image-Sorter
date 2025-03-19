@@ -182,7 +182,6 @@ class GUIManager(tk.Tk): #Main window
 
 
 
-        
         "Anim: displayedlist with frames/displayedlist with framecount/(queue)"
         temp = [x for x in self.gridmanager.displayedlist if x.obj.frametimes]
         self.animation_stats.set(f"Anim: {len(self.fileManager.animate.running)}/{len(temp)}")
@@ -635,7 +634,7 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
          # Bind arrow keys to Navigator.
         arrowkeys = ["<Up>", "<Down>", "<Left>", "<Right>", "<space>", "<Return>"]
         for arrowkey in arrowkeys: # Binding arrow keys to navigator
-            self.bind_all(f"{arrowkey}", partial(self.fileManager.navigator.bindhandler))
+            self.bind_all(f"{arrowkey}", lambda e: self.fileManager.navigator.bindhandler(e))
 
         # Frame to hold the buttons
         self.buttonframe = tk.Frame(self.leftui,bg=self.main_colour)
@@ -1149,7 +1148,7 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
 
             self.focused_on_secondwindow = True
 
-            self.new.canvas.focus_set()
+            #self.new.canvas.focus_set()
             
         else: # Standalone image viewer
             if not hasattr(self, 'second_window') or not self.second_window or not self.second_window.winfo_exists():
@@ -1177,10 +1176,10 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
             logger.debug("Rescaled and Centered")
             self.focused_on_secondwindow = True
 
-            if not self.show_next.get(): # wait for window to initialize
-                self.second_window.after(0, lambda: self.new.canvas.focus_set())
-            else:
-                self.second_window.after(0, lambda: self.new.canvas.focus_set())
+            #if not self.show_next.get(): # wait for window to initialize
+            #    self.second_window.after(0, lambda: self.new.canvas.focus_set())
+            #else:
+            #    self.second_window.after(0, lambda: self.new.canvas.focus_set())
         if not hasattr(self, "Image_frame"):
             self.Image_frame = self.new
             return
