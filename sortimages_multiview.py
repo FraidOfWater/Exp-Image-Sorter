@@ -758,8 +758,13 @@ class SortImages:
             if add:
                 gui.destination_viewer.add_squares(add)
             "If show next option checked, and next exists, and viewer is open, show next image"
-            if self.navigator.old and len(gridmanager.displayedset) >= 1:
-                self.navigator.select_next(gridmanager.displayedlist)
+            if self.navigator.window_focused == "GRID":
+                if self.navigator.old and len(gridmanager.displayedset) >= 1:
+                    self.navigator.select_next(gridmanager.displayedlist)
+            # Consider if we focus on destwindow instead, we should use navigate using that list, not default gridlist. This does that
+            elif self.navigator.window_focused == "DEST":
+                if self.navigator.old and len(gui.destination_viewer.displayedset) >= 1:
+                    self.navigator.select_next(gui.destination_viewer.displayedlist)
 
             if gui.auto_load and gui.current_view.get() == "Show Unassigned": 
                 if gui.squares_per_page_intvar.get() > len(gridmanager.displayedlist):
