@@ -2,10 +2,10 @@ import os
 
 from threading import Thread
 from math import floor, sqrt
-from random import seed
+from random import shuffle, seed
 from time import time, perf_counter
 from functools import partial
-
+import colorsys
 import logging
 import psutil
 
@@ -25,6 +25,14 @@ from destination_viewer import Destination_Viewer
 
 import objgraph
 #import objgraph
+
+from PIL import Image
+import io
+import colorsys
+from colorthief import ColorThief
+from sklearn.cluster import KMeans
+import numpy as np
+import concurrent.futures
 
 logger = logging.getLogger("GUI")
 logger.setLevel(logging.WARNING)  # Set to the lowest level you want to handle
@@ -178,7 +186,7 @@ class GUIManager(tk.Tk): #Main window
         #print("")
         #objgraph.show_growth()
         #print(len(objgraph.get_leaking_objects()))
-        print(len(self.fileManager.animate.running), len(self.fileManager.animation_queue))
+        #print(len(self.fileManager.animate.running), len(self.fileManager.animation_queue))
 
 
 
@@ -594,6 +602,160 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
 
     def guisetup(self, destinations): # 
         "Happens after we press new session or load session. Does the buttons etc"
+        def get_folder_color(dest, formats, sample_size):
+            def get_fur_color(colors):
+                def hex_to_rgb(hex_color):
+                    hex_color = hex_color.lstrip('#')
+                    return [int(hex_color[i:i+2], 16) for i in (0, 2, 4)]
+                if isinstance(colors[0], str) and colors[0].startswith('#'):
+                    colors = np.array([hex_to_rgb(color) for color in colors])
+
+                def rgb_to_hsv(rgb):
+                    return colorsys.rgb_to_hsv(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255)
+
+                def rgb_distance(color1, color2):
+                    return np.linalg.norm(np.array(color1) - np.array(color2))
+
+                kmeans = KMeans(n_clusters=5)
+                kmeans.fit(colors)
+                centers, labels = kmeans.cluster_centers_, kmeans.labels_
+                unique, counts = np.unique(labels, return_counts=True)
+                largest_cluster = unique[np.argmax(counts)]
+
+                cluster_center = centers[largest_cluster]
+                distances = np.array([rgb_distance(color, cluster_center) for color in colors])
+                threshold = np.percentile(distances, 70)
+                inlier_colors = colors[distances <= threshold]
+
+                def get_vibrancy(color):
+                    hsv = rgb_to_hsv(color)
+                    return hsv[1] * hsv[2]
+
+                vibrancy_scores = [get_vibrancy(color) for color in inlier_colors]
+                vibrant_colors = [color for color, score in zip(inlier_colors, vibrancy_scores)
+                                  if score >= np.median(vibrancy_scores)]
+
+                final_color = np.mean(vibrant_colors, axis=0) if vibrant_colors else np.mean(inlier_colors, axis=0)
+                a = final_color.astype(int)
+                return ('kMEANS', '#{:02x}{:02x}{:02x}'.format(*a))
+            def process_image(img, resize, q):
+                try:
+                    image = Image.open(img).convert('RGB')
+                    if resize is not None and (image.width > resize or image.height > resize):
+                        image = image.resize((resize, resize))
+
+                    image_bytes = io.BytesIO()
+                    image.save(image_bytes, format='png')
+                    image_bytes.seek(0)
+
+                    color_thief = ColorThief(image_bytes)
+                    dominant_color = color_thief.get_color(quality=q)
+                    ct_tuple = ('ColorThief', '#{:02x}{:02x}{:02x}'.format(*dominant_color))
+
+                    pixels = np.array(image).reshape(-1, 3)
+                    median_color = np.median(pixels, axis=0).astype(int)
+                    median_tuple = ('Median', '#{:02x}{:02x}{:02x}'.format(*median_color))
+
+                    image.close()
+                    image_bytes.close()
+                    return (img, ct_tuple, median_tuple)
+                except Exception as e:
+                    print(f"Error processing {img}: {e}")
+                    return None
+            def extract_colors(image_files, resize=125, q=4, how_many=25):
+                colors_list = []
+                colors_list2 = []
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+                    futures = {executor.submit(process_image, img, resize, q): img for img in image_files[:how_many]}
+                    for future in concurrent.futures.as_completed(futures):
+                        result = future.result()
+                        if result is not None:
+                            img, ct_tuple, median_tuple = result
+                            colors_list.append((img, [ct_tuple]))
+                            colors_list2.append((img, [median_tuple]))
+
+                colours = [x[1][0][1] for x in colors_list]
+                colours2 = [x[1][0][1] for x in colors_list2]
+
+                def hex_to_rgb_tuple(hex_color):
+                    return tuple(int(hex_color[i:i+2], 16) for i in (1, 3, 5))
+
+                def rgb_to_hex(rgb):
+                    return '#{:02x}{:02x}{:02x}'.format(*rgb)
+
+                def median_color(hex_colors):
+                    rgb_colors = [hex_to_rgb_tuple(c) for c in hex_colors]
+                    median_rgb = tuple(int(np.median([c[i] for c in rgb_colors])) for i in range(3))
+                    return "Median", rgb_to_hex(median_rgb)
+
+                median_c = median_color(colours)
+                kmeans = get_fur_color(colours)
+                c_kmeans = get_fur_color(colours2)
+
+                l = [median_c, kmeans, c_kmeans]
+                colors_list = []
+                return [colors_list], l
+            def get_image_files(folder, supported_formats, how_many):
+                image_files = []
+                subfolder_images = []
+
+                for f in os.listdir(folder):
+                    if f.lower().endswith(supported_formats):
+                        image_files.append(os.path.join(folder, f))
+
+                if len(image_files) < how_many:
+                    for root_dir, _, files in os.walk(folder):
+                        if root_dir == folder:
+                            continue
+                        for f in files:
+                            if f.lower().endswith(supported_formats):
+                                subfolder_images.append(os.path.join(root_dir, f))
+                    image_files.extend(subfolder_images[:max(0, how_many - len(image_files))])
+                shuffle(image_files)
+                return image_files
+            files = get_image_files(dest, formats, sample_size)
+            wanted_colors = extract_colors(files, resize=125, q=4, how_many=sample_size)
+            wanted_colors1 = [x[1] for x in wanted_colors[1]]
+            def hex_to_rgb(hex_color):
+                hex_color = hex_color.lstrip('#')
+                return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+
+            def rgb_to_hex(rgb):
+                return '#{:02x}{:02x}{:02x}'.format(*rgb)
+            now = wanted_colors1[1]
+            
+            later = None
+            def enhance_hsv(hex_color, sat_boost):
+                r, g, b = [x/255.0 for x in hex_to_rgb(hex_color)]
+                h, s, v = colorsys.rgb_to_hsv(r, g, b)
+                
+                # Boost saturation and clamp to 1.0
+                s = min(s * sat_boost, 1.0)
+                
+                r, g, b = colorsys.hsv_to_rgb(h, s, v)
+                return rgb_to_hex((int(r*255), int(g*255), int(b*255)))
+
+            def enhance_bold(hex_color, contrast_factor, sat_boost):
+                def boost_contrast(rgb, factor):
+                   # Adjust contrast: move each channel away from 128
+                   return tuple(max(0, min(255, int(128 + factor*(c - 128)))) for c in rgb)
+                # First, boost contrast in RGB space
+                rgb = hex_to_rgb(hex_color)
+                rgb_contrast = boost_contrast(rgb, contrast_factor)
+
+                # Now convert to HLS to increase saturation further
+                r, g, b = [x/255.0 for x in rgb_contrast]
+                h, l, s = colorsys.rgb_to_hls(r, g, b)
+                s = min(s * sat_boost, 1.0)
+                r, g, b = colorsys.hls_to_rgb(h, l, s)
+
+                return rgb_to_hex((int(r*255), int(g*255), int(b*255)))
+            later = enhance_hsv(now, sat_boost=1.9)
+            later = enhance_bold(later, contrast_factor=1.4, sat_boost=1.7)
+            # 1.5, 1.3, 1.3 
+            # 1.9, 1.4, 1.7
+            return later
         def luminance(hexin):
             color = tuple(int(hexin.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
             r = color[0]
@@ -623,6 +785,31 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
 
                 return f'#{r:02x}{g:02x}{b:02x}'
         
+        def reassign_hotkey(event, d, btn):
+            print(event, d, btn)
+            def key_press(event):
+                #print("pressed")
+                new_hotkey = event.keysym
+                for x in destinations:
+                    if new_hotkey == x["hotkey"]:
+                        #print("duplicate hotkey")
+                        return
+                        
+                self.unbind_all("<KeyPress>")
+                d['hotkey'] = new_hotkey
+                self.bind_all(f"<KeyPress-{new_hotkey}>", partial(self.fileManager.setDestination, d))
+                #print(new_hotkey)
+                btn.config(text=f"{new_hotkey}: {d['name']}")
+                
+
+            old_hotkey = d['hotkey']
+            d['hotkey'] = None
+            self.unbind_all(f"<KeyPress-{old_hotkey}>")
+            print(old_hotkey, "->", d['hotkey'])
+            btn.config(text=f"?: {d['name']}")
+
+            self.unbind_all("<KeyPress>")
+            self.bind_all("<KeyPress>", key_press)         
         self.source_entry_field.config(state=tk.DISABLED)
         self.destination_entry_field.config(state=tk.DISABLED)
 
@@ -650,67 +837,75 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
             for key in hotkeys:
                 self.unbind_all(key)
     
-            guirow = 1
-            guicol = 0
-            itern = 0
-            smallfont = self.smallfont
-            columns = 1
+            
+            
     
             if len(destinations) > int((self.leftui.winfo_height()/35)-2):
-                columns=2
                 buttonframe.columnconfigure(1, weight=1)
             if len(destinations) > int((self.leftui.winfo_height()/15)-4):
-                columns = 3
                 buttonframe.columnconfigure(2, weight=1)
             original_colors = {} #Used to return their color when hovered off
-            
-            for x in destinations:
-                color = x['color']
-                if x['name'] != "SKIP" and x['name'] != "BACK":
-                    if(itern < len(hotkeys)):
-                        newbut = tk.Button(buttonframe, text=hotkeys[itern] + ": " + x['name'], command=partial(
-                            self.fileManager.setDestination, x, {"widget": None}), anchor="w", wraplength=(self.leftui.winfo_width()/columns)-1)
-                        seed(x['name'])
-                        self.bind_all(f"<KeyPress-{self.hotkeys[itern]}>", partial(
-                            self.fileManager.setDestination, x))
-                        fg = self.button_text_colour
-                        if luminance(color) == 'light':
+            def test():
+                guirow = 1
+                guicol = 0
+                itern = 0
+                columns = 3
+                smallfont = self.smallfont
+                for x in destinations:
+                    color = x['color']
+                    if x['name'] != "SKIP" and x['name'] != "BACK":
+                        if(itern < len(hotkeys)):
+                            newbut = tk.Button(buttonframe, text=hotkeys[itern] + ": " + x['name'], command=partial(
+                                self.fileManager.setDestination, x, {"widget": None}), anchor="w", wraplength=(self.leftui.winfo_width()/columns)-1)
+                            seed(x['name'])
+                            self.bind_all(f"<KeyPress-{self.hotkeys[itern]}>", partial(
+                                self.fileManager.setDestination, x))
+                            x['hotkey'] = self.hotkeys[itern]
                             fg = self.button_text_colour
-                        newbut.configure(bg=color, fg=fg)
-                        original_colors[newbut] = {'bg': color, 'fg': fg}  # Store both colors
-                        if(len(x['name']) >= 13):
-                            newbut.configure(font=smallfont)
-                    else:
-                        newbut = tk.Button(buttonframe, text=x['name'],command=partial(
-                            self.fileManager.setDestination, x, {"widget": None}), anchor="w")
-                    itern += 1
+
+
+                            coolor = get_folder_color(x["path"],('.png','.jpg','.jpeg','.webp','.gif'),25)
+                            #coolor = "#000000"
+                            if luminance(coolor) == 'light':
+                                fg = self.button_text_colour
+                            newbut.configure(bg=coolor, fg=fg)
+                            original_colors[newbut] = {'bg': coolor, 'fg': fg}  # Store both colors
+                            if(len(x['name']) >= 13):
+                                newbut.configure(font=smallfont)
+                        else:
+                            newbut = tk.Button(buttonframe, text=x['name'],command=partial(
+                                self.fileManager.setDestination, x, {"widget": None}), anchor="w")
+                        itern += 1
+
+                    newbut.config(font=("Courier", 12), width=int(
+                        (self.leftui.winfo_width()/12)/columns), height=1)
+                    if len(x['name']) > 20:
+                        newbut.config(font=smallfont)
+                    newbut.dest = x
+                    if guirow > ((self.leftui.winfo_height()/35)-2):
+                        guirow = 1
+                        guicol += 1
+                    newbut.grid(row=guirow, column=guicol, sticky="nsew")
+                    newbut.bind("<Button-2>", lambda a, x=x, btn=newbut: (reassign_hotkey(a,x, btn), setattr(self, 'focused_on_secondwindow', False)))
+                    newbut.bind("<Button-3>", lambda a, x=x: self.destination_viewer.create_window(a,x))
+
+                    self.buttons.append(newbut)
+                    guirow += 1
+                    # Store the original colors for all buttons
+                    original_colors[newbut] = {'bg': newbut.cget("bg"), 'fg': newbut.cget("fg")}  # Store both colors
+
+                    # Bind hover events for each button
+                    newbut.bind("<Enter>", lambda e, btn=newbut: btn.config(bg=darken_color(original_colors[btn]['bg']), fg='white'))
+                    newbut.bind("<Leave>", lambda e, btn=newbut: btn.config(bg=original_colors[btn]['bg'], fg=original_colors[btn]['fg']))  # Reset to original colors
     
-                newbut.config(font=("Courier", 12), width=int(
-                    (self.leftui.winfo_width()/12)/columns), height=1)
-                if len(x['name']) > 20:
-                    newbut.config(font=smallfont)
-                newbut.dest = x
-                if guirow > ((self.leftui.winfo_height()/35)-2):
-                    guirow = 1
-                    guicol += 1
-                newbut.grid(row=guirow, column=guicol, sticky="nsew")
-                newbut.bind("<Button-3>", lambda a, x=x: self.destination_viewer.create_window(a,x))
-    
-                self.buttons.append(newbut)
-                guirow += 1
-                # Store the original colors for all buttons
-                original_colors[newbut] = {'bg': newbut.cget("bg"), 'fg': newbut.cget("fg")}  # Store both colors
-    
-                # Bind hover events for each button
-                newbut.bind("<Enter>", lambda e, btn=newbut: btn.config(bg=darken_color(original_colors[btn]['bg']), fg='white'))
-                newbut.bind("<Leave>", lambda e, btn=newbut: btn.config(bg=original_colors[btn]['bg'], fg=original_colors[btn]['fg']))  # Reset to original colors
-    
-            # For SKIP and BACK buttons, set hover to white
-            for btn in self.buttons:
-                if btn['text'] == "SKIP (Space)" or btn['text'] == "BACK":
-                    btn.bind("<Enter>", lambda e, btn=btn: btn.config(bg=self.button_text_colour, fg=self.main_colour))
-                    btn.bind("<Leave>", lambda e, btn=btn: btn.config(bg=self.button_colour, fg=self.button_text_colour))  # Reset to original colors
+                # For SKIP and BACK buttons, set hover to white
+                for btn in self.buttons:
+                    if btn['text'] == "SKIP (Space)" or btn['text'] == "BACK":
+                        btn.bind("<Enter>", lambda e, btn=btn: btn.config(bg=self.button_text_colour, fg=self.main_colour))
+                        btn.bind("<Leave>", lambda e, btn=btn: btn.config(bg=self.button_colour, fg=self.button_text_colour))  # Reset to original colors
         
+            Thread(target=test, daemon=True).start()
+            
         # Make second page buttons
         if True:
             # Frame to hold all new the buttons
