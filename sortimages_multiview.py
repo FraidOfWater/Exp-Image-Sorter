@@ -806,7 +806,7 @@ class SortImages:
                 if entry.is_dir():
                     seed(entry.name)
                     self.destinations.append(
-                        {'name': entry.name, 'path': entry.path, 'color': randomColor()})
+                        {'name': entry.name, 'path': entry.path, 'color': "black", 'hotkey': None})
                     self.destinationsraw.append(entry.path)
     def validate(self):
         gui = self.gui
