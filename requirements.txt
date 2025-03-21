@@ -1,10 +1,10 @@
-pillow 
-pyvips 
-imageio 
-imageio[ffmpeg] 
-numpy 
-python-vlc 
-psutil 
-pyinstaller 
-colorthief s
-cikit-learn
+pillow
+pyvips
+imageio
+imageio[ffmpeg]
+numpy
+python-vlc
+psutil
+pyinstaller
+colorthief
+scikit-learn
