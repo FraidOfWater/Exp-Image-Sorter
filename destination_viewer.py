@@ -77,8 +77,11 @@ class Destination_Viewer():
         for x in self.gui.gridmanager.gridsquarelist:
             if x.obj.dest == self.dest_path:
                 create_list.append((x.obj, "add"))
-            elif x.obj.moved and x.obj.path == dest:
+                #dest in x.obj.path
+                #
+            elif x.obj.moved and dest in x.obj.path:
                 create_list.append((x.obj, "add"))
+
         self.add_squares(create_list)
 
     def add_squares(self, imagetuples: list) -> None:
