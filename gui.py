@@ -33,7 +33,7 @@ from colorthief import ColorThief
 from sklearn.cluster import KMeans
 import numpy as np
 import concurrent.futures
-
+color_index = 0
 logger = logging.getLogger("GUI")
 logger.setLevel(logging.WARNING)  # Set to the lowest level you want to handle
 handler = logging.StreamHandler()
@@ -723,9 +723,8 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
 
             def rgb_to_hex(rgb):
                 return '#{:02x}{:02x}{:02x}'.format(*rgb)
-            now = wanted_colors1[1]
             
-            later = None
+            
             def enhance_hsv(hex_color, sat_boost):
                 r, g, b = [x/255.0 for x in hex_to_rgb(hex_color)]
                 h, s, v = colorsys.rgb_to_hsv(r, g, b)
@@ -751,11 +750,22 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                 r, g, b = colorsys.hls_to_rgb(h, l, s)
 
                 return rgb_to_hex((int(r*255), int(g*255), int(b*255)))
-            later = enhance_hsv(now, sat_boost=1.9)
-            later = enhance_bold(later, contrast_factor=1.4, sat_boost=1.7)
+            
+            later = None
+            #now = wanted_colors1[1]
+            
+            lis = []
+            
+            for x in wanted_colors1:
+                x = enhance_hsv(x, sat_boost=1.9)
+                x = enhance_bold(x, contrast_factor=1.4, sat_boost=1.7)
+                lis.append(x)
+            
+            #later = enhance_hsv(now, sat_boost=1.9)
+            #later = enhance_bold(later, contrast_factor=1.4, sat_boost=1.7)
             # 1.5, 1.3, 1.3 
             # 1.9, 1.4, 1.7
-            return later
+            return lis
         def luminance(hexin):
             color = tuple(int(hexin.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
             r = color[0]
@@ -766,7 +776,7 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                 0.587 * (g**2) +
                 0.114 * (b**2)
             )
-            if hsp > 115.6:
+            if hsp > 200:
                 return 'light'
             else:
                 return 'dark'
@@ -786,7 +796,7 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                 return f'#{r:02x}{g:02x}{b:02x}'
         
         def reassign_hotkey(event, d, btn):
-            print(event, d, btn)
+            #print(event, d, btn)
             def key_press(event):
                 #print("pressed")
                 new_hotkey = event.keysym
@@ -805,7 +815,7 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
             old_hotkey = d['hotkey']
             d['hotkey'] = None
             self.unbind_all(f"<KeyPress-{old_hotkey}>")
-            print(old_hotkey, "->", d['hotkey'])
+            #print(old_hotkey, "->", d['hotkey'])
             btn.config(text=f"?: {d['name']}")
 
             self.unbind_all("<KeyPress>")
@@ -845,6 +855,42 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
             if len(destinations) > int((self.leftui.winfo_height()/15)-4):
                 buttonframe.columnconfigure(2, weight=1)
             original_colors = {} #Used to return their color when hovered off
+            self.color_change_buttons = []
+            
+            def change_button_color(*args):
+                global color_index
+                color_index = (color_index + 1) % len(self.color_change_buttons[0][1]["lis"])  # Cycle through colors
+                for x1 in self.color_change_buttons:
+                    x1[0].config(bg=x1[1]["lis"][color_index])  # Change button color
+                print("Using option:", color_index)
+            def regen_button_color(*args):
+                def helper():
+                    print("Regenerating buttons.")
+                    for x in destinations:
+                        lis = get_folder_color(x["path"],('.png','.jpg','.jpeg','.webp','.gif'),25)
+                        coolor = lis[0]
+                        x["lis"] = lis
+                        #coolor = "#000000"
+                        if luminance(coolor) == 'dark':
+                            fg = self.button_text_colour
+                        else:
+                            fg = "black"
+                        x["btn"].configure(bg=coolor, fg=fg)
+                        original_colors[x["btn"]] = {'bg': coolor, 'fg': fg}  # Store both colors
+                        original_colors[x["btn"]] = {'bg': x["btn"].cget("bg"), 'fg': x["btn"].cget("fg")}  # Store both colors
+
+                        # Bind hover events for each button
+                        x["btn"].bind("<Enter>", lambda e, btn=x["btn"]: btn.config(bg=darken_color(original_colors[btn]['bg']), fg='white'))
+                        x["btn"].bind("<Leave>", lambda e, btn=x["btn"]: btn.config(bg=original_colors[btn]['bg'], fg=original_colors[btn]['fg']))  # Reset to original colors
+                        buttonframe.update_idletasks()
+                    print("Regenerated all buttons.")
+                
+                Thread(target=helper, daemon=True).start()
+        
+                    
+    
+            self.bind("<KeyPress-k>", change_button_color)
+            self.bind("<KeyPress-l>", regen_button_color)
             def test():
                 guirow = 1
                 guicol = 0
@@ -852,7 +898,6 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                 columns = 3
                 smallfont = self.smallfont
                 for x in destinations:
-                    color = x['color']
                     if x['name'] != "SKIP" and x['name'] != "BACK":
                         if(itern < len(hotkeys)):
                             newbut = tk.Button(buttonframe, text=hotkeys[itern] + ": " + x['name'], command=partial(
@@ -864,10 +909,15 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                             fg = self.button_text_colour
 
 
-                            coolor = get_folder_color(x["path"],('.png','.jpg','.jpeg','.webp','.gif'),25)
+                            lis = get_folder_color(x["path"],('.png','.jpg','.jpeg','.webp','.gif'),25)
+                            coolor = lis[0]
+                            x["lis"] = lis
                             #coolor = "#000000"
-                            if luminance(coolor) == 'light':
+                            if luminance(coolor) == 'dark':
                                 fg = self.button_text_colour
+                            else:
+                                fg = "black"
+                            x["btn"] = newbut
                             newbut.configure(bg=coolor, fg=fg)
                             original_colors[newbut] = {'bg': coolor, 'fg': fg}  # Store both colors
                             if(len(x['name']) >= 13):
@@ -890,6 +940,7 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                     newbut.bind("<Button-3>", lambda a, x=x: self.destination_viewer.create_window(a,x))
 
                     self.buttons.append(newbut)
+                    self.color_change_buttons.append((newbut, x))
                     guirow += 1
                     # Store the original colors for all buttons
                     original_colors[newbut] = {'bg': newbut.cget("bg"), 'fg': newbut.cget("fg")}  # Store both colors
