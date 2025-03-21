@@ -877,10 +877,11 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                         x["btn"].configure(bg=coolor, fg=fg)
                         original_colors[x["btn"]] = {'bg': coolor, 'fg': fg}  # Store both colors
                         original_colors[x["btn"]] = {'bg': x["btn"].cget("bg"), 'fg': x["btn"].cget("fg")}  # Store both colors
-
+                        
                         # Bind hover events for each button
                         x["btn"].bind("<Enter>", lambda e, btn=x["btn"]: btn.config(bg=darken_color(original_colors[btn]['bg']), fg='white'))
                         x["btn"].bind("<Leave>", lambda e, btn=x["btn"]: btn.config(bg=original_colors[btn]['bg'], fg=original_colors[btn]['fg']))  # Reset to original colors
+                        x["btn"].configure(text=x["btn"].cget("text"))
                         buttonframe.update_idletasks()
                     print("Regenerated all buttons.")
                 
@@ -897,39 +898,32 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                 columns = 3
                 smallfont = self.smallfont
                 for x in destinations:
-                    if x['name'] != "SKIP" and x['name'] != "BACK":
-                        if(itern < len(hotkeys)):
-                            newbut = tk.Button(buttonframe, text=hotkeys[itern] + ": " + x['name'], command=partial(
-                                self.fileManager.setDestination, x, {"widget": None}), anchor="w", wraplength=(self.leftui.winfo_width()/columns)-1)
-                            seed(x['name'])
-                            self.bind_all(f"<KeyPress-{self.hotkeys[itern]}>", partial(
-                                self.fileManager.setDestination, x))
-                            x['hotkey'] = self.hotkeys[itern]
+                    if(itern < len(hotkeys)):
+                        newbut = tk.Button(buttonframe, text=hotkeys[itern] + ": " + x['name'], command=partial(
+                            self.fileManager.setDestination, x, {"widget": None}), anchor="w")
+                        seed(x['name'])
+                        self.bind_all(f"<KeyPress-{self.hotkeys[itern]}>", partial(
+                            self.fileManager.setDestination, x))
+                        x['hotkey'] = self.hotkeys[itern]
+                        
+                        fg = self.button_text_colour
+                        lis = get_folder_color(x["path"],('.png','.jpg','.jpeg','.webp','.gif'),25)
+                        coolor = lis[0]
+                        x["lis"] = lis
+                        #coolor = "#000000"
+                        if luminance(coolor) == 'dark':
                             fg = self.button_text_colour
-
-
-                            lis = get_folder_color(x["path"],('.png','.jpg','.jpeg','.webp','.gif'),25)
-                            coolor = lis[0]
-                            x["lis"] = lis
-                            #coolor = "#000000"
-                            if luminance(coolor) == 'dark':
-                                fg = self.button_text_colour
-                            else:
-                                fg = "black"
-                            x["btn"] = newbut
-                            newbut.configure(bg=coolor, fg=fg)
-                            original_colors[newbut] = {'bg': coolor, 'fg': fg}  # Store both colors
-                            if(len(x['name']) >= 13):
-                                newbut.configure(font=smallfont)
                         else:
-                            newbut = tk.Button(buttonframe, text=x['name'],command=partial(
-                                self.fileManager.setDestination, x, {"widget": None}), anchor="w")
-                        itern += 1
+                            fg = "black"
+                        x["btn"] = newbut
+                        newbut.configure(bg=coolor, fg=fg)
+                        original_colors[newbut] = {'bg': coolor, 'fg': fg}  # Store both colors
+                        newbut.config(font=("Courier", 12))
+                    else:
+                        newbut = tk.Button(buttonframe, text=x['name'],command=partial(
+                            self.fileManager.setDestination, x, {"widget": None}), anchor="w")
+                    itern += 1
 
-                    newbut.config(font=("Courier", 12), width=int(
-                        (self.leftui.winfo_width()/12)/columns), height=1)
-                    if len(x['name']) > 20:
-                        newbut.config(font=smallfont)
                     newbut.dest = x
                     if guirow > ((self.leftui.winfo_height()/35)-2):
                         guirow = 1
