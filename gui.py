@@ -23,7 +23,6 @@ from tkinter import filedialog as tkFileDialog
 from canvasimage import CanvasImage
 from destination_viewer import Destination_Viewer
 
-import objgraph
 #import objgraph
 
 from PIL import Image
@@ -776,7 +775,7 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                 0.587 * (g**2) +
                 0.114 * (b**2)
             )
-            if hsp > 200:
+            if hsp > 210:
                 return 'light'
             else:
                 return 'dark'
