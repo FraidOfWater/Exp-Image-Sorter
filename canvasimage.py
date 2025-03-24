@@ -259,7 +259,7 @@ class CanvasImage:
         new_width += 2  # divider
 
         # Define the control area height (for timeline and volume)
-        control_height = 25
+        control_height = 35
 
         # Create a container frame to hold the video and controls.
         self.video_container = tk.Frame(self.canvas, bg=self.gui.viewer_bg,
@@ -348,24 +348,35 @@ class CanvasImage:
         Thread(target=video_print_data, daemon=True).start()
 
         # Start polling to update timeline slider maximum when media duration is valid
+        self.disable = False
         self.canvas.after(100, self.update_timeline_slider)
 
+    def update_slider_position(self):
+        "Updates the timeline slider to match the current video position."
+        if self.player.is_playing():
+            self.disable = True
+            self.timeline_slider.set(self.player.get_time())
+            self.disable = False
+        
+            self.canvas.after(1000, self.update_slider_position)
 
     def update_timeline_slider(self):
         "Poll until a valid media duration is available, then update the timeline slider"
         duration = self.media.get_duration()
         if duration > 0:
             self.timeline_slider.config(to=duration)
+            self.canvas.after(500, self.update_slider_position)
         else:
             self.canvas.after(100, self.update_timeline_slider)
 
     def seek_video(self, value):
         "Callback to jump to a specific time in the video."
-        try:
-            new_time = int(float(value))
-            self.player.set_time(new_time)
-        except Exception as e:
-            pass
+        if not self.disable:
+            try:
+                new_time = int(float(value))
+                self.player.set_time(new_time)
+            except Exception as e:
+                pass
 
     def change_volume(self, value):
         "Callback to adjust the audio level."
