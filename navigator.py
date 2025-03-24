@@ -220,8 +220,8 @@ class Navigator:
             self.displayedlist = self.gridmanager.displayedlist
         key = event.keysym
         arrow_action[key]()
-        if self.gui.show_next.get():
-            self.gui.displayimage(self.old.obj)
+        if self.gui.show_next.get() and key not in ("space","Return"):
+            self.gui.displayimage(self.old.obj, caller="arrow")
 
     def default(self, frame):
         "Reverts colour back to default"
