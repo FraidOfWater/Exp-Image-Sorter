@@ -173,29 +173,28 @@ class CanvasImage:
             self.canvas.bind('<MouseWheel>', self.__wheel)  # zoom for Windows and MacOS, but not Linux / zoom pyramid.
             self.canvas.bind('<Button-5>',   self.__wheel)  # zoom for Linux, wheel scroll down
             self.canvas.bind('<Button-4>',   self.__wheel)  # zoom for Linux, wheel scroll up
-    "Video"
+            "Video"
     def handle_video(self):
         "Handles videos"
         def video_print_data():
             try:
-                #if self.gui.dock_view.get():
-                #    self.gui.bind("<Configure>", resize_video)
-                #elif hasattr(self.gui, "second_window"):
-                #    self.gui.second_window.bind("<Configure>", resize_video)
+                if self.gui.dock_view.get():
+                    self.gui.bind("<Configure>", resize_video)
+                elif hasattr(self.gui, "second_window"):
+                    self.gui.second_window.bind("<Configure>", resize_video)
                 if hasattr(self, "media"):
                     self.media.parse()
-                    total_seconds = int(self.media.get_duration()/1000)
+                    total_seconds = int(self.media.get_duration() / 1000)
                     minutes = total_seconds // 60
                     seconds = total_seconds % 60
                     self.gui.frameinfo.set(f"F/D: {minutes}:{seconds}")
             except:
-                pass # thread closed
+                pass  # thread closed
+
         def resize_video(*args):
             "Canvas resizer"
-            #print("ran")
             try:
-                if perf_counter()-self.time11 < 0.1:
-                    #print("ingored")
+                if perf_counter() - self.time11 < 0.1:
                     return
                 if self.gui.middlepane_frame.winfo_width() == 1:
                     return
@@ -213,33 +212,34 @@ class CanvasImage:
                 if not hasattr(self, "canvas_height") or not hasattr(self, "imwidth") or not hasattr(self, "imheight"):
                     return
                 if self.gui.dock_view.get():
-
-                    
-                    new_width = self.gui.middlepane_frame.winfo_width()+2
+                    new_width = self.gui.middlepane_frame.winfo_width() + 2
                     aspect_ratio = self.imwidth / self.imheight
                     new_height = int(new_width / aspect_ratio)
+                    # Update the video canvas size
                     if self.video_frame.winfo_width() == new_width or self.video_frame.winfo_height() == new_height:
                         return
                     self.video_frame.config(width=new_width, height=new_height)
-                    pady1 = (self.canvas_height - new_height) // 2
+                    # Resize the container to include the control height as well
+                    self.video_container.config(width=new_width, height=new_height + control_height)
+                    pady1 = (self.canvas_height - (new_height + control_height)) // 2
                     if pady1 > 0:
-                        self.video_frame.grid(pady=pady1, sticky="nsew")
+                        self.video_container.grid(pady=pady1, sticky="nsew")
                 else:
-                    new_width = self.gui.second_window.winfo_width()+2
+                    new_width = self.gui.second_window.winfo_width() + 2
                     aspect_ratio = self.imwidth / self.imheight
                     new_height = int(new_width / aspect_ratio)
-    
                     if self.video_frame.winfo_width() == new_width or self.video_frame.winfo_height() == new_height:
                         return
                     self.video_frame.config(width=new_width, height=new_height)
-                    self.video_frame.grid(pady=((self.canvas_height - new_height) // 2), sticky="nsew")
+                    self.video_container.config(width=new_width, height=new_height + control_height)
+                    self.video_container.grid(pady=((self.canvas_height - (new_height + control_height)) // 2), sticky="nsew")
             except Exception as e:
                 pass
+
+        # Setup VLC playback as before
         path = self.obj.path
-        # Create a VLC instance
         self.vlc_instance = self.gui.vlc_instance
         self.media_list_player = self.vlc_instance.media_list_player_new()
-        #self.vlc_instance = vlc.Instance('--quiet')
 
         self.media_list = self.vlc_instance.media_list_new()
         self.media = self.vlc_instance.media_new(path)
@@ -250,24 +250,94 @@ class CanvasImage:
         new_width = self.canvas_width
         new_height = self.canvas_height
         aspect_ratio = self.imwidth / self.imheight
-        ratio = new_width/self.imwidth
+        ratio = new_width / self.imwidth
 
         if new_width / new_height > aspect_ratio:
             new_width = int(new_height * aspect_ratio)
         else:
             new_height = int(new_width / aspect_ratio)
-        new_width += 2 #divider
+        new_width += 2  # divider
 
-        self.video_frame = tk.Canvas(self.canvas,width=new_width, height=new_height,
-                                     bg=self.gui.viewer_bg, highlightbackground="black",
-                                        highlightthickness=0, borderwidth=0)
-        #self.canvas.update()  # Wait until the canvas has finished creating.
-        self.video_frame.grid(pady=((self.canvas_height - new_height) // 2), sticky="nsew")
-        self.video_frame.grid(padx=(((self.canvas_width+2) - new_width) // 2), sticky="nsew")
+        # Define the control area height (for timeline and volume)
+        control_height = 25
+
+        # Create a container frame to hold the video and controls.
+        self.video_container = tk.Frame(self.canvas, bg=self.gui.viewer_bg,
+                                        width=new_width, height=new_height + control_height)
+        self.video_container.grid_propagate(False)  # prevent automatic resizing
+        self.video_container.grid(row=0, column=0,
+                                  padx=(((self.canvas_width + 2) - new_width) // 2),
+                                  pady=((self.canvas_height - (new_height + control_height)) // 2),
+                                  sticky="nsew")
+
+        # Create the video canvas inside the container
+        self.video_frame = tk.Canvas(self.video_container,
+                                     width=new_width,
+                                     height=new_height,
+                                     bg=self.gui.viewer_bg,
+                                     highlightbackground="black",
+                                     highlightthickness=0,
+                                     borderwidth=0)
+        self.video_frame.grid(row=0, column=0)
+
+        style = ttk.Style()
+
+        style.configure("Horizontal.TScale",
+                background=self.gui.viewer_bg)
+        
+        # Create a control frame for the sliders under the video
+        self.controls_frame = tk.Frame(self.video_container, bg=self.gui.viewer_bg)
+        self.controls_frame.grid(row=1, column=0, sticky="ew")
+        # Configure grid: timeline slider in column 0, volume slider in column 1
+        self.controls_frame.columnconfigure(0, weight=3)
+        self.controls_frame.columnconfigure(1, weight=1)
+
+        # Timeline slider with click-to-seek functionality
+        self.timeline_slider = ttk.Scale(self.controls_frame,
+                                        from_=0,
+                                        to=self.media.get_duration(),
+                                        orient=tk.HORIZONTAL,
+                                        style="Horizontal.TScale",
+                                        command=self.seek_video)
+        
+        self.timeline_slider.grid(row=0, column=0, sticky="ew", padx=(5, 2), pady=5)
+
+        def timeline_click(event):
+            slider = event.widget
+            slider_width = slider.winfo_width()
+            click_fraction = event.x / slider_width
+            new_value = float(slider.cget("from")) + (float(slider.cget("to")) - float(slider.cget("from"))) * click_fraction
+            slider.set(new_value)
+            self.seek_video(new_value)
+        
+        
+
+        # Bind click event on the timeline slider so that clicking anywhere jumps to that point
+        self.timeline_slider.bind("<Button-1>", timeline_click)
+
+        # Volume slider: range from 0 to 100
+        self.volume_slider = ttk.Scale(self.controls_frame,
+                                      from_=0,
+                                      to=100,
+                                      orient=tk.HORIZONTAL,
+                                      style="Horizontal.TScale",
+                                      command=self.change_volume)
+        self.volume_slider.set(self.gui.volume)
+        self.volume_slider.grid(row=0, column=1, sticky="ew", padx=(2, 5), pady=5)
+
+        def volume_click(event):
+            slider = event.widget
+            slider_width = slider.winfo_width()
+            click_fraction = event.x / slider_width
+            new_value = float(slider.cget("from")) + (float(slider.cget("to")) - float(slider.cget("from"))) * click_fraction
+            slider.set(new_value)
+            self.change_volume(new_value)
+
+        self.volume_slider.bind("<Button-1>", volume_click)
+
         self.player.set_fullscreen(True)
         self.video_frame_id = self.video_frame.winfo_id()
         self.player.set_hwnd(self.video_frame_id)
-        #self.player.video_set_scale(ratio)
         self.imscale = ratio
 
         self.media_list_player.set_playback_mode(PlaybackMode.loop)
@@ -275,12 +345,39 @@ class CanvasImage:
 
         self.gui.first_render.set(f"F: {self.timer.stop()}")
 
-        # Will cause a crash when resizing, then loading another mp4. must bind before, but first 100 ms of config calls should be ignored.
-        #if self.gui.dock_view.get():
-        #    self.canvas.after(100, lambda: self.gui.bind("<Configure>", resize_video))
-        #elif hasattr(self.gui, "second_window"):
-        #    self.canvas.after(100, lambda: self.gui.second_window.bind("<Configure>", resize_video))
         Thread(target=video_print_data, daemon=True).start()
+
+        # Start polling to update timeline slider maximum when media duration is valid
+        self.canvas.after(100, self.update_timeline_slider)
+
+
+    def update_timeline_slider(self):
+        "Poll until a valid media duration is available, then update the timeline slider"
+        duration = self.media.get_duration()
+        if duration > 0:
+            self.timeline_slider.config(to=duration)
+        else:
+            self.canvas.after(100, self.update_timeline_slider)
+
+    def seek_video(self, value):
+        "Callback to jump to a specific time in the video."
+        try:
+            new_time = int(float(value))
+            self.player.set_time(new_time)
+        except Exception as e:
+            pass
+
+    def change_volume(self, value):
+        "Callback to adjust the audio level."
+        try:
+            new_volume = int(float(value))
+            self.player.audio_set_volume(new_volume)
+            self.gui.volume = new_volume
+        except Exception as e:
+            pass
+
+
+
 
     "Static"
     
