@@ -486,56 +486,43 @@ class CanvasImage:
                                                     anchor='nw', image=imagetk)
                     else:  # show normal image
                         if self.first:
-                            self.first = False
-                            image = self.__pyramid[(max(0, self.__curr_img))]
-                            if self.file_size < self.gui.quick_preview_size_threshold: # if small render high quality
-                                if self.imwidth < 256 and self.imheight < 256:
-                                    self.__filter = Image.Resampling.NEAREST
-                                ##print(f"Size (small): {self.file_size} MB. Frames: {self.obj.framecount}")
-                                imagetk = ImageTk.PhotoImage(image.resize((int(x2 - x1), int(y2 - y1)), self.__filter))
+                            img = self.__pyramid[max(0, self.__curr_img)]
+                            if self.file_size < self.gui.quick_preview_size_threshold:
+                                render_filter = self.__filter if (self.imwidth < 256 and self.imheight < 256) else self.__first_filter
                             else:
-                                ##print(f"Size: {self.file_size} MB. Frames: {self.obj.framecount}")
-                                imagetk = ImageTk.PhotoImage(image.resize((int(x2 - x1), int(y2 - y1)), self.__first_filter))
-                            self.imageid = self.canvas.create_image(max(box_canvas[0], box_img_int[0]),
-                                                       max(box_canvas[1], box_img_int[1]),
-                                                    anchor='nw', image=imagetk)
-                            
+                                render_filter = self.__first_filter
+                            rendered = img.resize((int(x2 - x1), int(y2 - y1)), render_filter)
+                            imagetk = ImageTk.PhotoImage(rendered)
+                            self.imageid = self.canvas.create_image(max(box_canvas[0], box_image[0]),
+                                                                     max(box_canvas[1], box_image[1]),
+                                                                     anchor='nw', image=imagetk)
+                            self.canvas.imagetk = imagetk  # Cache reference
+                            self.first = False
+                            self.first_rendered.set()  # Signal that the quick preview is done.
                             self.gui.first_render.set(f"F: {self.timer.stop()}")
-
-                            self.canvas.lower(self.imageid)  # set image into background
-                            self.canvas.imagetk = imagetk  # keep an extra reference to prevent garbage-collection
-                            self.first_rendered.set() #tell threading that second picture is allowed to render.
                         elif self.replace_await: # only render second time if needed.
                             self.replace_await = False
-                            image = self.__pyramid[(max(0, self.__curr_img))]
-                            imagetk = ImageTk.PhotoImage(image.resize((int(x2 - x1), int(y2 - y1)), self.__filter))
-                            self.imageid = self.canvas.create_image(max(box_canvas[0], box_img_int[0]),
-                                                       max(box_canvas[1], box_img_int[1]),
-                                                    anchor='nw', image=imagetk)
-
-                            self.gui.buffered.set(f"B: {self.timer.stop()}")
-
-                            self.canvas.lower(self.imageid)  # set image into background
+                            img = self.__pyramid[max(0, self.__curr_img)]
+                            rendered = img.resize((int(x2 - x1), int(y2 - y1)), self.__filter)
+                            imagetk = ImageTk.PhotoImage(rendered)
+                            self.canvas.itemconfig(self.imageid, image=imagetk)
                             self.canvas.imagetk = imagetk
+                            self.gui.buffered.set(f"B: {self.timer.stop()}")
 
                         else:
                             if self.lag_prevention:
                                 self.manual_wheel() ## Initially displays pos 0 from pyramid, this fixes it. Probably needed because the later entries to the pyramid arent created yet when rendering the first picture!
-                                # Would it load faster if we waited for generation of the third image for example, and render that, since it is smaller than the first?
-                                # Interestng optimization opportunity, but eh...
-                                # From brief testing, it didnt look promising, generating a lower pyramid image delays the initial render too long.
+
                                 self.lag_prevention = False
 
-                            if self.imageid:
-                                self.canvas.delete(self.imageid)
-                            image = self.__pyramid[(max(0, self.__curr_img))].crop(  # crop current img from pyramid
-                                            (int(x1 / self.__scale), int(y1 / self.__scale),
-                                             int(x2 / self.__scale), int(y2 / self.__scale)))
-                            imagetk = ImageTk.PhotoImage(image.resize((int(x2 - x1), int(y2 - y1)), self.__filter)) #new resize for no reason?
+                            img = self.__pyramid[max(0, self.__curr_img)]
+                            cropped = img.crop((int(x1 / self.__scale), int(y1 / self.__scale),
+                                                int(x2 / self.__scale), int(y2 / self.__scale)))
+                            rendered = cropped.resize((int(x2 - x1), int(y2 - y1)), self.__filter)
+                            imagetk = ImageTk.PhotoImage(rendered)
                             self.imageid = self.canvas.create_image(max(box_canvas[0], box_img_int[0]),
                                                        max(box_canvas[1], box_img_int[1]),
                                                     anchor='nw', image=imagetk)
-                            self.canvas.lower(self.imageid)  # set image into background
                             self.canvas.imagetk = imagetk
         except AttributeError as e:
             logger.debug("Failed to render image to canvasimage. Err1. (Safe)", e)
