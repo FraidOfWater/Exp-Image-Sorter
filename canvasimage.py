@@ -185,9 +185,11 @@ class CanvasImage:
         def video_print_data():
             try:
                 if self.gui.dock_view.get():
-                    self.gui.bind("<Configure>", resize_video)
+                    #self.gui.bind("<Configure>", resize_video)
+                    pass
                 elif hasattr(self.gui, "second_window"):
-                    self.gui.second_window.bind("<Configure>", resize_video)
+                    #self.gui.second_window.bind("<Configure>", resize_video)
+                    pass
                 if hasattr(self, "media"):
                     self.media.parse()
                     total_seconds = int(self.media.get_duration() / 1000)
@@ -271,10 +273,13 @@ class CanvasImage:
         self.video_container = tk.Frame(self.canvas, bg=self.gui.viewer_bg,
                                         width=new_width, height=new_height + control_height)
         self.video_container.grid_propagate(False)  # prevent automatic resizing
-        self.video_container.grid(row=0, column=0,
+        try:
+            self.video_container.grid(row=0, column=0,
                                   padx=(((self.canvas_width + 2) - new_width) // 2),
-                                  pady=((self.canvas_height - (new_height + control_height)) // 2),
+                                  pady=max(0,((self.canvas_height - (new_height + control_height)) // 2)),
                                   sticky="nsew")
+        except:
+            return
 
         # Create the video canvas inside the container
         self.video_frame = tk.Canvas(self.video_container,
