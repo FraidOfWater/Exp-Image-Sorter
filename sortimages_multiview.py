@@ -305,6 +305,8 @@ class SortImages:
                 safe_set(lambda: gui.dock_view.set(jprefs["qui"]["dock_view"]),"dock_view")
                 safe_set(lambda: gui.dock_side.set(jprefs["qui"]["dock_side"]),"dock_side")
                 safe_set(lambda: gui.theme.set(jprefs["qui"]["theme"]),"theme")
+                safe_set(lambda: setattr(gui,"volume",jprefs["qui"]["volume"]),"volume")
+
 
                 "Window positions"
                 safe_set(lambda: setattr(gui,"main_geometry",jprefs["window_settings"]["main_geometry"]),"main_geometry")
@@ -381,6 +383,7 @@ class SortImages:
                 "dock_view": gui.dock_view.get(),
                 "dock_side": gui.dock_side.get(),
                 "theme": gui.theme.get(),
+                "volume": gui.volume,
             },
             "window_settings": {
                 "main_geometry": gui.winfo_geometry(),
