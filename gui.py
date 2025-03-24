@@ -8,7 +8,6 @@ from functools import partial
 import colorsys
 import logging
 import psutil
-
 from vlc import Instance
 
 import tkinter as tk
@@ -714,6 +713,8 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                 shuffle(image_files)
                 return image_files
             files = get_image_files(dest, formats, sample_size)
+            if len(files) == 0:
+                return None
             wanted_colors = extract_colors(files, resize=125, q=4, how_many=sample_size)
             wanted_colors1 = [x[1] for x in wanted_colors[1]]
             def hex_to_rgb(hex_color):
@@ -866,7 +867,12 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                 def helper():
                     print("Regenerating buttons.")
                     for x in destinations:
-                        lis = get_folder_color(x["path"],('.png','.jpg','.jpeg','.webp','.gif'),25)
+                        try:
+                            lis = get_folder_color(x["path"],('.png','.jpg','.jpeg','.webp','.gif'),25)
+                            if lis == None:
+                                continue
+                        except:
+                            continue 
                         coolor = lis[0]
                         x["lis"] = lis
                         #coolor = "#000000"
@@ -881,7 +887,6 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                         # Bind hover events for each button
                         x["btn"].bind("<Enter>", lambda e, btn=x["btn"]: btn.config(bg=darken_color(original_colors[btn]['bg']), fg='white'))
                         x["btn"].bind("<Leave>", lambda e, btn=x["btn"]: btn.config(bg=original_colors[btn]['bg'], fg=original_colors[btn]['fg']))  # Reset to original colors
-                        x["btn"].configure(text=x["btn"].cget("text"))
                         buttonframe.update_idletasks()
                     print("Regenerated all buttons.")
                 
@@ -907,9 +912,9 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                         x['hotkey'] = self.hotkeys[itern]
                         
                         fg = self.button_text_colour
-                        lis = get_folder_color(x["path"],('.png','.jpg','.jpeg','.webp','.gif'),25)
-                        coolor = lis[0]
-                        x["lis"] = lis
+                        #lis = get_folder_color(x["path"],('.png','.jpg','.jpeg','.webp','.gif'),25)
+                        coolor = x["color"]
+                        #x["lis"] = lis
                         #coolor = "#000000"
                         if luminance(coolor) == 'dark':
                             fg = self.button_text_colour
@@ -941,14 +946,8 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                     # Bind hover events for each button
                     newbut.bind("<Enter>", lambda e, btn=newbut: btn.config(bg=darken_color(original_colors[btn]['bg']), fg='white'))
                     newbut.bind("<Leave>", lambda e, btn=newbut: btn.config(bg=original_colors[btn]['bg'], fg=original_colors[btn]['fg']))  # Reset to original colors
-    
-                # For SKIP and BACK buttons, set hover to white
-                for btn in self.buttons:
-                    if btn['text'] == "SKIP (Space)" or btn['text'] == "BACK":
-                        btn.bind("<Enter>", lambda e, btn=btn: btn.config(bg=self.button_text_colour, fg=self.main_colour))
-                        btn.bind("<Leave>", lambda e, btn=btn: btn.config(bg=self.button_colour, fg=self.button_text_colour))  # Reset to original colors
-        
-            Thread(target=test, daemon=True).start()
+            test()
+            #Thread(target=test, daemon=True).start()
             
         # Make second page buttons
         if True:
@@ -1005,17 +1004,17 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
 
                 # Show next BUTTON
                 show_next_button = ttk.Checkbutton(toggleable_b, text="Show next", variable=self.show_next, onvalue=True, offvalue=False)
-                show_next_button.grid(row=0, column=1, sticky="ew")
+                show_next_button.grid(row=0, column=0, sticky="ew")
                 show_next_button.configure(style="Theme_checkbox.TCheckbutton")
                 
                 # Dock view BUTTON
                 dock_view_button = ttk.Checkbutton(toggleable_b, text="Dock view", variable=self.dock_view, onvalue=True, offvalue=False, command=lambda: (self.change_viewer()))
-                dock_view_button.grid(row=0, column=2, sticky="ew")
+                dock_view_button.grid(row=0, column=1, sticky="ew")
                 dock_view_button.configure(style="Theme_checkbox.TCheckbutton")
                 
                 # Dock side BUTTON
                 self.dock_side_button = ttk.Checkbutton(toggleable_b, text="Dock side", variable=self.dock_side, onvalue=True, offvalue=False, command=lambda: (self.change_dock_side()))
-                self.dock_side_button.grid(row=0, column=3, sticky="ew")
+                self.dock_side_button.grid(row=0, column=2, sticky="ew")
                 self.dock_side_button.configure(style="Theme_checkbox.TCheckbutton")
                 
                 if self.dock_view.get(): 
@@ -1041,7 +1040,7 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                 centering_b = tk.OptionMenu(toggleable_b, preference, *options)
                 centering_b.config(bg=self.button_colour, fg=self.button_text_colour, activebackground=self.button_colour_when_pressed, 
                     activeforeground=self.button_text_colour_when_pressed, highlightbackground=self.main_colour, highlightthickness=1)
-                centering_b.grid(row=0, column=4, sticky="ew")
+                centering_b.grid(row=0, column=3, sticky="ew") #0,4
 
                 # If extra buttons is true, we should load the correct text for the centering button.
                 if self.viewer_x_centering and self.viewer_y_centering:
@@ -1054,17 +1053,25 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                     preference.set("No centering")
                 
                 preference.trace_add("write", lambda *args: self.change_centering(preference.get())) # Start tracking for changes
-
+            
+            
             if True:
                 self.theme_b = tk.OptionMenu(toggleable_b, self.theme, *self.theme_names)
                 self.theme_b.config(bg=self.button_colour, fg=self.button_text_colour, activebackground=self.button_colour_when_pressed, 
                     activeforeground=self.button_text_colour_when_pressed, highlightbackground=self.main_colour, highlightthickness=1)
                 
-                self.theme_b.grid(row=0, column=5, sticky="ew")
+                self.theme_b.grid(row=0, column=4, sticky="ew") #0,5
                 
                 self.theme.trace_add("write", lambda *args: self.change_theme(self.theme.get())) # Start tracking for changes
 
                 self.menus.extend([view_menu, centering_b, self.theme_b])
+
+            if True:
+                regen_buttons_button = tk.Button(toggleable_b, text="Colors", command=regen_button_color,
+                    bg=self.button_colour, fg=self.button_text_colour, activebackground = self.button_colour_when_pressed, activeforeground=self.button_text_colour_when_pressed)
+                regen_buttons_button.grid(row=0, column=5, sticky="ew")
+
+                self.buttons1.append(regen_buttons_button)
         
         if True:
             #Option for making the buttons change color on hover
@@ -1082,7 +1089,8 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
 
             squares_per_page_b.bind("<FocusIn>", lambda e: (squares_per_page_b.config(bg=self.field_activated_colour, fg=self.field_text_activated_colour), setattr(self, "focused_on_field", True)))
             squares_per_page_b.bind("<FocusOut>", lambda e: (squares_per_page_b.config(bg=self.field_colour, fg=self.field_text_colour),setattr(self, "focused_on_field", False)))
-
+        
+        #regen_button_color()
         self.bind_all("<Button-1>", self.setfocus)
     def initial_dock_setup(self):
         "Setup the dock"
@@ -1340,26 +1348,29 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
         event.widget.focus_set()
 
     "CanvasImage" # Viewers
-    def displayimage(self, obj):
-        " Throttler, calls 'test()' which is the real thing. If you edit these, make sure the memory doesnt leak after."
-        if obj == None:
+    def displayimage(self, obj, caller=None):
+        "Throttler, calls 'test()' to schedule CanvasImage creation."
+        if obj is None:
             return
-        "Throttle displayimage. When holding down arrow key, every image doesnt load. This reduces perceived lag."
-        if self.last_time == None or perf_counter() - self.last_time > 0.19: # load normal keypresses instantly
-            self.test(obj)
-            self.displayqueue = obj
-            self.last_time = perf_counter()
+        # If the caller is arrow keys, apply throttling logic.
+        if caller == "arrow":
+            if self.last_time is None or perf_counter() - self.last_time > 0.1:
+                self.test(obj, caller)
+                self.displayqueue = obj
+                self.last_time = perf_counter()
+            else:
+                self.displayqueue = obj
+                self.after(190, lambda obj=obj: self.test(obj, caller) if self.displayqueue == obj else None)
+                t = perf_counter() - self.last_time
+                self.times.append(t)
+                if len(self.times) > 5:
+                    self.times.pop(0)
+                self.last_time = perf_counter()
         else:
-            self.displayqueue = obj
-            self.after(190, lambda obj=obj: self.test(obj) if self.displayqueue == obj else None)
-            time = perf_counter()-self.last_time
-            self.times.append(time)
-            #print(sum(self.times)/len(self.times))
-        #    print(time)
-            if len(self.times) > 5:
-                self.times.pop(0)
-            self.last_time = perf_counter()
-    def test(self, obj):
+            # For other callers (space, enter, etc.), bypass throttling and always call test.
+            self.test(obj, caller)
+
+    def test(self, obj, caller=None):
         "Display image in viewer"
         def close_old(Image_frame):
             "Closes and cleanups the old canvasimage instance"
@@ -1372,6 +1383,10 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
                 del Image_frame
                 #collect() ###
 
+        if caller == "arrow":
+            if hasattr(self, "Image_frame") and self.Image_frame is not None:
+                if getattr(self.Image_frame, 'obj', None) == obj:
+                    return
         # Middlepane width refresh
         if self.middlepane_frame.winfo_width() != 1:
             self.middlepane_width = self.middlepane_frame.winfo_width()
