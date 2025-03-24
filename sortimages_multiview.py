@@ -268,25 +268,15 @@ class SortImages:
                 jprefs = json.loads(jdata)
 
                 "Paths"
-                #if this was a large operation, id do a list, and then just feed that list into the helper function via a loop.
-                #the values set would have to be uniform about where they are located, no intermixing of self, gui and local.
-                #also if it was a tkinter var, id just save that vaal to a local func, and set the val later in the file manually.
-                #safe_set(lambda: setattr(gui,"",val),val)
-                #safe_set(lambda: gui.sessionpathvar.set(jprefs["paths"]['lastsession']),"sessionpathvar")
 
                 safe_set(lambda: setattr(gui,"source_folder",jprefs["paths"]["source"]),"source_folder")
                 safe_set(lambda: setattr(gui,"destination_folder",jprefs["paths"]["destination"]),"destination_folder")
                 safe_set(lambda: gui.sessionpathvar.set(jprefs["paths"]['lastsession']),"sessionpathvar")
                 safe_set(lambda: setattr(self,"exclude",jprefs["paths"]["exclude"]),"exclude")
-
-                #gui.source_folder = jprefs["paths"]["source"]
-                #gui.destination_folder = jprefs["paths"]["destination"]
-                #gui.sessionpathvar.set(jprefs["paths"]['lastsession'])
-                #self.exclude = jprefs["paths"]["exclude"]
         
                 "Preferences"
                 safe_set(lambda: setattr(gui,"thumbnailsize",int(jprefs["preferences"]["user"]["thumbnailsize"])),"thumbnailsize")
-                #safe_set(lambda: setattr(gui,"hotkeys",jprefs["preferences"]["user"]["hotkeys"]),"hotkeys")
+
                 try:
                     hotkeys = jprefs["preferences"]["user"]["hotkeys"]
                 except Exception as e:
@@ -297,26 +287,12 @@ class SortImages:
                 safe_set(lambda: setattr(gui,"do_anim_loading_colors",jprefs["preferences"]["user"]["do_anim_loading_colors"]),"do_anim_loading_colors")
                 safe_set(lambda: setattr(gui,"do_debug_terminal",jprefs["preferences"]["user"]["do_debug_terminal"]),"do_debug_terminal")
 
-                #gui.thumbnailsize = int(jprefs["preferences"]["user"]["thumbnailsize"])
-                #hotkeys = jprefs["preferences"]["user"]["hotkeys"]
-                #gui.centering_button = jprefs["preferences"]["user"]["centering_button"]
-                #gui.force_scrollbar = jprefs["preferences"]["user"]["force_scrollbar"]
-                #gui.auto_load = jprefs["preferences"]["user"]["auto_load"]
-                #gui.do_anim_loading_colors = jprefs["preferences"]["user"]["do_anim_loading_colors"]
-                #gui.do_debug_terminal = jprefs["preferences"]["user"]["do_debug_terminal"]
-
                 "Technical preferences"
                 safe_set(lambda: setattr(gui,"filter_mode",jprefs["preferences"]["technical"]["quick_preview_filter"]),"filter_mode")
                 safe_set(lambda: setattr(gui,"quick_preview_size_threshold",int(jprefs["preferences"]["technical"]["quick_preview_size_threshold"])),"quick_preview_size_threshold")
                 safe_set(lambda: setattr(self,"threads",jprefs["preferences"]["technical"]['threads']),"threads")
                 safe_set(lambda: setattr(self,"max_concurrent_frames",int(jprefs["preferences"]["technical"]['max_concurrent_frames'])),"max_concurrent_frames")
                 safe_set(lambda: setattr(self,"autosave",jprefs["preferences"]["technical"]['autosave_session']),"autosave")
-                
-                #gui.filter_mode = jprefs["preferences"]["technical"]["quick_preview_filter"]
-                #gui.quick_preview_size_threshold = int(jprefs["preferences"]["technical"]["quick_preview_size_threshold"])
-                #self.threads = jprefs["preferences"]["technical"]['threads']
-                #self.max_concurrent_frames = int(jprefs["preferences"]["technical"]['max_concurrent_frames'])
-                #self.autosave = jprefs["preferences"]["technical"]['autosave_session']
 
                 "GUI CONTROLLED PREFRENECES"
                 safe_set(lambda: gui.squares_per_page_intvar.set(jprefs["qui"]["squares_per_page"]),"squares_per_page_intvar")
@@ -328,15 +304,6 @@ class SortImages:
                 safe_set(lambda: gui.dock_side.set(jprefs["qui"]["dock_side"]),"dock_side")
                 safe_set(lambda: gui.theme.set(jprefs["qui"]["theme"]),"theme")
 
-                #gui.squares_per_page_intvar.set(jprefs["qui"]["squares_per_page"])
-                #gui.sort_by_date_boolvar.set(jprefs["qui"]["sort_by_date"])
-                #gui.viewer_x_centering = jprefs["qui"]["viewer_x_centering"]
-                #gui.viewer_y_centering = jprefs["qui"]["viewer_y_centering"]
-                #gui.show_next.set(jprefs["qui"]["show_next"])
-                #gui.dock_view.set(jprefs["qui"]["dock_view"])
-                #gui.dock_side.set(jprefs["qui"]["dock_side"])
-                #gui.theme.set(jprefs["qui"]["theme"])
-
                 "Window positions"
                 safe_set(lambda: setattr(gui,"main_geometry",jprefs["window_settings"]["main_geometry"]),"main_geometry")
                 safe_set(lambda: setattr(gui,"viewer_geometry",jprefs["window_settings"]["viewer_geometry"]),"viewer_geometry")
@@ -346,13 +313,7 @@ class SortImages:
 
                 safe_set(lambda: gui.images_sorted.set(str(jprefs["window_settings"]["images_sorted"])),"images_sorted")
                 safe_set(lambda: gui.images_sorted_strvar.set(f"Sorted: {gui.images_sorted.get()}"),"images_sorted_strvar")
-                #gui.main_geometry = jprefs["window_settings"]["main_geometry"]
-                #gui.viewer_geometry = jprefs["window_settings"]["viewer_geometry"]
-                #gui.destpane_geometry = jprefs["window_settings"]["destpane_geometry"]
-                #gui.leftpane_width = int(jprefs["window_settings"]["leftpane_width"])
-                #gui.middlepane_width = int(jprefs["window_settings"]["middlepane_width"])
-                #gui.images_sorted.set(str(jprefs["window_settings"]["images_sorted"]))
-                #gui.images_sorted_strvar.set(f"Sorted: {gui.images_sorted.get()}")
+
                 gui.actual_gridsquare_width = gui.thumbnailsize + gui.gridsquare_padx + gui.square_border_size*2 + gui.whole_box_size*2
                 gui.actual_gridsquare_height = gui.thumbnailsize + gui.gridsquare_pady + gui.square_border_size*2 + gui.whole_box_size*2 + gui.checkbox_height
 
@@ -806,7 +767,7 @@ class SortImages:
                 if entry.is_dir():
                     seed(entry.name)
                     self.destinations.append(
-                        {'name': entry.name, 'path': entry.path, 'color': "black", 'hotkey': None})
+                        {'name': entry.name, 'path': entry.path, 'color': randomColor(), 'hotkey': None})
                     self.destinationsraw.append(entry.path)
     def validate(self):
         gui = self.gui
