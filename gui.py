@@ -222,15 +222,6 @@ class GUIManager(tk.Tk): #Main window
         #self.text_widget.see(tk.END)
         self.text_widget.configure(state="disabled")
     
-    def manage_lines2(self, input, first=False):
-        self.text_widget2.configure(state="normal")
-        if first:
-            self.text_widget2.delete("1.0", tk.END)
-            self.text_widget2.insert(tk.END, f"{input}\n")
-        else:
-            self.text_widget2.insert(tk.END, f"{input}\n")
-        self.text_widget2.configure(state="disabled")
-    
     def manage_name_field(self, input):
         self.name_field.delete(0, tk.END)
         self.name_field.insert(0, self.name_ext_size.get())
@@ -279,10 +270,13 @@ class GUIManager(tk.Tk): #Main window
         self.toppane.add(self.leftui, weight=0) # 0 here, it stops the divider from moving itself.
         #The divider pos is saved by prefs, this complicates it, so auto scaling based on text amount in source and dest folder is disabled.
         
-        self.first_page_buttons() # This setups all the buttons and text
 
         # Start the grid setup
+        
+
         self.middlepane_frame = tk.Frame(self.toppane, bg=self.viewer_bg, width = self.middlepane_width) # holds dock
+
+        self.first_page_buttons() # This setups all the buttons and text
 
         imagegridframe = tk.Frame(self.toppane,bg=self.grid_background_colour)
         self.grid_background_colour_b.append(imagegridframe)
@@ -490,7 +484,7 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
             session_b.bind("<Leave>", lambda e: session_b.config(bg=self.button_colour, fg=self.button_text_colour))
 
         # Debug Terminal and Stats
-        if self.do_debug_terminal:
+        if True:
             self.statsframe = tk.Frame(self.leftui, bg=self.main_colour)
             self.frames.append(self.statsframe)
             self.statsframe.grid(column=0, row=6, sticky="SW")
@@ -516,69 +510,76 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
 
             # Create a Text widget for terminal output
             self.text_widget = tk.Text(terminal_frame, width=10000, height=6, bg="#03070b", fg = "#6a858a")
-            self.text_widget.grid(row = 0, sticky="EW")
+            if self.do_debug_terminal:
+                self.text_widget.grid(row = 0, sticky="EW")
             self.text_widget.configure(state="disabled")
 
             "LABELS" # Main frame
             label_frame = tk.Frame(self.statsframe, bg=self.main_colour)
-            label_frame.grid(row = 0, sticky="NSEW")
-            label_frame.columnconfigure(0, weight=0)
-            label_frame.rowconfigure(0, weight=1)
+            if self.do_debug_terminal:
+                label_frame.grid(row = 0, sticky="NSEW")
+                label_frame.columnconfigure(0, weight=0)
+                label_frame.rowconfigure(0, weight=1)
 
             self.frames.append(label_frame)
 
             # Secondary column:
             left_column = tk.Frame(label_frame, bg="#03070b")
-            left_column.grid(row = 0, column = 0, sticky="EW")
-            left_column.columnconfigure(0, weight=1)
-            left_column.rowconfigure(0, weight=1)
-            left_column.columnconfigure(1, weight=0)
-            left_column.rowconfigure(1, weight=1)
+            if self.do_debug_terminal:
+                left_column.grid(row = 0, column = 0, sticky="EW")
+                left_column.columnconfigure(0, weight=1)
+                left_column.rowconfigure(0, weight=1)
+                left_column.columnconfigure(1, weight=0)
+                left_column.rowconfigure(1, weight=1)
 
             left_column2 = tk.Frame(left_column, bg="#03070b")
-            left_column2.grid(row = 0, column = 0, sticky="W")
-            left_column2.columnconfigure(0, weight=0)
-            left_column2.rowconfigure(0, weight=1)
-            left_column2.columnconfigure(1, weight=0)
-            left_column2.rowconfigure(1, weight=1)
-            left_column2.columnconfigure(2, weight=0)
-            left_column2.rowconfigure(2, weight=1)
+            if self.do_debug_terminal:
+                left_column2.grid(row = 0, column = 0, sticky="W")
+                left_column2.columnconfigure(0, weight=0)
+                left_column2.rowconfigure(0, weight=1)
+                left_column2.columnconfigure(1, weight=0)
+                left_column2.rowconfigure(1, weight=1)
+                left_column2.columnconfigure(2, weight=0)
+                left_column2.rowconfigure(2, weight=1)
 
             # Actual labels: Left
             ram_label = tk.Label(left_column2, justify="left", bg="#03070b", fg="#6a858a", textvariable=self.current_ram_strvar) # RAN
-            ram_label.grid(row = 2, column = 0, sticky = "W")
+            if self.do_debug_terminal:
+                ram_label.grid(row = 2, column = 0, sticky = "W")
 
             sorted_label = tk.Label(left_column2, justify="left", bg="#03070b", fg="#6a858a", textvariable=self.images_sorted_strvar) # SORTED
-            sorted_label.grid(row = 0, column = 0, sticky="W")
+            if self.do_debug_terminal:
+                sorted_label.grid(row = 0, column = 0, sticky="W")
 
             self.images_left_stats_strvar = tk.StringVar(value="Left: NaN/NaN/NaN") # Assigned/Displayed/Imagelist
             left_label = tk.Label(left_column2, justify="left", bg="#03070b", fg="#6a858a", textvariable=self.images_left_stats_strvar) # LISTS
-            left_label.grid(row = 1, column = 0, sticky="W")
+            if self.do_debug_terminal:
+                left_label.grid(row = 1, column = 0, sticky="W")
 
             # Actual labels: Middle
-            #name_label = tk.Label(left_column, justify="left", bg="#03070b", fg="#6a858a", textvariable=self.name_ext_size) # INFO
+            #self.debug_frame = tk.Frame(left_column2, bg="#03070b")
             self.info = tk.StringVar(value="Size:")
-            name_label = tk.Label(left_column2, width=13, anchor="w", bg="#03070b", fg="#6a858a", textvariable=self.info) # INFO
-            name_label.grid(row = 0, column = 1, sticky = "W")
+            self.name_label = tk.Label(left_column2, width=24, anchor="w", bg="#03070b", fg="#6a858a", textvariable=self.info) # INFO
+            if self.do_debug_terminal:
+                #self.debug_frame.grid(row=0, column=1, sticky="ew")
+                self.name_label.grid(row=0, column=1, sticky="ew")
 
+            container_frameinfo = tk.Frame(left_column2, bg="#03070b")
             self.frameinfo = tk.StringVar(value="F/D: 0/0/0")
-            size_label = tk.Label(left_column2, justify="left", bg="#03070b", fg="#6a858a", textvariable=self.frameinfo) # FRAMEINFO
-            size_label.grid(row = 1, column = 1, sticky = "W")
+            self.size_label = tk.Label(container_frameinfo, justify="left", bg="#03070b", fg="#6a858a", textvariable=self.frameinfo) # FRAMEINFO
+            if self.do_debug_terminal:
+                self.size_label.grid(row = 0, column = 0, sticky = "W")
 
             self.frametimeinfo = tk.StringVar(value="0/0")
-            size_label2 = tk.Label(left_column2, justify="left", bg="#03070b", fg="#6a858a", textvariable=self.frametimeinfo) # FRAMETIME
-            size_label2.grid(row = 2, column = 1, sticky = "W")
-                        
-            # Create a Text widget for terminal output
-            self.text_widget2 = tk.Text(left_column, height= 4, width=11, bg="#03070b", fg = "#6a858a")
-            self.text_widget2.grid(row = 0, column= 1, sticky="EW")
-            self.text_widget2.configure(state="disabled")
+            self.size_label2 = tk.Label(container_frameinfo, justify="left", bg="#03070b", fg="#6a858a", textvariable=self.frametimeinfo) # FRAMETIME
+            if self.do_debug_terminal:
+                self.size_label2.grid(row = 0, column = 1, sticky = "W")
+                container_frameinfo.grid(row=1, column=1, sticky = "W")
 
             self.first_render = tk.StringVar(value="0") # F: 1.543s
-            self.first_render.trace_add("write", lambda *args: self.manage_lines2(self.first_render.get(), first=True))
-
-            self.buffered = tk.StringVar(value="0") # B: 1.754s # make terminal for these? no?
-            self.buffered.trace_add("write", lambda *args: self.manage_lines2(self.buffered.get()))
+            self.rendertime = tk.Label(left_column2, justify="left", bg="#03070b", fg="#6a858a", textvariable=self.first_render) # FRAMETIME
+            if self.do_debug_terminal:
+                self.rendertime.grid(row=2, column=1, sticky="W")
 
             self.name_ext_size = tk.StringVar(value="0")
             self.name_ext_size.trace_add("write", lambda *args: self.manage_name_field(self.name_ext_size.get()))
@@ -593,11 +594,11 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
             self.name_field.bind("<Return>", self.save_text)
             # Actual labels: Right
 
-            #self.panel333 = tk.Label(self.counter, justify="left", bg="#03070b", fg="#6a858a", textvariable=self.animation_stats)
-            #self.panel333.grid(column = 0, row = 3, sticky = "NSEW")
+            self.panel333 = tk.Label(left_column2, justify="left", bg="#03070b", fg="#6a858a", textvariable=self.animation_stats)
+            self.panel333.grid(column = 2, row = 1, sticky = "W")
 
             self.panel333 = tk.Label(left_column2, justify="left", bg="#03070b", fg="#6a858a", textvariable=self.resource_limiter)
-            self.panel333.grid(row = 2, column = 3, sticky = "NSEW")
+            self.panel333.grid(row = 2, column = 2, sticky = "W")
 
     def guisetup(self, destinations): # 
         "Happens after we press new session or load session. Does the buttons etc"
@@ -1392,10 +1393,19 @@ Special thanks to FooBar167 on Stack Overflow for the advanced and memory-effici
         if self.middlepane_frame.winfo_width() != 1:
             self.middlepane_width = self.middlepane_frame.winfo_width()
 
-        if self.dock_view.get(): # Dock viewer            
+        if self.dock_view.get(): # Dock viewer
+            pos = 0
+            #if self.do_debug_terminal:
+            #    self.debug_frame.grid(row = 0, column = 0, sticky = "W")
+#
+            #    pos = 1
+#
             geometry = str(self.middlepane_width) + "x" + str(self.winfo_height())
+
+            
+
             self.new = CanvasImage(self.middlepane_frame, geometry, obj, self)
-            self.new.grid(row = 0, column = 0, sticky = "NSEW")
+            self.new.grid(row = pos, column = 0, sticky = "NSEW")
             self.new.rescale(min(self.middlepane_width / self.new.imwidth, self.winfo_height() / self.new.imheight))  # Scales to the window
             self.new.center_image(self.viewer_x_centering, self.viewer_y_centering)
             
@@ -1727,6 +1737,7 @@ class GridManager:
         for gridsquare in squares:
             if gridsquare in self.displayedset: # because may be in dest displayedlist insetad
                 self.gui.imagegrid.window_configure(gridsquare, window="")
+                self.gui.imagegrid.update()
                 self.displayedlist.remove(gridsquare)
                 self.displayedset.discard(gridsquare)
                 if unload:
