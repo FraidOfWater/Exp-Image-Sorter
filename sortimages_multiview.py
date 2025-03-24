@@ -237,19 +237,21 @@ class SortImages:
         "First image found, check whether it is the expected size (prefs.json thumbnailsize)"
         first_image_path = os.path.join(data_dir, cache[0])
         try:
-            image = pyvips.Image.new_from_file(first_image_path, access='sequential') # Should be robust, these images are create by PIL or pyvips themselves.
-            if max(image.width, image.height) != self.gui.thumbnailsize: # The larger side doesn't equal thumbnailsize in prefs.json, meaning user changed this setting.
+            delete = False
+            with Image.open(first_image_path) as image:
+                # Check if the larger dimension matches the expected thumbnailsize
+                if max(image.width, image.height) != self.gui.thumbnailsize:
+                    delete = True
+            if delete:
                 try:
-                    logger.warning(f"Removing data folder, thumbnailsize changed")
+                    logger.warning("Removing data folder, thumbnailsize changed")
                     rmtree(data_dir)
                     os.mkdir(data_dir)
-                    logger.warning(f"Re-created data folder.")
+                    logger.warning("Re-created data folder.")
                 except Exception as e:
                     print(f"Couldn't delete/create data folder: {e}")
         except Exception as e:
             logger.error(f"Couldn't load first image in data folder {e}")
-        finally:
-            del image
        
     def loadprefs(self):
         "Loads prefs.json. Needs self.gui to be created. This edits self.gui attributes."
