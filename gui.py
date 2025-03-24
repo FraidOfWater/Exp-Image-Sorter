@@ -154,6 +154,7 @@ class GUIManager(tk.Tk): #Main window
             self.destpane_geometry = str(int(self.winfo_screenwidth() * 0.80)) + "x" + str(self.winfo_screenheight() - 120) + "+365+60"
             self.leftpane_width = 363
             self.middlepane_width = 363
+            self.volume = 50
             ##END OF PREFS
 
             themes = self.fileManager.jthemes
