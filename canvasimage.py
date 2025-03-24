@@ -46,8 +46,9 @@ class CanvasImage:
         self.imageid = None
         self.obj = imageobj
         self.gui = gui
-        self.gui.frametimeinfo.set("")
-        self.gui.buffered.set("")
+        aa = ""
+        self.gui.frametimeinfo.set(f"{aa:>4}")
+        self.gui.first_render.set("F:")
         # Lists, attributes and other flags.
         self.lazy_index = 0
         self.lazy_loading = True    # Flag that turns off when all frames have been loaded to frames.
@@ -73,6 +74,7 @@ class CanvasImage:
             self.__first_filter = Image.Resampling.BILINEAR
 
         self.__filter = Image.Resampling.LANCZOS  # The end qualtiy of the image. #NEAREST, BILINEAR, BICUBIC
+
         # Image scaling defaults
         self.imscale = 1.0  # Scale for the canvas image zoom
         self.__delta = 1.15  # Zoom step magnitude
@@ -110,6 +112,8 @@ class CanvasImage:
         if self.obj.path.lower().endswith((".mp4",".webm")): # Is video
             self.file_type = self.gui.file_types[1]
             self.imwidth, self.imheight = self.obj.dimensions
+            a = f"{self.imwidth}x{self.imheight}"
+            self.gui.info.set(f"Size: {self.file_size:>6.2f} MB {a:>10}")
             self.handle_video()
             self.binds(animated=True)
             return
@@ -120,6 +124,8 @@ class CanvasImage:
             simplefilter('ignore')
             self.image = Image.open(self.path)  # open image, but down't load it
         self.imwidth, self.imheight = self.image.size  # public for outer classes
+        a = f"{self.imwidth}x{self.imheight}"
+        self.gui.info.set(f"Size: {self.file_size:>6.2f} MB {a:>10}")
         if self.imwidth * self.imheight > self.__huge_size * self.__huge_size and \
            self.image.tile[0][0] == 'raw':  # only raw images could be tiled
             self.__huge = True  # image is huge
@@ -289,8 +295,8 @@ class CanvasImage:
         self.controls_frame = tk.Frame(self.video_container, bg=self.gui.viewer_bg)
         self.controls_frame.grid(row=1, column=0, sticky="ew")
         # Configure grid: timeline slider in column 0, volume slider in column 1
-        self.controls_frame.columnconfigure(0, weight=3)
-        self.controls_frame.columnconfigure(1, weight=1)
+        self.controls_frame.columnconfigure(0, weight=3, minsize=0)
+        self.controls_frame.columnconfigure(1, weight=1, minsize=0)
 
         # Timeline slider with click-to-seek functionality
         self.timeline_slider = ttk.Scale(self.controls_frame,
@@ -353,12 +359,12 @@ class CanvasImage:
 
     def update_slider_position(self):
         "Updates the timeline slider to match the current video position."
-        if self.player.is_playing():
+        if hasattr(self, "player") and self.player.is_playing():
             self.disable = True
             self.timeline_slider.set(self.player.get_time())
             self.disable = False
         
-            self.canvas.after(1000, self.update_slider_position)
+            self.canvas.after(500, self.update_slider_position)
 
     def update_timeline_slider(self):
         "Poll until a valid media duration is available, then update the timeline slider"
@@ -396,7 +402,6 @@ class CanvasImage:
         def lazy_pyramid(w, h):
             "Generates zoom pyramid"
             def render_second():
-                self.pyramid_ready.wait(timeout=2)
                 self.first_rendered.wait(timeout=2)
                 self.replace_await = True
                 try:
@@ -408,7 +413,6 @@ class CanvasImage:
                 if self.file_size > self.gui.quick_preview_size_threshold:
                     Thread(target=render_second, daemon=True).start()
                 self.pyramid = [Image.open(self.path)]
-                c11.set()
                 while w > 512 and h > 512: # stop this if program closing
                     w /= self.__reduction
                     h /= self.__reduction
@@ -424,10 +428,8 @@ class CanvasImage:
                 logger.debug(f"Thread caught (lazy_pyramid): {e}")
         "Handles static images"
         w, h = self.__pyramid[-1].size
-        c11 = Event()
         #self.gui.size.set(f"{self.file_size} MB")
         Thread(target=lazy_pyramid, args=(w,h), daemon=True).start()
-        c11.wait()
         self.container = self.canvas.create_rectangle((0, 0, self.imwidth, self.imheight), width=0)
 
     "GIF"
@@ -470,10 +472,11 @@ class CanvasImage:
                     if all(i == 0 for i in self.frametimes):
                         for i in range(len(self.frametimes)):
                             self.frametimes[i] = self.delay
+                    self.gui.first_render.set(f"{self.gui.first_render.get()[:-2]}+{self.timer.stop()}")
                 except:
                     pass
-
-                self.gui.buffered.set(f"L: {self.timer.stop()}")
+                    
+                
 
                 self.lazy_loading = False # Lower the lazy_loading flag so animate can take over.
                 self.image.close()
@@ -499,8 +502,10 @@ class CanvasImage:
                     self.canvas.itemconfig(self.imageid, image=self.frames[self.lazy_index])
                     self.canvas.after(self.frametimes[self.lazy_index], animate_image)
                     self.lazy_index = (self.lazy_index + 1) % len(self.frames)
-                    self.gui.frameinfo.set(f"F/D: {self.lazy_index}/{len(self.frames)}/{self.framecount}")
-                    self.gui.frametimeinfo.set(f"{self.frametimes[self.lazy_index]} ms")
+                    a = f"{self.lazy_index}/{len(self.frames)}/{self.framecount}"
+                    self.gui.frameinfo.set(f"F/D: {a:>4}")
+                    b = f"{self.frametimes[self.lazy_index]} ms"
+                    self.gui.frametimeinfo.set(f"{b:>4}")
                 except:
                     return
 
@@ -519,10 +524,10 @@ class CanvasImage:
                     self.canvas.itemconfig(self.imageid, image=self.frames[self.lazy_index])
                     self.canvas.after(self.frametimes[self.lazy_index], lazy_load)
                     self.lazy_index = (self.lazy_index + 1) % self.framecount
-                    self.gui.frametimeinfo.set(f"{self.frametimes[self.lazy_index]} ms")
-                    self.gui.frameinfo.set(f"F/D: {self.lazy_index}/{len(self.frames)}/{self.framecount}")
-
-
+                    a = f"{self.lazy_index}/{len(self.frames)}/{self.framecount}"
+                    self.gui.frameinfo.set(f"F/D: {a:>4}")
+                    b = f"{self.frametimes[self.lazy_index]} ms"
+                    self.gui.frametimeinfo.set(f"{b:>4}")
                     return
                 else:
                     logger.error("Error in lazy load, take a look")
@@ -595,10 +600,11 @@ class CanvasImage:
                     else:  # show normal image
                         if self.first:
                             img = self.__pyramid[max(0, self.__curr_img)]
-                            if self.file_size < self.gui.quick_preview_size_threshold:
-                                render_filter = self.__filter if (self.imwidth < 256 and self.imheight < 256) else self.__first_filter
-                            else:
+                            if self.file_size > self.gui.quick_preview_size_threshold:
                                 render_filter = self.__first_filter
+                            else:
+                                render_filter = self.__filter if (self.imwidth > 256 and self.imheight > 256) else Image.Resampling.NEAREST
+
                             rendered = img.resize((int(x2 - x1), int(y2 - y1)), render_filter)
                             imagetk = ImageTk.PhotoImage(rendered)
                             self.imageid = self.canvas.create_image(max(box_canvas[0], box_image[0]),
@@ -615,7 +621,7 @@ class CanvasImage:
                             imagetk = ImageTk.PhotoImage(rendered)
                             self.canvas.itemconfig(self.imageid, image=imagetk)
                             self.canvas.imagetk = imagetk
-                            self.gui.buffered.set(f"B: {self.timer.stop()}")
+                            self.gui.first_render.set(f"{self.gui.first_render.get()[:-2]}+{self.timer.stop()}")
 
                         else:
                             if self.lag_prevention:
