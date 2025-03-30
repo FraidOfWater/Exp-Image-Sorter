@@ -781,7 +781,7 @@ class SortImages:
         self.ddp = gui.destination_entry_field.get()
         samepath = (self.sdp == self.ddp)
 
-        if ((os.path.isdir(self.sdp)) and (os.path.isdir(self.ddp)) and not samepath):
+        if ((os.path.isdir(self.sdp)) and (os.path.isdir(self.ddp))):
             self.setup(self.ddp)
             gui.guisetup(self.destinations)
             gui.initial_dock_setup()
@@ -796,31 +796,23 @@ class SortImages:
             print(f'Source:   "{self.sdp}"')
             print(f'Target:   "{self.ddp}"')
             
-            self.walk(self.sdp)
+            self.walk(self.sdp, samepath)
             gui.manage_lines(f"Files searched in: {self.timer.stop()}", clear=True)
             self.timer.start()
 
             gui.gridmanager.load_more()
 
-        elif samepath:
-            gui.source_entry_field.delete(0, tk.END)
-            gui.destination_entry_field.delete(0, tk.END)
-            gui.source_entry_field.insert(0, "PATHS CANNOT BE SAME")
-            gui.destination_entry_field.insert(0, "PATHS CANNOT BE SAME")
         else:
             gui.source_entry_field.delete(0, tk.END)
             gui.destination_entry_field.delete(0, tk.END)
             gui.source_entry_field.insert(0, "ERROR INVALID PATH")
             gui.destination_entry_field.insert(0, "ERROR INVALID PATH")
 
-    def walk(self, src):
+    def walk(self, src, samepath):
         supported_formats = {"png", "gif", "jpg", "jpeg", "bmp", "pcx", "tiff", "webp", "psd", "jfif", "mp4", "webm"}
         animation_support = {"gif", "webp", "mp4", "webm"} # For clarity
-
-        for root, dirs, files in os.walk(src, topdown=True):
-            dirs[:] = [d for d in dirs if d not in self.exclude]
-
-            for name in files:
+        if samepath:
+            for name in os.listdir(src):
                 parts = name.rsplit(".", 1)
                 if len(parts) == 2:
                     n, ext = parts
@@ -828,10 +820,25 @@ class SortImages:
                 else:
                     n = parts[0]
                     ext = ""
-                
                 if ext in supported_formats:
-                    imgfile = Imagefile(name, os.path.join(root, name), ext) # 24.5
+                    imgfile = Imagefile(name, os.path.join(src, name), ext) # 24.5
                     self.imagelist.append(imgfile)
+        else:
+            for root, dirs, files in os.walk(src, topdown=True):
+                dirs[:] = [d for d in dirs if d not in self.exclude]
+
+                for name in files:
+                    parts = name.rsplit(".", 1)
+                    if len(parts) == 2:
+                        n, ext = parts
+                        ext = ext.lower()
+                    else:
+                        n = parts[0]
+                        ext = ""
+
+                    if ext in supported_formats:
+                        imgfile = Imagefile(name, os.path.join(root, name), ext) # 24.5
+                        self.imagelist.append(imgfile)
 
         # Sort by date modificated
         if self.gui.sort_by_date_boolvar.get():
