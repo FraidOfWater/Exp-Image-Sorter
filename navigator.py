@@ -1,5 +1,3 @@
-from math import ceil
-
 from tkinter import ttk
 
 class Navigator:
@@ -101,7 +99,7 @@ class Navigator:
             elif self.window_focused == "DEST":
                 target_grid = gui.destination_viewer.destgrid
             columns = int(max(1, target_grid.winfo_width() / gui.actual_gridsquare_width))
-            rows = ceil(len(self.displayedlist) / columns)
+            rows = int((len(self.displayedlist) + columns - 1) / columns)
             if reverse:
                 current_row = (len(self.displayedlist)-self.index-1) // columns
             else:
@@ -118,7 +116,7 @@ class Navigator:
                 target_grid = gui.destination_viewer.destgrid
 
             columns = int(max(1, target_grid.winfo_width() / gui.actual_gridsquare_width))
-            rows = ceil(len(self.displayedlist) / columns)
+            rows = int((len(self.displayedlist) + columns - 1) / columns)
             if reverse:
                 current_row = (len(self.displayedlist)-self.index-1) // columns
             else:
