@@ -94,12 +94,13 @@ class Navigator:
 
     def bindhandler(self, event):
         #updownleftright = 38,40,37,39
+        gui = self.gui
         def scroll_up(reverse=None):
             if self.window_focused == "GRID":
-                target_grid = self.gui.imagegrid
+                target_grid = gui.imagegrid
             elif self.window_focused == "DEST":
-                target_grid = self.gui.destination_viewer.destgrid
-            columns = int(max(1, target_grid.winfo_width() / self.gui.actual_gridsquare_width))
+                target_grid = gui.destination_viewer.destgrid
+            columns = int(max(1, target_grid.winfo_width() / gui.actual_gridsquare_width))
             rows = ceil(len(self.displayedlist) / columns)
             if reverse:
                 current_row = (len(self.displayedlist)-self.index-1) // columns
@@ -112,11 +113,11 @@ class Navigator:
                 target_grid.yview_moveto(target_scroll)
         def scroll_down(reverse=None):
             if self.window_focused == "GRID":
-                target_grid = self.gui.imagegrid
+                target_grid = gui.imagegrid
             elif self.window_focused == "DEST":
-                target_grid = self.gui.destination_viewer.destgrid
+                target_grid = gui.destination_viewer.destgrid
 
-            columns = int(max(1, target_grid.winfo_width() / self.gui.actual_gridsquare_width))
+            columns = int(max(1, target_grid.winfo_width() / gui.actual_gridsquare_width))
             rows = ceil(len(self.displayedlist) / columns)
             if reverse:
                 current_row = (len(self.displayedlist)-self.index-1) // columns
@@ -152,9 +153,9 @@ class Navigator:
         def highlight_up(reverse=None):
             # consider also destgrid bounds for this to function on destgrid.
             if self.window_focused == "GRID":
-                columns = int(max(1, self.gui.imagegrid.winfo_width() / self.gui.actual_gridsquare_width))
+                columns = int(max(1, gui.imagegrid.winfo_width() / gui.actual_gridsquare_width))
             elif self.window_focused == "DEST":
-                columns = int(max(1, self.gui.destination_viewer.destgrid.winfo_width() / self.gui.actual_gridsquare_width))
+                columns = int(max(1, gui.destination_viewer.destgrid.winfo_width() / gui.actual_gridsquare_width))
 
             check_upper_bound = self.index-columns
             if check_upper_bound < 0:
@@ -168,9 +169,9 @@ class Navigator:
 
         def highlight_down(reverse=None):
             if self.window_focused == "GRID":
-                columns = int(max(1, self.gui.imagegrid.winfo_width() / self.gui.actual_gridsquare_width))
+                columns = int(max(1, gui.imagegrid.winfo_width() / gui.actual_gridsquare_width))
             elif self.window_focused == "DEST":
-                columns = int(max(1, self.gui.destination_viewer.destgrid.winfo_width() / self.gui.actual_gridsquare_width))
+                columns = int(max(1, gui.destination_viewer.destgrid.winfo_width() / gui.actual_gridsquare_width))
 
             check_lower_bound = self.index+columns
             if check_lower_bound > len(self.displayedlist)-1:
@@ -183,11 +184,11 @@ class Navigator:
             else: scroll_down()
 
         def spacebar():
-            self.gui.displayimage(self.old.obj)
+            gui.displayimage(self.old.obj)
         def enter():
-            self.gui.displayimage(self.old.obj)
+            gui.displayimage(self.old.obj)
 
-        if self.gui.focused_on_field:
+        if gui.focused_on_field:
             return
         if not self.arrow_action:
             self.arrow_action = {
@@ -208,40 +209,44 @@ class Navigator:
                 "Return": lambda: enter()
             }
 
-        if self.gui.current_view.get() == "Show Assigned":
+        if gui.current_view.get() == "Show Assigned":
             arrow_action = self.arrow_action_reversed
         else:
             arrow_action = self.arrow_action
 
         if self.window_focused == "DEST":
-            self.displayedlist = self.gui.destination_viewer.displayedlist
+            self.displayedlist = gui.destination_viewer.displayedlist
             arrow_action = self.arrow_action_reversed
         else:
             self.displayedlist = self.gridmanager.displayedlist
         key = event.keysym
         arrow_action[key]()
-        if self.gui.show_next.get() and key not in ("space","Return"):
-            self.gui.displayimage(self.old.obj, caller="arrow")
+        gui.imagegrid.update()
+        if gui.show_next.get() and key not in ("space","Return"):
+            gui.displayimage(self.old.obj, caller="arrow")
 
     def default(self, frame):
         "Reverts colour back to default"
+        gui = self.gui
         if not frame:
             return
         
-        f_color = frame.obj.dest_color if frame.obj.dest != "" else self.gui.square_default
+        f_color = frame.obj.dest_color if frame.obj.dest != "" else gui.square_default
         #exists = frame.obj.guidata.get("destframe", None)
         try:
             frame.configure(highlightcolor = f_color,  highlightbackground = f_color) # Trying to access destroyed destsquare? # If dest is closed, remove self.old if any frame was there.
             frame.canvas.configure(bg=f_color, highlightcolor=f_color, highlightbackground = f_color)
             frame.c.configure(style="Theme_square1.TCheckbutton")
-            frame.cf.configure(bg=self.gui.square_text_box_colour)
+            frame.cf.configure(bg=gui.square_text_box_colour)
+            frame.update()
         except:
             pass
     def selected(self, frame):
+        gui = self.gui
         if not frame:
             return
-
-        frame.configure(highlightbackground = self.gui.square_selected, highlightcolor = self.gui.square_selected)
-        frame.canvas.configure(bg=self.gui.square_selected, highlightbackground = self.gui.square_selected, highlightcolor = self.gui.square_selected)
+        frame.configure(highlightbackground = gui.square_selected, highlightcolor = gui.square_selected)
+        frame.canvas.configure(bg=gui.square_selected, highlightbackground = gui.square_selected, highlightcolor = gui.square_selected)
         frame.c.configure(style="Theme_square2.TCheckbutton")
-        frame.cf.configure(bg=self.gui.square_text_box_selection_colour)
+        frame.cf.configure(bg=gui.square_text_box_selection_colour)
+        frame.update()
