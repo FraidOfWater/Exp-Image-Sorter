@@ -1,0 +1,89 @@
+{
+    "themes": {
+        "Black": {
+            "main_bg":                          "black",
+            "viewer_bg":                        "black",
+            "grid_bg":                          "black",
+
+            "divider_colour":                   "grey",
+            
+            "button_bg":                        "black",
+            "button_bg_pressed":                "black",
+            "button_text":                      "white",
+            "button_text_pressed":              "white",
+            
+            "field_colour":                     "black",
+            "field_activated_colour":           "white",
+            "field_text":                       "white",
+            "field_text_pressed":               "black",
+            
+            "square_default":                   "black",
+            "square_selected":                  "#2630AE",
+            "square_text":                      "white",
+            "square_outline":                   "white",
+            "outline_thickness":                2,
+            "textbox_size":                     25,
+            "square_padx":                      5,
+            "square_pady":                      5
+        },
+
+        "White": {
+            "main_bg":                          "lightgrey",
+            "viewer_bg":                        "#a9a9a9",
+            "grid_bg":                          "lightgrey",
+
+            "divider_colour":                   "grey",
+            
+            "button_bg":                        "lightgrey",
+            "button_bg_pressed":                "lightgrey",
+            "button_text":                      "black",
+            "button_text_pressed":              "black",
+            
+            "field_colour":                     "lightgrey",
+            "field_activated_colour":           "white",
+            "field_text":                       "black",
+            "field_text_pressed":               "black",
+            
+            "square_default":                   "lightgrey",
+            "square_selected":                  "#a9a9a9",
+            "square_text":                      "black",
+            "square_outline":                   "black",
+            "outline_thickness":                2,
+            "textbox_size":                     25,
+            "square_padx":                      5,
+            "square_pady":                      5
+        },
+
+        "Midnight": {
+            "main_bg":                          "#202041",
+            "viewer_bg":                        "#141433",
+            "grid_bg":                          "#303276",
+
+            "divider_colour":                   "grey",
+            
+            "button_bg":                        "#24255C",
+            "button_bg_pressed":                "#303276",
+            "button_text":                      "white",
+            "button_text_pressed":              "white",
+            
+            "field_colour":                     "#303276",
+            "field_activated_colour":           "#888BF8",
+            "field_text":                       "white",
+            "field_text_pressed":               "black",
+            
+            "square_default":                   "#888BF8",
+            "square_selected":                  "#303276",
+            "square_text":                      "white",
+
+            "square_outline":                   "white",
+            "active_outline":                   "white",
+
+            "outline_thickness":                2,
+            "textbox_size":                     25,
+            "square_padx":                      5,
+            "square_pady":                      5,
+            "square_cutoff":                    false,
+            "square_cutoff_size":               11
+        }
+    }
+}
