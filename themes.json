@@ -77,10 +77,10 @@
             "field_text_activated_colour":      "black",
             
             "checkbox_height":                  25,
-            "gridsquare_padx":                  2,
-            "gridsquare_pady":                  2,
+            "gridsquare_padx":                  1,
+            "gridsquare_pady":                  1,
             "whole_box_size":                   0,
-            "square_border_size":               0,
+            "square_border_size":               3,
             
             "square_default":                   "#303276",
             "square_selected":                  "#888BF8",
