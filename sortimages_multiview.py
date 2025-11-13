@@ -1,341 +1,230 @@
 #pip freeze > requirements.txt && pip uninstall -r requirements.txt -y && del requirements.txt
+# are requirements correct?
 
-import os
-import json
-import logging
-
-from shutil import rmtree, move as shutilmove
-
-from random import seed, random
-from time import perf_counter
-
-from threading import Thread
-from concurrent.futures import ThreadPoolExecutor
-from gc import collect
-
+import os, shutil, json, time, queue, tkinter as tk, ctypes, psutil
 from hashlib import md5
 from PIL import Image, ImageTk
-from imageio import get_reader, mimread
-
-import tkinter as tk
-from tkinter.messagebox import askokcancel
-from tkinter import filedialog as tkFileDialog
-
-import numpy as np
-
+import threading, multiprocessing as mp
+from concurrent.futures import ThreadPoolExecutor
 from gui import GUIManager
 from navigator import Navigator
 
-def import_pyvips():
-    "This looks scary, but it just points to where 'import pyvips' can find it's files from"
-    "To update this module, change vips-dev-8.16 to your new folder name here and in build.bat"
-    base_path = os.path.dirname(os.path.abspath(__file__))
-    vipsbin = os.path.join(base_path, "vips-dev-8.16", "bin")
-    
-    if not os.path.exists(vipsbin):
-        raise FileNotFoundError(f"The directory {vipsbin} does not exist.")
+# rework
+    # consider old colors from customgrid. (and the button style)
+    # consider customgrid vlc controls. (style)
+    # use customgrid instead of tktext.
+    # sessions: do the work, what should be cached, saved. Autosave?
+    # investigate single-image-mode
+    # all resizing options in main menu bar.
+    # get rid of menu bar, have a setting window
+    # compare new and old vlc implementation
+    # old ui is so good?
+    # see if old colors is better (color gen)
+    # maybe remove arrows from the folder buttons , the font has to change at least.
+    # themes doesnt work. also make purple theme?
+#testing
+    # should test vlc as we removed updates.
+    # moved is in reverse order? # test, may be fixed
+    # make sure predictions works w cpu and otherwise, and setdest works correctly for it
+    # test sorting system.
+    # are anim loading colors correct? do dests get corect colors, does this show in moved, assigned?
+    # prediction view colors, and assigning by RETURN key.
 
-    os.environ['PATH'] = os.pathsep.join((vipsbin, os.environ['PATH']))
-    os.add_dll_directory(vipsbin)
-import_pyvips()
-try:
-    import pyvips
-except Exception as e:
-    print("Couldn't import pyvips:", e)
+# tweaks
+    # sorter should add scroll offset to where it knows index is
+    # delete scroll functionality from folders? (caps lock confusion)
+    # resizing signature: remove unused stuff just use a config file...
+    # resizing no "fast" or "quality" but "sharp" and "smooth"
+    # sort stalls or loading icons:
+    # scroll doesnt work for folder view?
+    # make advanced do useful stuff
 
-logger = logging.getLogger("Sortimages")
-logger.setLevel(logging.WARNING)  # Set to the lowest level you want to handle
-handler = logging.StreamHandler()
-handler.setLevel(logging.WARNING)
-formatter = logging.Formatter('%(message)s')
-handler.setFormatter(formatter)
-logger.addHandler(handler)
+# window responsiveness:
+ # grid redraws abysmal
+ # folder frame has no color so resizing looks laggy.
 
-" Long-term Polish "
-# Replace while loops with better program exit checking. While does not apparently check the if for every line, but for every loop.
-# This has caused clutter/complexity in gen_frames.
-# To fix frame limiter, figure out framecount first and choose to allow loading upon that.
-# Sometimes frames animate on 1 or two frames.
-# Some kind of memory leak exists when sorting for a while. 
-# Seems like canvasimage destroy() breaks or something. Large delays. memory increase. Fixed?
-
-" Known issues "
-# Phantom shutdowns every once in a while. Reason unclear. (Was it the threads not shutting down bug? Sometimes I got thread unsynch thing. Not in sequence and such. Out of sequence)
-"Memory"
-# Fail to allocate bitmap memory issue. Tkinter or PIL cant juggle a lot of animated images at the same time. Load less of them.
-# Use self.max_concurrent_frames = 5000 to set memory limit and lower self.threads if you lag.
-"Memory leaks"
-# If memory leaks persist (by fast changing of gridsquares in viewers), objgraph growth shows creation of 1 addition to list and 1 frame.
-# The 1 addition to list is tkinter window hierarchy, cant change that. 1 frame is likely that 1 frame added to the list. Destviewr also creates this hierarchy clutter.
-#Leak is negligible now, so won't bother. Cannot delete tkinter window hierarchy, rather, have one image_frame and update contents. 
+# memory leaks:
+    # no apparent.
 
 class Imagefile:
-    path = "" # Once move happens, this becomes dest, dest = "" and moved flag becomes True".
-    dest = "" # Moved imgs have flag moved = True and dest = "", Assigned images have dest = "path"
-
+    ANIMATION = "ANIMATION"
+    IMAGE = "IMAGE"
+    VIDEO = "VIDEO"
     def __init__(self, name, path, ext) -> None:
         "An Imagefile object stores data about the image to help us manage it in the program"
         "Normal attributes"
         self.name = name
-        self.truncated_filename = "..." # This is just a placeholder for destination destsquare truncated name. We copy it over from gridsquare and dont have to generate it again.
+        self.truncated_filename = None
         self.path = path
+        self.dest = ""
+        self.thumbnail = None           # Path to the cached thumbnail in data directory
         self.moved = False              # Used to track if img is sorted
-        self.checked = tk.BooleanVar(value=False) # Checkbox checked or not.
         self.ext = ext
-        
+        self.color = None # dest color
+        self.embed = None
+        self.color_embed = None
+        self.predicted_path = None
         "Hash"
         self.id = None              # Hash of img name, mod_time and file_size. This is faster to hash than whole file binary stream.
         self.mod_time = None        # Used by sortimages. Used to hash id.
         self.file_size = None       # Used by canvasimage. Buffers if large enough. Used to hash id.
-
+        
         "Animation"
-        self.lazy_loading = True    # Used to tell animate to stop lazy loading animation and move to actual loop.
-        self.frames = None          # PIL frames for animation with tkinter for imagegrid. Generated by ThumbManager (self.animate) for gif, webp and webm.
-        self.frametimes = None      # Used for animating at correct speed. Generated by thumbmanager.generate.
-        self.framecount = 0         # could use len(frames) instead? ###
+        self.frames = []            # PIL frames for animation with tkinter for imagegrid. Generated by ThumbManager (self.animate) for gif, webp and webm.
         self.index = 0              # Used to control what frame is displayed (for imgagegrid).
         self.delay = 100            #Default delay. Used to fill frametimes if speed can't be extracted from file.
-        self.frame = None
-        self.destframe = None
+        self.thumb = None           # Store the thumbnail imagetk
+        self.frame = None           # Reference to gridframe
+        self.destframe = None       # Reference to destframe
+        self.gridsquare = None
+        self.destsquare = None
+        self.change_color_flag = False
 
-        self.saved_color = None
-        "Canvasimage, video support"
-        self.dimensions = None      # Used by canvasimage. VLC must know aspect ratio.
+        "Prediction"
+        self.conf = None
+        self.pred = None
+
+    def gen_id(self):
+        file_name = self.path.replace('\\', '/').split('/')[-1]
+        file_stats = os.stat(self.path)
+        self.file_size = file_stats.st_size
+        self.mod_time = file_stats.st_mtime
+        id = f"{file_name} {file_stats.st_size} {file_stats.st_mtime}"
+        self.id = md5(id.encode('utf-8')).hexdigest()
+    
+    def clear_frames(self):
+        self.frames.clear()
 
     def setdest(self, dest) -> None:
         "Sets imagefile dest and destcolor to desired."
+        # if trashed flag, move to "trashed" folder inside our source_dir. during exit, trash these.
         self.dest = dest["path"]
         self.dest_color = dest["color"]
-        logger.info("Set destination of %s to %s", self.name, self.dest)
 
-    def rename(self, name, fileManager):
-        new_path = f"{self.path[:-len(self.name)]}{name}"
-        os.rename(self.path, new_path)
-        self.path = new_path
-        self.name = name
-        self.truncated_filename = fileManager.thumbs.truncate_text(self)
-        self.frame.obj2.set(self.truncated_filename)
-        fileManager.gui.displayimage(fileManager.navigator.select(fileManager.navigator.old))
-
-    def move(self, fileManager) -> None:
+    def move(self):
         "Move image from self.path to self.dest and set self.dest = ''. Turn moved flag to True"
 
-        "Early exits"
-        if not self.dest: # dest = ""
-            return
-        if not os.path.isdir(self.dest): # If dest exists but not found in file system
-            return
+        if not self.dest or not os.path.isdir(self.dest): return
 
         "Pointers"
-        filename = self.name # in function, better to point  like this or call each time? ###
+        name = self.name # in function, better to point  like this or call each time? ###
         old_path = self.path + "" # Perhaps unnecessary, if shutil fails, self.path wont get set to destpath. This is for clarity. This is original path of the file.
-        destpath = os.path.join(self.dest, filename)
+        destpath = os.path.join(self.dest, name)
 
         "Check for conflicts: file with same name already in dest." "Refuse to overwrite anything"
         if os.path.exists(destpath): # path/to/dest/filename
-            print(f"File {filename[:30]} already exists in destination. No action")
-            if self.path == destpath:
-                return True
+            print(f"File {name[:30]} already exists in destination. No action") # would overwrite with same name otherwise.
+            if self.path == destpath: 
+                return True # already exists there.
             return False
 
         try:
-            shutilmove(self.path, destpath) # Copy -> Delete. If either fail, do exceptions.
-            
-            #self.guidata["frame"].configure(
-            #    highlightbackground="green", highlightthickness=2)
-
+            shutil.move(self.path, destpath) # Copy -> Delete. If either fail, do exceptions.
             self.path = destpath
             self.dest = ""
             self.moved = True
-
-            
             return True
         except Exception as e:
             "Shutil failed: Did delete old fail?"
             if os.path.exists(destpath) and os.path.exists(old_path): # This can only remove files created by shutil due to our early exits checking for anything in the way. Safe.
                 os.remove(destpath)
-                print(f"File {filename[:30]} is in use and is unable to delete. Removing created copy from destination.")
-                return 
+                print(f"File {name[:30]} is in use and is unable to delete. Removing created copy from destination.")
             else:
-                print(f"Error moving/deleting: {e} {filename[:30]}, This error shouldn't be raised at all. Report/investigate")
-            #self.guidata["frame"].configure(highlightbackground="red", highlightthickness=2) # Notify user via gui if we get exceptions.
+                print(f"Error moving/deleting: {e} {name[:30]}, This error shouldn't be raised at all. Report/investigate")
             return False
 
 class SortImages:
+    
+    THUMB_FORMAT = ".webp"
+    supported_formats = {"png", "gif", "jpg", "jpeg", "bmp", "pcx", "tiff", "webp", "psd", "jfif", "mp4", "webm", "avif"}
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    data_dir = os.path.join(script_dir, "data")
+    trash_dir = os.path.join(script_dir, "Trash")
+    os.makedirs(trash_dir, exist_ok=True)
+    train_dir = os.path.join(script_dir, "training")
+    model_dir = os.path.join(script_dir, "models")
+    os.makedirs(model_dir, exist_ok=True)
+    model_classes = None
+    names_2_path = None
+
+    prefs_path = os.path.join(script_dir, "prefs.json")
+    themes_path = os.path.join(script_dir, "themes.json")
+
     imagelist = [] # Store all Imagefiles
-    destinations = []
     exclude = []
-    program_is_exiting = False
+
+    # Flow
+    last_call_time = 0
+    throttle_delay = 0.19
+
+    # Flags
+    autosave = True
+    threads = int(os.cpu_count()/2)
+    concurrent_frames = 0
+    max_concurrent_frames = 2500
+    
     def __init__(self) -> None:
         "Sortimages setups the program. It creates imagefiles from the folder given, loads and saves prefs, loads and saves sessions, and starts up the gui and other modules."
-        "Paths"
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        self.data_dir = os.path.join(script_dir, "data")
-        self.prefs_path = os.path.join(os.getcwd(), "prefs.json")
-        self.themes_path = os.path.join(os.getcwd(), "themes.json")
-
-        self.jthemes = None
-        self.load_themes()
+        
+        self.jthemes = self.load_themes()
 
         "Timekeeping and throttling"
         self.timer = Timer()        # Time since creation.
-        self.last_call_time = 0     # Used to throttle setdestination against too frequent calls
-        self.throttle_delay = 0.19
 
-        "Normal attributes"
-        self.autosave=True
-        self.threads = 4 # Roughly how much computing power you use. Thumbs use twice this amount, frames half.
-        self.max_concurrent_frames = 4000 #6200 # memory overflow / bitmap allocation fix. Too many tkinter animations will crash the program. Use this to limit the amount of frames in memory.
-        self.animation_queue = []
         "Start modules"
-        self.gui = GUIManager(self) # loadprefs() edits self.gui attributes. Create self.gui and attributes for loadprefs() to manipulate.
-        self.loadprefs()            # Load prefs
+        prefs = self.loadprefs()
+        if prefs: self.THUMB_FORMAT = prefs.get("THUMB_FORMAT", self.THUMB_FORMAT)
+        self.gui = GUIManager(self, prefs)
         self.gui.initialize()       # Let GUI initialize fully now with loaded values.
-
         self.navigator = Navigator(self) # Navigator highlights the current selection, main use is to be able to navigate using arrow or wasd keys ### (wasd not implemented)
-        self.animate = Animate(self, self.gui.square_default) # Animate module is dedicated for making things animated.
+        self.animate = Animate(self) # Animate module is dedicated for making things animated.
         self.thumbs = ThumbManager(self) # Thumbmanager generates thumbs, frames, truncated names and imagefile attributes, and reloads and unloads resources when needed.
-        
-        self.gui.destination_viewer.set_thumbmanager_and_animate()
-
-        self.gui.change_theme(self.gui.theme.get())
-
-        self.gui.show_ram_usage()
-
-        self.validate_thumbnail_cache()
+        self.gui.after(3000, self.update_info)
+        self.val_thumb_cache(self.data_dir)
         self.gui.mainloop()
-
-    def validate_thumbnail_cache(self):
+    
+    def val_thumb_cache(self, path):
         "Setups cache folder for thumbnails. If folder doesn't exist, it is created. If the first picture in it is not the expected size, the folder is emptied."
 
-        "Pointers"
-        data_dir = self.data_dir
-
         "Data folder doesn't exists: creates it"
-        if not (os.path.exists(data_dir) and os.path.isdir(data_dir)):
-            logger.warning(f"Data folder created")
-            os.mkdir(data_dir)
+        if not (os.path.exists(path) and os.path.isdir(path)):
+            os.mkdir(path)
             return
-
-        "Data folder exists: do nothing if empty"
-        cache = os.listdir(data_dir)
-        if len(cache) < 1:
-            logger.warning(f"Data folder is empty")
+        
+        testable = None
+        with os.scandir(path) as entries:
+            for entry in entries:
+                if entry.is_file() and entry.name.endswith(self.THUMB_FORMAT):
+                    testable = entry
+        
+        if not testable:
+            print(f"Data folder is empty")
             return
+        
 
-        "Data folder not empty: empty folder if first file name is wrong"
-        if not cache[0].lower().endswith('.webp'):
+        with Image.open(testable.path) as im:
+            width, height = im.width, im.height
+        if max(width, height) != self.gui.thumbnailsize:
             try:
-                logger.warning(f"Removing data folder, first file inspected wasn't .jpg")
-                rmtree(data_dir)
-                os.mkdir(data_dir)
-                logger.warning(f"Re-created data folder.")
+                print("Removing data folder, thumbnailsize changed")
+                shutil.rmtree(path)
+                os.mkdir(path)
+                print("Re-created data folder.")
             except Exception as e:
                 print(f"Couldn't delete/create data folder: {e}")
-            return
-        
-        "First image found, check whether it is the expected size (prefs.json thumbnailsize)"
-        first_image_path = os.path.join(data_dir, cache[0])
-        try:
-            delete = False
-            with Image.open(first_image_path) as image:
-                # Check if the larger dimension matches the expected thumbnailsize
-                if max(image.width, image.height) != self.gui.thumbnailsize:
-                    delete = True
-            if delete:
-                try:
-                    logger.warning("Removing data folder, thumbnailsize changed")
-                    rmtree(data_dir)
-                    os.mkdir(data_dir)
-                    logger.warning("Re-created data folder.")
-                except Exception as e:
-                    print(f"Couldn't delete/create data folder: {e}")
-        except Exception as e:
-            logger.error(f"Couldn't load first image in data folder {e}")
-       
+
     def loadprefs(self):
         "Loads prefs.json. Needs self.gui to be created. This edits self.gui attributes."
-        def safe_set(command, pref_name):
-            try:
-                command()
-            except Exception as e:
-                print(f"Error loading {pref_name}: {e}")
-        gui = self.gui
-        hotkeys = "" # manual checking at end of this method
-
         try:
             with open(self.prefs_path, "r") as prefsfile:
-
                 jdata = prefsfile.read()
                 jprefs = json.loads(jdata)
-
-                "Paths"
-
-                safe_set(lambda: setattr(gui,"source_folder",jprefs["paths"]["source"]),"source_folder")
-                safe_set(lambda: setattr(gui,"destination_folder",jprefs["paths"]["destination"]),"destination_folder")
-                safe_set(lambda: gui.sessionpathvar.set(jprefs["paths"]['lastsession']),"sessionpathvar")
-                safe_set(lambda: setattr(self,"exclude",jprefs["paths"]["exclude"]),"exclude")
-        
-                "Preferences"
-                safe_set(lambda: setattr(gui,"thumbnailsize",int(jprefs["preferences"]["user"]["thumbnailsize"])),"thumbnailsize")
-
-                try:
-                    hotkeys = jprefs["preferences"]["user"]["hotkeys"]
-                except Exception as e:
-                    print("Error loading hotkeys:", e)
-                safe_set(lambda: setattr(gui,"centering_button",jprefs["preferences"]["user"]["centering_button"]),"centering_button")
-                safe_set(lambda: setattr(gui,"force_scrollbar",jprefs["preferences"]["user"]["force_scrollbar"]),"force_scrollbar")
-                safe_set(lambda: setattr(gui,"auto_load",jprefs["preferences"]["user"]["auto_load"]),"auto_load")
-                safe_set(lambda: setattr(gui,"do_anim_loading_colors",jprefs["preferences"]["user"]["do_anim_loading_colors"]),"do_anim_loading_colors")
-                safe_set(lambda: setattr(gui,"do_debug_terminal",jprefs["preferences"]["user"]["do_debug_terminal"]),"do_debug_terminal")
-
-                "Technical preferences"
-                safe_set(lambda: setattr(gui,"filter_mode",jprefs["preferences"]["technical"]["quick_preview_filter"]),"filter_mode")
-                safe_set(lambda: setattr(gui,"quick_preview_size_threshold",int(jprefs["preferences"]["technical"]["quick_preview_size_threshold"])),"quick_preview_size_threshold")
-                safe_set(lambda: setattr(self,"threads",jprefs["preferences"]["technical"]['threads']),"threads")
-                safe_set(lambda: setattr(self,"max_concurrent_frames",int(jprefs["preferences"]["technical"]['max_concurrent_frames'])),"max_concurrent_frames")
-                safe_set(lambda: setattr(self,"autosave",jprefs["preferences"]["technical"]['autosave_session']),"autosave")
-
-                "GUI CONTROLLED PREFRENECES"
-                safe_set(lambda: gui.squares_per_page_intvar.set(jprefs["qui"]["squares_per_page"]),"squares_per_page_intvar")
-                safe_set(lambda: gui.sort_by_date_boolvar.set(jprefs["qui"]["sort_by_date"]),"sort_by_date_boolvar")
-                safe_set(lambda: setattr(gui,"viewer_x_centering",jprefs["qui"]["viewer_x_centering"]),"viewer_x_centering")
-                safe_set(lambda: setattr(gui,"viewer_y_centering",jprefs["qui"]["viewer_y_centering"]),"viewer_y_centering")
-                safe_set(lambda: gui.show_next.set(jprefs["qui"]["show_next"]),"show_next")
-                safe_set(lambda: gui.dock_view.set(jprefs["qui"]["dock_view"]),"dock_view")
-                safe_set(lambda: gui.dock_side.set(jprefs["qui"]["dock_side"]),"dock_side")
-                safe_set(lambda: gui.theme.set(jprefs["qui"]["theme"]),"theme")
-                safe_set(lambda: setattr(gui,"volume",jprefs["qui"]["volume"]),"volume")
-
-
-                "Window positions"
-                safe_set(lambda: setattr(gui,"main_geometry",jprefs["window_settings"]["main_geometry"]),"main_geometry")
-                safe_set(lambda: setattr(gui,"viewer_geometry",jprefs["window_settings"]["viewer_geometry"]),"viewer_geometry")
-                safe_set(lambda: setattr(gui,"destpane_geometry",jprefs["window_settings"]["destpane_geometry"]),"destpane_geometry")
-                safe_set(lambda: setattr(gui,"leftpane_width",int(jprefs["window_settings"]["leftpane_width"])),"leftpane_width")
-                safe_set(lambda: setattr(gui,"middlepane_width",int(jprefs["window_settings"]["middlepane_width"])),"middlepane_width")
-
-                safe_set(lambda: gui.images_sorted.set(str(jprefs["window_settings"]["images_sorted"])),"images_sorted")
-                safe_set(lambda: gui.images_sorted_strvar.set(f"Sorted: {gui.images_sorted.get()}"),"images_sorted_strvar")
-
-                gui.actual_gridsquare_width = gui.thumbnailsize + gui.gridsquare_padx + gui.square_border_size*2 + gui.whole_box_size*2
-                gui.actual_gridsquare_height = gui.thumbnailsize + gui.gridsquare_pady + gui.square_border_size*2 + gui.whole_box_size*2 + gui.checkbox_height
-
-            if len(hotkeys) > 1:
-                gui.hotkeys = hotkeys
-
-            "Make sure middlepane doesnt become 'hidden', fooled me!"
-            "If the thumbnail grid becomes too small, reset it to an acceptable size."
-            win_width, discard = gui.main_geometry.split("x")
-            win_width = int(win_width)
-            l_pan = gui.leftpane_width
-            m_pan = gui.middlepane_width
-            if win_width - l_pan-m_pan < gui.thumbnailsize+35:
-                space = int(win_width) - int(gui.leftpane_width)
-                gui.middlepane_width = space-gui.thumbnailsize-35
-
+                return jprefs
         except Exception as e:
-            logger.error(f"Error loading prefs.json: {e}")
+            print(f"Error loading prefs.json: {e}")
+            return None
+        
     def saveprefs(self, gui):
         "Saves all customizable stuff to prefs.json."
         if gui.middlepane_frame.winfo_width() == 1: # Do not try to save invalid value
@@ -347,38 +236,41 @@ class SortImages:
         ddp = gui.destination_entry_field.get() if os.path.exists(gui.destination_entry_field.get()) else ""
 
         temp = gui.squares_per_page_intvar.get()
-        if temp == "": # if field left empty
+        if temp == "":
             temp = 1
         save = {
             "paths": {
                 "source": sdp,
                 "destination": ddp,
-                "lastsession": gui.sessionpathvar.get(),
+                "lastsession": gui.lastsession,
                 "exclude": self.exclude,
+                "categories": self.gui.categories,
+                "excludes": self.gui.excludes,
+                "model": self.gui.model_path
             },
-            "preferences": {
-                "user": {
-                    "thumbnailsize": gui.thumbnailsize,
-                    "hotkeys": gui.hotkeys,
-                    "centering_button": gui.centering_button,
-                    "force_scrollbar": gui.force_scrollbar,
-                    "auto_load": gui.auto_load,
-                    "do_anim_loading_colors": gui.do_anim_loading_colors,
-                    "do_debug_terminal": gui.do_debug_terminal
-                },
-                "technical": {
-                    "quick_preview_filter": gui.filter_mode,
-                    "quick_preview_size_threshold": gui.quick_preview_size_threshold,
-                    "threads": self.threads,
-                    "max_concurrent_frames": self.max_concurrent_frames,
-                    "autosave_session":self.autosave,
-                },
+            "user": {
+                "thumbnailsize": gui.thumbnailsize,
+                "prediction_thumbsize": gui.prediction_thumbsize,
+                "hotkeys": gui.hotkeys,
+                "force_scrollbar": gui.force_scrollbar,
+                "auto_load": gui.auto_load,
+                "do_anim_loading_colors": gui.do_anim_loading_colors,
+                "show_statusbar": gui.show_statusbar.get(),
+                "show_ram": gui.show_ram.get(),
+                "show_advanced": gui.show_advanced.get(),
             },
+            "technical": {
+                "quick_preview_filter": gui.filter_mode,
+                "quick_preview_size_threshold": gui.quick_preview_size_threshold,
+                "threads": self.threads,
+                "max_concurrent_frames": self.max_concurrent_frames,
+                "autosave_session":self.autosave,
+                "THUMB_FORMAT": self.THUMB_FORMAT
+            },
+            
             "qui": {
                 "squares_per_page": gui.squares_per_page_intvar.get(),
-                "sort_by_date": gui.sort_by_date_boolvar.get(),
-                "viewer_x_centering": gui.viewer_x_centering,
-                "viewer_y_centering": gui.viewer_y_centering,
+                "display_order": gui.display_order.get(),
                 "show_next": gui.show_next.get(),
                 "dock_view": gui.dock_view.get(),
                 "dock_side": gui.dock_side.get(),
@@ -392,46 +284,46 @@ class SortImages:
                 "leftpane_width":gui.leftui.winfo_width(),
                 "middlepane_width":gui.middlepane_width,
                 "images_sorted":gui.images_sorted.get(),
-            },
+            }
         }
+        save["viewer"] = gui.viewer_prefs
 
         "Save to prefs.json"
         try:
             with open(self.prefs_path, "w+") as json_file:
                 json.dump(save, json_file, indent=4)
-                logger.debug(save)
         except Exception as e:
-            logger.error(("Failed to save prefs:", e))
+            print(("Failed to save prefs:", e))
 
         "Save session"
         try:
             if self.autosave:
                 self.savesession(asksavelocation=False)
         except Exception as e:
-            logger.error(("Failed to save session:", e))
-    def savesession(self,asksavelocation):
-        gui = self.gui
+            print(("Failed to save session:", e))
+    
+    def savesession(self, asksavelocation):
         "Saves session. Includes some imagefile data and assigned list ids. Sessions do not support thumbnail_cache_validation. So you cannot change thumbnailsize during one."
-
+        gui = self.gui
         "If there is nothing to save"
-        if len(self.imagelist) < 1 and len(self.gui.gridmanager.gridsquarelist) < 1:
+        if len(self.imagelist) < 1 and len(gui.gridmanager.gridsquarelist) < 1:
             return
 
-        "Prompt"
         if asksavelocation:
+            from tkinter import filedialog as tkFileDialog
             custom_session_name = f"{os.path.basename(self.sdp)}-{os.path.basename(self.ddp)}.json" 
             filet=[("Javascript Object Notation","*.json")]
             savelocation=tkFileDialog.asksaveasfilename(confirmoverwrite=True,defaultextension=filet,filetypes=filet,
                                                         initialdir=os.getcwd(),initialfile=custom_session_name)
         else:
             savelocation = "last_session.json"
-        
-        "Construct save file"
+
+        if not savelocation: return
+
         "Save imagefile attributes"
         def make_list(squares, is_gridsquare=False):
             imagesavedata = []
             for obj in squares:
-
                 name = obj.name
                 imagesavedata.append({
                     "name": name,
@@ -446,9 +338,6 @@ class SortImages:
                     if obj.moved == True:
                         imagesavedata[-1]["moved"] = obj.moved
 
-                if hasattr(obj, "dimensions"):
-                    if obj.dimensions != None:
-                        imagesavedata[-1]["dimensions"] = obj.dimensions
             return imagesavedata
 
         objs = [x for x in self.imagelist if not x.id or not x.moved or not x.dest]
@@ -456,31 +345,22 @@ class SortImages:
 
         gridobjs = [x.obj for x in gui.gridmanager.gridsquarelist]
         gridsquarelist = make_list(gridobjs, is_gridsquare=True)
-
-        "We save the order of the assigned list"
-        if self.gui.sort_by_date_boolvar.get():
-            order = "modification_date"
-        else:
-            order = "default"
         
-        save = {"dest": self.ddp, "source": self.sdp, "thumbnailsize":gui.thumbnailsize, "sortorder": order,
+        save = {"dest": self.ddp, "source": self.sdp, "thumbnailsize":gui.thumbnailsize, "display_order": gui.display_order.get(),
                 "imagelist": imagelist, "gridsquarelist": gridsquarelist}
-    
-        with open(savelocation, "w+") as json_file:
+
+        with open(os.path.join(self.script_dir, savelocation), "w+") as json_file:
             json.dump(save, json_file, indent=4)    
-    
+
     def loadsession(self):
         gui = self.gui
         gridmanager = gui.gridmanager
-        "Loads session"
-        sessionpath = gui.sessionpathvar.get()
-        print(sessionpath)
         "If there is no last session, early exit"
-        if not (os.path.exists(sessionpath) and os.path.isfile(sessionpath)):
-            logger.warning("No Last Session!")
+        if not (os.path.exists(gui.lastsession) and os.path.isfile(gui.lastsession)):
+            print("No Last Session!")
             return
         
-        with open(sessionpath, "r") as json_file:
+        with open(gui.lastsession, "r") as json_file:
             sdata = json_file.read()
             savedata = json.loads(sdata)
 
@@ -489,14 +369,10 @@ class SortImages:
         self.sdp = savedata['source']
         self.ddp = savedata['dest']
 
-        self.setup(savedata['dest'])
-        gui.guisetup(self.destinations)
-        gui.initial_dock_setup()
+        gui.guisetup()
 
         print("")
-        #gui.sessionpathvar.set(os.path.basename(
-            #    self.sdp)+"-"+os.path.basename(self.ddp)+".json")
-        print(f'Using session:  "{os.path.basename(sessionpath)}"')
+        print(f'Using session:  "{os.path.basename(gui.lastsession)}"')
         print(f'Source:   "{self.sdp}"')
         print(f'Target:   "{self.ddp}"')
 
@@ -508,17 +384,13 @@ class SortImages:
                 if os.path.exists(full_path):
                     obj = Imagefile(name, full_path, os.path.splitext(name)[1][1:].lower())
                     if line['id']: # If None, (thumb never generated, skip it (processes the imagelist))
-                        obj.thumbnail = self.data_dir + "\\" + line['id'] + ".webp"
+                        obj.thumbnail = self.data_dir + "\\" + line['id'] + self.THUMB_FORMAT
                     obj.dest=line.get("dest")
                     if obj.dest == None: obj.dest = ""
                     obj.id=line['id']
                     obj.file_size=line['file_size']
                     obj.moved = line.get("moved")
                     if obj.moved == None: obj.moved = False
-                    dimensions = line.get('dimensions')
-                    if dimensions != None:
-                        obj.dimensions=(int(dimensions[0]), int(dimensions[1]))
-
                     lista.append(obj) # clear of moved and dest.
         gridsquarelist = []
         make_list(self.imagelist, "imagelist")
@@ -530,289 +402,222 @@ class SortImages:
                 moved_or_assigned.append(x)
             else:
                 unassigned.append(x)
-            
+        unassigned.reverse()
+        self.imagelist.extend(unassigned)
         "Sort order"
-        old_order = savedata["sortorder"]
-        new_order = self.gui.sort_by_date_boolvar.get()
+        self.gui.display_order.set(savedata["display_order"])
 
-        if new_order:
-            new_order = "modification_date"
-        else: 
-            new_order = "default"
-
-        if old_order != new_order:
-            if new_order == "default":
-                self.imagelist.sort(key=lambda img: (img.name, img.path), reverse=True)
-                unassigned.sort(key=lambda img: (img.name, img.path))
-                change_order = "default"
-            else:
-                self.imagelist.sort(key=lambda img: os.path.getmtime(img.path), reverse=False)
-                unassigned.sort(key=lambda img: os.path.getmtime(img.path), reverse=False)
-
-                change_order = "modification_date"
-        else:
-            change_order = None
-
-        gui.gridmanager.load_session(unassigned, moved_or_assigned, change_order) 
-        gui.destination_viewer.get_paths()
+        gui.gridmanager.load_session(moved_or_assigned) 
 
         self.gui.images_left_stats_strvar.set(
             f"Left: {len(gridmanager.assigned)}/{len(gridmanager.gridsquarelist)-len(gridmanager.assigned)-len(gridmanager.moved)}/{len(self.imagelist)}")
  
         gui.images_sorted_strvar.set(f"Sorted: {gui.images_sorted.get()}")
-    
-    def load_themes(self):
-        with open(self.themes_path, "r") as themesfile:
-            jdata = themesfile.read()
-            jthemes = json.loads(jdata)
-            self.jthemes = jthemes
+        gui.winfo_toplevel().title(f"EXP: {gui.images_sorted_strvar.get()}")
+        
+        self.gui.update()
+        self.navigator.first()
 
+    def load_themes(self):
+        try:
+            with open(self.themes_path, "r") as themesfile:
+                jdata = themesfile.read()
+                jthemes = json.loads(jdata)
+                return jthemes["themes"]
+        except Exception as e:
+            print("Error loading themes:", e)
+            return None
+    
     def moveall(self):
         self.timer.start()
         gui = self.gui
         gridmanager = gui.gridmanager
-        temp = gui.gridmanager.assigned.copy()
+        gridmanager.undo.clear()
+        temp = gridmanager.assigned.copy()
         reopen = "none"
-        old = None
-        if hasattr(gui, "second_window") and hasattr(gui, "Image_frame"):
-            old = gui.Image_frame.obj
-            gui.middlepane_frame.grid_forget()
-            gui.Image_frame.destroy()
-            gui.unbind("<Configure>")
-            del gui.Image_frame
-            reopen = "window"
-        elif hasattr(gui, "Image_frame"):
-            old = gui.Image_frame.obj
-            gui.middlepane_frame.grid_forget()
-            gui.Image_frame.destroy()
-            gui.unbind("<Configure>")
-            del gui.Image_frame
-            reopen = "dock"
 
+        old = None
+        """if gui.Image_frame != None:
+            old = gui.Image_frame.obj
+            gui.middlepane_frame.grid_forget()
+            gui.Image_frame.close()
+            gui.unbind("<Configure>") ###
+            gui.Image_frame = None
+            reopen = "window" ###
+"""
         successfull = []
         for x in temp:
-            success = x.obj.move(self)
+            success = x.obj.move()
             if success: # If move was successfull
-                gui.gridmanager.assigned.remove(x)
-                gui.gridmanager.moved.append(x)
-                self.gui.images_left_stats_strvar.set(
+                gridmanager.assigned.remove(x)
+                gridmanager.moved.append(x)
+                gui.images_left_stats_strvar.set(
                     f"Left: {len(gridmanager.assigned)}/{len(gridmanager.gridsquarelist)-len(gridmanager.assigned)-len(gridmanager.moved)}/{len(self.imagelist)}")
                 gui.images_sorted.set(gui.images_sorted.get()+1)
                 gui.images_sorted_strvar.set(f"Sorted: {gui.images_sorted.get()}")
+                gui.winfo_toplevel().title(f"EXP: {gui.images_sorted_strvar.get()}")
+
                 successfull.append(x)
-        gui.gridmanager.remove_squares(successfull, unload=True)
+        if self.gui.current_view.get() == "Assigned":
+            gridmanager.remove_squares(successfull, unload=True)
 
-        
-        if reopen == "window":
-            gui.displayimage(old)
-        elif reopen =="dock":
-            gui.displayimage(old)
         print(self.timer.stop())
-    def setDestination(self, *args):
-        gui = self.gui
-        gridmanager = gui.gridmanager
-        current_time = perf_counter()
-        #throttling
-        if current_time - self.last_call_time < 0.1: #and key pressed down... so you can tap as fast as you like.
+
+    def setDestination(self, dest, caller=None):
+        if hasattr(caller, "keysym") and caller.keysym == "Delete" and self.gui.Image_frame.app2.search_minimized: pass
+        elif self.gui.Image_frame and self.gui.Image_frame.app2.search_active and hasattr(caller, "type") and caller.type != tk.EventType.ButtonPress: # if viewer displays something and search is active, ignore all hotkeypresses.
             return
-            
-        else:
-            self.last_call_time = current_time
-            
-
-        #take multiple
-        dest = args[0]
-
-        try:
-            wid = args[1].widget
-        except AttributeError:
-            wid = args[1]["widget"]
-        if isinstance(wid, tk.Entry):
-            pass
-
-        # Return all images whose checkbox is checked (And currently in view by image viewer, so you can just press a hotkey and not have to check a checkbox everytime) (If interacting with other squares, it will cancel itself out. This is so user wont accidentally move anything.)
-        else:
-            marked = [] # List of all marked
-            
-            displayedlist = gridmanager.displayedlist
-            marked = [x for x in displayedlist if x.obj.checked.get()]
-            if hasattr(gui.destination_viewer, "destwindow"):
-                displayedset = gridmanager.displayedset.union(gui.destination_viewer.displayedset)
-                displayedlist_dest = gui.destination_viewer.displayedlist
-                temp = [x for x in displayedlist_dest if x.obj.checked.get()]
-                marked.extend(temp)
-            else:
-                displayedset = gridmanager.displayedset # Current list being compared
-
-            "Current selection is added to marked if focus never lost"
-            if self.navigator.old and gui.focused_on_secondwindow and self.navigator.old in displayedset: # to see if we have clicked elsewhere as to not move the displayed image anymore.
-                if self.navigator.old not in marked:
-                    marked.append(self.navigator.old)
-            
-            if not marked:
+        "Ignored"
+        if True:
+            "Ignore calls from certain widgets"
+            if caller and caller != "sorter" and isinstance(caller.widget, tk.Entry):
+                #print("came from entry")
                 return
-            if self.gui.focused_on_field:
-                return
+            #if caller == None: print("Button")
+            #else: print("Key")
+            "Ignore calls if they are spammed"
+            current_time = time.perf_counter()
+            if current_time - self.last_call_time < 0.1: return
+            else: self.last_call_time = current_time
 
-            #Handle lists
-            to_remove_from_grid = []
-            to_refresh_from_grid = []
-            remove = []
-            add = []
-            for x in marked: #set background to button colour
-                x.obj.setdest(dest)
-                temp = x.obj.guidata.get("color", None)
-                if temp:
-                    temp['background'] = dest['color']
-                    temp.canvas['background'] = dest['color']
-                    #save info to file
-                    
-                x.obj.checked.set(False)
-
-
-                if hasattr(gui.destination_viewer, "destwindow"):
-                    
-                    if gui.destination_viewer.dest_path != x.obj.dest: # GRIDSQUARE is not DESTINED to DESTGRID.
-                        if x.obj.id in gui.destination_viewer.displayedlist_ids: # GRIDSQUARE ALREAD IN DESTGRID
-                            a = gui.destination_viewer.displayedlist_ids.index(x.obj.id) # Get index of DESTSQUARE from GRIDSQUARE in DESTGRID
-                            destsquare = gui.destination_viewer.displayedlist[a]
-                            remove.append(destsquare) # REMOVE SQUARE
-                        else: # GRIDSQUARE NOT IN DESTGRID
-                            pass # DO NOTHING!
-
-                    elif gui.destination_viewer.dest_path == x.obj.dest: # GRIDSQUARE is DESTINED to DESTGRID
-                        if x.obj.id in gui.destination_viewer.displayedlist_ids: # GRIDSQUARE ALREADY IN DESTGRID
-                            a = gui.destination_viewer.displayedlist_ids.index(x.obj.id) # Get index of DESTSQUARE from GRIDSQUARE in DESTGRID
-                            destsquare = gui.destination_viewer.displayedlist[a]
-                            add.append((destsquare, "refresh")) # REFRESH SQUARE.
-                        else: #GRIDSQUARE NOT IN DETGRID
-                            add.append((x.obj, "add")) # ADD SQUARE
-
-                # Move from list to list
-                if gui.current_view.get() == "Show Unassigned":
-                    if x in gridmanager.displayedset:
-                        gridmanager.unassigned.remove(x)
-                        gridmanager.assigned.append(x)
-                        to_remove_from_grid.append(x)
-
-                # Moving from assigned to assigned
-                elif gui.current_view.get() == "Show Assigned":
-                    if x in gridmanager.displayedset:
-                        gridmanager.assigned.remove(x)
-                        gridmanager.assigned.append(x)
-                        to_refresh_from_grid.append(x) # Means we want to update pos so it lines up with assigned list order.
-                        #dest, dest may be changed, check if destsquare is same as gridsquare, if not, nothing, if yes, remove.
-
-                # Moving from moved to assigned
-                elif gui.current_view.get() == "Show Moved":
-                    if x in gridmanager.displayedset:
-                        gridmanager.moved.remove(x)
-                        gridmanager.assigned.append(x)
-                        to_remove_from_grid.append(x)
-                
-                elif gui.current_view.get() == "Show Animated":
-                    if x in gridmanager.displayedset:
-                        gridmanager.assigned.append(x)
-                        to_remove_from_grid.append(x)
-            "Add and remove from imagegrid"
-
-            gridmanager.remove_squares(to_remove_from_grid, unload=True) # Moved/unassigned/animated scenarios
-            
-            "Assigned view: remove and add square back so it is 'newest'" # Wont run if above runs, because method is passed an empty list then.
-            gridmanager.remove_squares(to_refresh_from_grid, unload=False) # Assigned scenario
-            gridmanager.add_squares(to_refresh_from_grid)
-
-            "Add and remove from destgrid" #if assigned above
-            if remove:
-                gui.destination_viewer.remove_squares(remove, unload=True)
-            if add:
-                gui.destination_viewer.add_squares(add)
-            "If show next option checked, and next exists, and viewer is open, show next image"
-            if self.navigator.window_focused == "GRID":
-                if self.navigator.old and len(gridmanager.displayedset) >= 1:
-                    self.navigator.select_next(gridmanager.displayedlist)
-            # Consider if we focus on destwindow instead, we should use navigate using that list, not default gridlist. This does that
-            elif self.navigator.window_focused == "DEST":
-                if self.navigator.old and len(gui.destination_viewer.displayedset) >= 1:
-                    self.navigator.select_next(gui.destination_viewer.displayedlist)
-
-            if gui.auto_load and gui.current_view.get() == "Show Unassigned": 
-                if gui.squares_per_page_intvar.get() > len(gridmanager.displayedlist):
-                    to_load = gui.squares_per_page_intvar.get() - len(gridmanager.displayedlist)
-                    left = len(self.imagelist)
-                    items = min(to_load, left)
-                    gridmanager.load_more(amount=items) # the unload thread might access stuff simultneous to this one.
-            "Update stat tracker"
-            self.gui.images_left_stats_strvar.set(
-                f"Left: {len(gridmanager.assigned)}/{len(gridmanager.gridsquarelist)-len(gridmanager.assigned)-len(gridmanager.moved)}/{len(self.imagelist)}")
-                
-
-    def setup(self, dest): # scan the destination
-        def randomColor():
-            r = int(random() * 256)  # Range: 0 to 255
-            g = int(random() * 256)  # Range: 0 to 255
-            b = int(random() * 256)  # Range: 0 to 255
-
-            # Ensure the color is not too light by checking the brightness
-            brightness = (r * 0.299 + g * 0.587 + b * 0.114)
-            if brightness > 200:  # Adjust this threshold as needed
-                # If too light, adjust one of the colors down
-                if r > g and r > b:
-                    r = max(0, r - 50)
-                elif g > r and g > b:
-                    g = max(0, g - 50)
-                else:
-                    b = max(0, b - 50)
-
-            return f'#{r:02X}{g:02X}{b:02X}'
-        self.destinations = []
-        self.destinationsraw = []
-        with os.scandir(dest) as it:
-            for entry in it:
-                if entry.is_dir():
-                    seed(entry.name)
-                    self.destinations.append(
-                        {'name': entry.name, 'path': entry.path, 'color': randomColor(), 'hotkey': None})
-                    self.destinationsraw.append(entry.path)
-    def validate(self):
         gui = self.gui
-        self.timer.start()
+        dest_viewer = gui.destination_viewer
+        gridmanager = gui.gridmanager
+        navigator = self.navigator
+        "Find all marked images"
+
+        marked = []
+        marked_dest = []
+
+        if navigator.old and gui.focused_on_secondwindow and gui.focused_on_secondwindow and dest["path"] != navigator.old.obj.dest:
+            marked.append(navigator.old)
+        # treat this as as standalone...
+        marked = [x for x in gridmanager.displayedlist if x.checked.get() and x not in marked] or marked
+
+        "Add from destview"
+        if hasattr(dest_viewer, "destwindow"):
+            marked_dest.extend([x for x in dest_viewer.displayedlist if x.checked.get()])
+
+        if not marked and not marked_dest:
+            return
+
+        # Handle these based on the views...
+        # for some reason the last picture from unassigned refuses to work....
+        def helper(x):
+            obj = x.obj
+            obj.setdest(dest)
+            x.checked.set(False)
+            obj.color = dest['color']
+            self.gui.gridmanager.change_square_color(obj, obj.color)
+        
+        # Removal and refreshing
+        for x in marked + marked_dest:
+            helper(x)
+        
+        if hasattr(dest_viewer, "destwindow") and dest_viewer.dest_path != dest["path"]:
+            dest_viewer.remove_squares(marked_dest)
+        else:
+            dest_viewer.refresh_squares(marked_dest)
+            for x in marked_dest:
+                gridmanager.assigned.remove(x.obj.gridsquare)
+                gridmanager.assigned.append(x.obj.gridsquare)
+    
+        if marked_dest:
+            if self.gui.current_view.get() == "Assigned":
+                gridmanager.refresh_squares([x.obj.gridsquare for x in marked_dest]) # rem dest from grid
+
+        if hasattr(dest_viewer, "destwindow") and marked: # add to dest from grid, refresh from grid to dest
+            if dest["path"] == dest_viewer.dest_path:
+                if self.gui.current_view.get() == "Assigned":
+                    add = []
+                    refresh = []
+                    for x in marked:
+                        if x.obj.destsquare == None:
+                            add.append(x.obj)
+                        else:
+                            refresh.append(x.obj.destsquare)
+                    if refresh:
+                        print("refresh")
+                        dest_viewer.refresh_squares(refresh)
+                        for x in refresh:
+                            gridmanager.assigned.remove(x.obj.gridsquare)
+                            gridmanager.assigned.append(x.obj.gridsquare)
+                        
+                    if add:
+                        print("makegridsquare2")
+                        dest_viewer.add_objs(add)
+                else:
+                    dest_viewer.add_objs([x.obj for x in marked])
+            else:
+                print("different")
+                dest_viewer.remove_squares([x.obj.destsquare for x in marked if x.obj.destsquare])
+
+        # Other functionality
+        gridmanager.move_to_assigned(marked) # dont activate when
+
+        # Load more
+        if gui.auto_load and (gui.current_view.get() == "Unassigned" or gui.current_view.get() == "Predictions") and gui.squares_per_page_intvar.get() > len(gridmanager.displayedlist): 
+            to_load = gui.squares_per_page_intvar.get() - len(gridmanager.displayedlist)
+            left = len(self.imagelist)
+            items = min(to_load, left)
+            if items > 0: gridmanager.load_more(amount=items)
+        
+        # Display next image
+        if navigator.window_focused == "GRID" and navigator.old and len(gridmanager.displayedlist) > 0:
+            navigator.select_next(gridmanager.displayedlist)
+        elif navigator.window_focused == "DEST" and navigator.old and len(dest_viewer.displayedlist) > 0:
+            navigator.select_next(dest_viewer.displayedlist)
+        temp = 0 if not hasattr(dest_viewer, "destwindow") else len(dest_viewer.displayedlist) 
+        if gui.current_view.get() != "Assigned" and len(gridmanager.displayedlist) == 0 and temp == 0:
+            gui.displayimage(None)
+            pass
+        # Update stats
+        gui.images_left_stats_strvar.set(
+            f"Left: {len(gridmanager.assigned)}/{len(gridmanager.gridsquarelist)-len(gridmanager.assigned)-len(gridmanager.moved)}/{len(self.imagelist)}")
+    
+    def validate(self): # new session
+        gui = self.gui
+        timer = self.timer; timer.start()
         self.sdp = gui.source_entry_field.get()
         self.ddp = gui.destination_entry_field.get()
         samepath = (self.sdp == self.ddp)
 
-        if ((os.path.isdir(self.sdp)) and (os.path.isdir(self.ddp))):
-            self.setup(self.ddp)
-            gui.guisetup(self.destinations)
-            gui.initial_dock_setup()
+        if os.path.isdir(self.sdp) and os.path.isdir(self.ddp):
+            if not hasattr(self.gui, "folder_explorer"):
+                gui.guisetup()
+            if gui.gridmanager.gridsquarelist:
+                gui.gridmanager.clear_all()
+            if gui.Image_frame != None:
+                gui.Image_frame.set_image(None)
+            if gui.second_window_viewer != None:
+                gui.second_window_viewer.set_image(None)
+            gui.folder_explorer.set_view(self.ddp)
+            gui.buttons = gui.folder_explorer.buttons.copy()
 
-            gui.destination_viewer.get_paths()
-            gui.sessionpathvar.set("last_session.json")
-            #gui.sessionpathvar.set(os.path.basename(
-            #    self.sdp)+"-"+os.path.basename(self.ddp)+".json")
+            gui.lastsession = "last_session.json"
             
             print("")
             print(f'New session:  "{"last_session.json"}"')
             print(f'Source:   "{self.sdp}"')
             print(f'Target:   "{self.ddp}"')
             
-            self.walk(self.sdp, samepath)
-            gui.manage_lines(f"Files searched in: {self.timer.stop()}", clear=True)
-            self.timer.start()
-
+            self.imagelist = self.walk(self.sdp, samepath)
+            timer.start()
             gui.gridmanager.load_more()
-
         else:
             gui.source_entry_field.delete(0, tk.END)
             gui.destination_entry_field.delete(0, tk.END)
             gui.source_entry_field.insert(0, "ERROR INVALID PATH")
             gui.destination_entry_field.insert(0, "ERROR INVALID PATH")
+        
+        self.gui.update_idletasks()
+        self.navigator.first()
 
     def walk(self, src, samepath):
-        supported_formats = {"png", "gif", "jpg", "jpeg", "bmp", "pcx", "tiff", "webp", "psd", "jfif", "mp4", "webm"}
-        animation_support = {"gif", "webp", "mp4", "webm"} # For clarity
-        if samepath:
-            for name in os.listdir(src):
+        imagelist = []
+        for root, dirs, files in os.walk(src, topdown=True):
+            dirs[:] = [d for d in dirs if d not in self.exclude]
+            for name in files:
                 parts = name.rsplit(".", 1)
                 if len(parts) == 2:
                     n, ext = parts
@@ -820,563 +625,901 @@ class SortImages:
                 else:
                     n = parts[0]
                     ext = ""
-                if ext in supported_formats:
-                    imgfile = Imagefile(name, os.path.join(src, name), ext) # 24.5
-                    self.imagelist.append(imgfile)
+                if ext in self.supported_formats:imagelist.append(Imagefile(name, os.path.join(root, name), ext))
+            if samepath: break
+
+        from operator import attrgetter
+        if self.gui.display_order.get().lower() == "latest":
+            for obj in imagelist:
+                obj.mod_time = os.path.getmtime(obj.path)
+            imagelist.sort(key=attrgetter("mod_time"), reverse=False) # 65 ######## false
         else:
-            for root, dirs, files in os.walk(src, topdown=True):
-                dirs[:] = [d for d in dirs if d not in self.exclude]
+            from natsort import natsorted
+            imagelist = natsorted(imagelist, key=attrgetter("name"), reverse=True)
+        return imagelist
 
-                for name in files:
-                    parts = name.rsplit(".", 1)
-                    if len(parts) == 2:
-                        n, ext = parts
-                        ext = ext.lower()
-                    else:
-                        n = parts[0]
-                        ext = ""
-
-                    if ext in supported_formats:
-                        imgfile = Imagefile(name, os.path.join(root, name), ext) # 24.5
-                        self.imagelist.append(imgfile)
-
-        # Sort by date modificated
-        if self.gui.sort_by_date_boolvar.get():
-            self.imagelist.sort(key=lambda img: os.path.getmtime(img.path), reverse=False) # 65 ######## false
-        #elif self.gui.sort_by_size_boolvar.get():
-        #    self.imagelist.sort(key=lambda img: os.path.getsize(img.path), reverse=False)
-
-        return self.imagelist
     def clear(self, *args):
+        from tkinter.messagebox import askokcancel
         if askokcancel("Confirm", "Really clear your selection?"):
-            for x in self.imagelist:
-                x.checked.set(False)
+            for x in self.gui.gridmanager.gridsquarelist:
+                obj = x.obj
+                if obj.frame: obj.frame.checked.set(False)
+                if obj.destframe: obj.destframe.checked.set(False)
+
+    def reorder_as_nearest(self, imagefiles):
+        import numpy as np
+        import concurrent.futures
+        TARGET_SIZE = (224, 224)
+        BATCH_SIZE = 64
+        SAVE_PATH = r"C:\Users\4f736\Downloads\sort\results"
+        PRESET = 1 # 2
+        os.makedirs(SAVE_PATH, exist_ok=True)
+
+        TARGET_SIZE = 224  # used by pyvips.thumbnail()
+        def load_images_threadsafe(imagefiles):
+            """Load, resize, and pad images with black bars to TARGET_SIZE using PyVips (multi-threaded)."""
+            images, objs = [], []
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max(1,self.threads-1), thread_name_prefix="mobilenet_thumbs") as executor:
+                futures = [executor.submit(self.thumbs.gen_thumb, obj, size=TARGET_SIZE, cache_dir=None, user="mobilenet", mode="letterbox") for obj in imagefiles]
+                for f in concurrent.futures.as_completed(futures):
+                    result = f.result()
+                    if isinstance(result, tuple): 
+                        img, obj = result
+                        if img is not None and obj is not None:
+                            images.append(img)
+                            objs.append(obj)
+
+            if not images: return np.empty((0, TARGET_SIZE, TARGET_SIZE, 3), dtype=np.uint8), []
+            return np.stack(images), objs
+        
+        def get_mobilenet_embeddings(images):
+            """Compute MobileNet feature embeddings in batches."""
+            import torch
+            import torchvision.transforms as T
+            import torchvision.models as models
+            from torchvision.models import MobileNet_V2_Weights
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            #model = models.mobilenet_v2(weights=MobileNet_V2_Weights.DEFAULT).to(device)
+            model = models.mobilenet_v2(weights=MobileNet_V2_Weights.IMAGENET1K_V1).to(device)
+            model.eval()
+
+            preprocess = T.Compose([
+                T.Resize(224),
+                T.CenterCrop(224),
+                T.ToTensor(),
+                T.Normalize(mean=[0.485, 0.456, 0.406],
+                            std=[0.229, 0.224, 0.225]),
+            ])
+
+            all_emb = []
+            with torch.no_grad():
+                for i in range(0, len(images), BATCH_SIZE):
+                    print("Embed:", i+BATCH_SIZE)
+                    batch = images[i:i+BATCH_SIZE]
+                    batch_tensor = torch.stack([preprocess(Image.fromarray(img)) for img in batch]).to(device)
+                    feats = model.features(batch_tensor)
+                    pooled = torch.nn.functional.adaptive_avg_pool2d(feats, (1, 1)).view(len(batch), -1)
+                    all_emb.append(pooled.cpu().numpy())
+
+            embeddings = np.concatenate(all_emb, axis=0)
+            embeddings /= np.linalg.norm(embeddings, axis=1, keepdims=True)
+            return embeddings
+
+        def get_dominant_center_color(img, crop_ratio=0.6, similarity_threshold=32):
+            try:
+                img_f = img.astype(np.float32)
+                h, w, _ = img_f.shape
+
+                # --- Center crop ---
+                ch, cw = int(h * crop_ratio), int(w * crop_ratio)
+                top, left = (h - ch) // 2, (w - cw) // 2
+                center_crop = img_f[top:top+ch, left:left+cw].reshape(-1, 3)
+
+                # --- Background crop ---
+                mask = np.ones((h, w), dtype=bool)
+                mask[top:top+ch, left:left+cw] = False
+                background_crop = img_f[mask].reshape(-1, 3)
+
+                if len(background_crop) == 0:
+                    return np.median(center_crop, axis=0)
+
+                # --- Compute distances from background pixels ---
+                # Using simple RGB Euclidean distance
+                bg_median = np.median(background_crop, axis=0)
+                dists = np.linalg.norm(center_crop - bg_median[None, :], axis=1)
+
+                # Keep pixels that are sufficiently different from background
+                fg_pixels = center_crop[dists > similarity_threshold]
+
+                if len(fg_pixels) == 0:
+                    # fallback: use center crop median
+                    fg_pixels = center_crop
+
+                dominant_color = np.median(fg_pixels, axis=0)
+                return np.clip(dominant_color, 0, 255)
+
+            except Exception:
+                return np.median(img_f.reshape(-1, 3), axis=0)
+
+        def get_median_center_color(img, crop_ratio=0.5):
+            """Compute median center color in RGB for each image."""
+            try:
+                h, w, _ = img.shape
+                ch, cw = int(h * crop_ratio), int(w * crop_ratio)
+                top = (h - ch) // 2
+                left = (w - cw) // 2
+                crop = img[top:top+ch, left:left+cw]
+                return np.median(crop.reshape(-1, 3), axis=0)
+            except Exception:
+                return np.zeros(3)
+        
+        def get_order_tsp(combined, k=20):
+            """Use k-nearest neighbor TSP-like heuristic for smoother ordering."""
+            import faiss
+            index = faiss.IndexFlatL2(combined.shape[1])
+            index.add(combined.astype(np.float32))
+            D, I = index.search(combined.astype(np.float32), k)
+
+            visited = np.zeros(len(combined), dtype=bool)
+            order = [0]
+            visited[0] = True
+
+            for _ in range(1, len(combined)):
+                last = order[-1]
+                found = False
+
+                # Try nearest neighbors first
+                for neighbor in I[last]:
+                    if not visited[neighbor]:
+                        order.append(neighbor)
+                        visited[neighbor] = True
+                        found = True
+                        break
+
+                # Fallback: find globally nearest unvisited
+                if not found:
+                    unvisited = np.where(~visited)[0]
+                    if len(unvisited) == 0:
+                        break
+                    # use FAISS to find closest among remaining
+                    D2, I2 = index.search(combined[last:last+1].astype(np.float32), len(combined))
+                    for neighbor in I2[0]:
+                        if not visited[neighbor]:
+                            order.append(neighbor)
+                            visited[neighbor] = True
+                            break
+            return order
+        
+        test = sorted(imagefiles, key=lambda x: x.name)
+        images, objs_to_encode = load_images_threadsafe(test)
+        
+        alpha = 0.7 if PRESET == 1 else 0.4
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1,self.threads-1), thread_name_prefix="mobilenet-colors") as executor:
+            dominant_colors = []
+            func = get_dominant_center_color if PRESET == 1 else get_median_center_color
+            futures = [executor.submit(func, img) for img in images]
+            for f in concurrent.futures.as_completed(futures):
+                dominant_color = f.result()
+                dominant_colors.append(dominant_color)
+                np.array(dominant_colors, dtype=np.float32)
+                np.array(dominant_colors, dtype=np.float32)
+            color_emb_new = np.array(dominant_colors, dtype=np.float32)
+
+            for obj, col in zip(objs_to_encode, color_emb_new):
+                obj.color_embed = np.asarray(col, dtype=np.float32)
+
+            if len(objs_to_encode) > 0:
+                embeddings_new = get_mobilenet_embeddings(images)
+                for obj, emb in zip(objs_to_encode, embeddings_new):
+                    obj.embed = np.asarray(emb, dtype=np.float32)
+
+        objs_with_both = [
+            obj for obj in test
+            if getattr(obj, "embed", None) is not None and getattr(obj, "color_embed", None) is not None
+        ]
+        if len(objs_with_both) == 0:
+            print("No objects with both embed and color_embed — aborting.")
+            return
+
+        # 5) Stack arrays in the same order
+        all_emb = np.vstack([np.asarray(obj.embed, dtype=np.float32).reshape(1, -1) for obj in objs_with_both])
+        color_emb = np.vstack([np.asarray(obj.color_embed, dtype=np.float32).reshape(1, -1) for obj in objs_with_both])
+
+        # 6) normalize color embeddings safely
+        norms = np.linalg.norm(color_emb, axis=1, keepdims=True)
+        norms[norms == 0] = 1e-8
+        color_emb /= norms
+
+        combined = np.concatenate([alpha * all_emb, (1 - alpha) * color_emb], axis=1)
+        order = get_order_tsp(combined)
+
+        ordered_objs = [objs_with_both[idx] for idx in reversed(order)]
+
+        remaining = [o for o in imagefiles if o not in objs_with_both]
+        imagefiles[:] = ordered_objs + remaining
+
+    def update_info(self, old=None):
+        def get_memory_usage():
+            # Get the current process
+            process = psutil.Process()
+
+            # Get memory info
+            memory_info = process.memory_info()
+
+            # Return the RSS (Resident Set Size) in bytes
+            return (memory_info.rss)
+        
+        if self.gui.show_ram.get():
+            self.gui.current_ram_strvar.set(f"RAM: {get_memory_usage() / (1024 ** 2):.2f} MB")
+
+        "Anim: displayedlist with frames/displayedlist with framecount/(queue)"
+        temp = [x for x in self.gui.gridmanager.displayedlist if x.obj.frames]
+        self.gui.animation_stats_var.set(f"Anim: {len(self.animate.running)}/{len(temp)}")
+
+        "Frames: frames + frames_dest / max"
+        temp = [x.obj.frames for x in self.gui.gridmanager.displayedlist if x.obj.frames]
+        c = 0
+        for x in temp:
+            c += len(x)
+        self.gui.resource_limiter_var.set(f"{c}/{self.max_concurrent_frames}")
+
+        self.concurrent_frames = c
+        with self.thumbs._cf_cond:
+            self.thumbs._cf_cond.notify_all()
+
+        self.gui.after(333, self.update_info)
 
 class ThumbManager:
-    "Thumbmanager class to manage memory usage of images in grid."
+    class CachedTruncator:
+        def __init__(self, thumbmanager):
+            self.thumbs = thumbmanager
+            self.gui = thumbmanager.gui
+            self.prefix_width_cache = {}
+            self.char_width_cache = {}
+            self.measure_calls = 0
+            self.ellipsis = "...."
+            self.padding = 24
+            self.ellipsis_width = self.gui.smallfont.measure(self.ellipsis)
+
+        def truncate(self, filename):
+            parts = filename.rsplit(".", 1)
+            
+            if len(parts) == 2:
+                base, ext = parts
+                ext_w = self.prefix_width_cache.get(ext, False)
+                if ext_w == False:
+                    ext_w = self.gui.smallfont.measure(ext)
+                    self.prefix_width_cache[ext] = ext_w
+                    self.measure_calls += 1
+            else:
+                base = filename
+                ext = ""
+                ext_w = 0
+
+            base_chars_w = []
+            base_w = 0
+            for char in base:
+                char_w = self.char_width_cache.get(char, False)
+                if char_w == False:
+                    char_w = self.gui.smallfont.measure(char)
+                    self.char_width_cache[char] = char_w
+                    self.measure_calls += 1
+
+                base_w += char_w
+                base_chars_w.append(base_w)
+            
+            if base_w + ext_w <= self.gui.thumbnailsize - self.padding:
+                return filename
+            
+            available = self.gui.thumbnailsize - self.padding - self.ellipsis_width - ext_w
+            
+            # Binary search using precomputed widths
+            lo, hi = 0, len(base)
+            while lo < hi:
+                if self.thumbs.stop_event.is_set(): return
+                mid = (lo + hi + 1) // 2
+                if base_chars_w[mid - 1] <= available:
+                    lo = mid
+                else:
+                    hi = mid - 1
+
+            return f"{base[:lo]}{self.ellipsis}{ext}"
+    class DaemonThreadPoolExecutor(ThreadPoolExecutor):
+        """ThreadPoolExecutor that sets all worker threads as daemon threads."""
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._set_daemon_threads(kwargs["thread_name_prefix"])
+
+        def _set_daemon_threads(self, name):
+            """
+            Replace all non-daemon threads in the executor with daemon threads.
+            Called after pool creation. Compatible with Python 3.9–3.13.
+            """
+            old_threads = list(self._threads)
+            self._threads.clear()
+            for i in range(len(old_threads), self._max_workers):
+                t = threading.Thread(target=self._worker_entry, name=f"{name}_{i+1}", daemon=True)
+                t.start()
+                self._threads.add(t)
+
+        def _worker_entry(self):
+            """Our wrapper for the internal work queue processing loop."""
+            while True:
+                try:
+                    work_item = self._work_queue.get(block=True)
+                    if work_item is None:
+                        break
+                    work_item.run()
+                    del work_item
+                except Exception:
+                    import traceback
+                    traceback.print_exc()
+
+    thumb_ext = {"png", "jpg", "jpeg", "bmp", "pcx", "tiff", "psd", "jfif", "gif", "webp", "avif"}
+    anim_ext = {"gif", "webp", "webm", "mp4"}
+    video_ext = {"webm", "mp4"}
+    thumb_pool = None
+    frame_pool = None
     def __init__(self, fileManager):
-        self.animate = fileManager.animate
-        self.mem = {}
+        self.fileManager = fileManager
+        self.gui = fileManager.gui
         self.threads = fileManager.threads
         self.data_dir = fileManager.data_dir
-        self.gui = fileManager.gui
-        self.fileManager = fileManager
-
-        self.gen_thread = None
-        self.new_thread = None
-
-        self.supported_formats = {"png", "jpg", "jpeg", "bmp", "pcx", "tiff", "psd", "jfif", "gif", "webp"}
-        self.animated_thumb_formats = {"gif", "webp", "webm"}
-        self.video_formats = {"webm", "mp4"}
-    
-    def truncate_text(self, imageobj): #may fail for very small thumbsizes # very inefficient ###
-        filename = imageobj.name
-        parts = filename.rsplit(".", 1)
-        if len(parts) == 2:
-            base_name, ext = parts
-            ext = ext
-        else:
-            base_name = parts[0]
-            ext = ""
-        smallfont = self.gui.smallfont
-        text_width = smallfont.measure(filename)
-        if text_width+24 <= self.gui.thumbnailsize:
-            return filename # Return whole filename
-        ext = "...." + ext
-        while True: # Return filename that has been truncated.
-            test_text = base_name + ext # Test with one less character
-            text_width = smallfont.measure(test_text)
-            if text_width+24 < self.gui.thumbnailsize:  # Reserve space for ellipsis
-                break
-            base_name = base_name[:-2]
-        return test_text
-
-    def generate(self, gridsquares, dest=False, queue=False):
-        mem = self.mem
-        gui = self.gui
-        def queue_trail():
-            fileManager = self.fileManager
-            animation_queue = fileManager.animation_queue
-            temp = animation_queue.copy()
-            t = []
-            for x in temp:
-                if x.frame or x.destframe:
-                    t.append(x)
-                else:
-                    animation_queue.remove(x)
-            max_workers = max(1,self.threads)
-            with ThreadPoolExecutor(max_workers=max_workers) as executor: # FRAMES
-                executor.map(gen_frames, t)
-        def gen_thumb(imagefile): # session just calls this for displayedlist
-            def get_mode(vips_img):
-                pformat = str(vips_img.interpretation).lower()
-                
-                "Debug code"
-                if pformat in mem:
-                    mem[pformat] = mem[pformat]+1
-                else:
-                    mem[pformat] = 1
-
-                "Most common formats are srgb, b-w, rgb16 and grey16. We get the pillows equivalent 'mode' for frombytes method"
-                if pformat == "srgb":
-                    if vips_img.bands == 3: mode = "RGB"
-                    elif vips_img.bands == 4: 
-                        mode = "RGBA" # Transparency. Able to view photos with invisible background.
-                elif pformat == "b-w":
-                    mode = "L"
-                elif pformat == "rgb16":
-                    mode = "I;16"
-                elif pformat == "grey16":
-                    mode = "I;16"
-                else:
-                    print("Our pyvips interpreter encountered an unsupported format (not srgb, b-w, rgb16 or grey16):", vips_img.interpretation, imagefile.name)
-                return mode
-
-            def load_thumb(im, load=False):
-                #copy over if img exists
-                if load and dest:
-                    frame = imagefile.destframe
-                    frame.canvas.image = im
-                    frame.canvas.itemconfig(frame.canvas_image_id, image=im)
-                    return
-                elif load:
-                    frame = imagefile.frame
-                    canvas = frame.canvas
-                    canvas.image = im
-                    canvas.itemconfig(frame.canvas_image_id, image=im)
-                    return
-                if dest:
-                    frame = imagefile.destframe
-                    frame.canvas.image = im
-                    frame.canvas.itemconfig(frame.canvas_image_id, image=im)
-                    return
-
-
-                imagefile.guidata['img'] = im
-                frame = imagefile.frame
-                canvas = frame.canvas
-                canvas.image = im
-                canvas.itemconfig(frame.canvas_image_id, image=im)
-            
-            temp = imagefile.guidata.get("img", None)
-            if temp:
-                load_thumb(temp, load=True)
-                return
-            if not imagefile.id:
-                #Hash using name, size, mod time. Creates unique thumb name.
-                file_name1 = imagefile.path.replace('\\', '/').split('/')[-1]
-                if not imagefile.file_size or not imagefile.mod_time:
-                    file_stats = os.stat(imagefile.path)
-                    imagefile.file_size = file_stats.st_size
-                    imagefile.mod_time = file_stats.st_mtime
-                id = file_name1 + " " +str(imagefile.file_size)+ " " + str(imagefile.mod_time)
-                hash = md5()
-                hash.update(id.encode('utf-8'))
-                imagefile.id = hash.hexdigest()
-
-            thumbpath = os.path.join(self.data_dir, imagefile.id+os.extsep+"webp") # if you change format, you must reconfigure validate_thumbnail_cache to that prefix.
-            
-            "Thumbnail found and obj is saved the reference"
-            if (os.path.exists(thumbpath)):
-                imagefile.thumbnail = thumbpath
-                try:
-                    pyvips_image = pyvips.Image.new_from_file(imagefile.thumbnail)
-                    mode = get_mode(pyvips_image)
-
-                    buffer = pyvips_image.write_to_memory()
-                    pillows_image = Image.frombytes(
-                        mode, (pyvips_image.width, pyvips_image.height), buffer, "raw")
-                    buffer = None
-                    pyvips_image = None
-
-                    imagetk = ImageTk.PhotoImage(pillows_image)
-                    if imagefile.ext in self.video_formats:
-                        imagefile.dimensions = (imagetk.width(), imagetk.height())
-
-                    load_thumb(imagetk)       
-                except Exception as e:
-                    print(f"Pyvips couldn't load thumbnail from data: {imagefile.name} : Error: {e}. Trying with pillows.")
-                    try:
-                        with Image.open(imagefile.thumbnail) as image:
-                            imagetk = ImageTk.PhotoImage(image)
-                            load_thumb(imagetk)
-                    except Exception as e:
-                        print(f"Pillows couldn't load thumbnail from data: {imagefile.name} : Error: {e}.")
-
-                "Generate thumbnails and save to data folder." "PNG, JPG, GIF, WEBP"
-            else:
-                if imagefile.ext in self.video_formats: #mp4, webm
-                    try:
-                        reader = None
-                        reader = get_reader(imagefile.path)
-                        pillows_image = Image.fromarray(reader.get_data(0))
-                        pillows_image.thumbnail((gui.thumbnailsize,gui.thumbnailsize))
-
-                        imagetk = ImageTk.PhotoImage(pillows_image)
-                        imagefile.dimensions = (imagetk.width(), imagetk.height())
-
-                        if pillows_image.mode != "RGB": # Convert to a standard RGB for robustness
-                            pillows_image = pillows_image.convert("RGB")
-
-                        pillows_image.save(thumbpath)
-                        imagefile.thumbnail = thumbpath
-
-                        load_thumb(imagetk)
-                    except Exception as e:
-                        print(f"Couldn't create thumbnail for video: {imagefile.name} : Error: {e}")
-                    finally:
-                        if reader:
-                            reader.close()
-                        return
-                #Else
-                try: # Pyvips method is faster than pillows
-                    #raise Exception("")
-                    "Pyvips, load image and make a thumbnail and get interpreatation for pillows frombytes"
-                    #vips_image = pyvips.Image.new_from_file(imagefile.path, access="sequential") # use this to find strange formats. thumbnail seems to convert them.
-                    vips_image = pyvips.Image.thumbnail(imagefile.path, gui.thumbnailsize) # get_mode is kind of useless now. should recognize diff between rgb and rgba though, but not the other types.
-                    mode = get_mode(vips_image)
-
-                    buffer = vips_image.write_to_memory() # Pyvips, write thumbnail image to a memory array
-                    "Pillows, Read the array and create a pillows image. This needs a 'mode' and will fail if incorrect."
-                    pillows_image = Image.frombytes(
-                            mode, (vips_image.width, vips_image.height), buffer, "raw")
-                    #pillows_image = Image.frombuffer(
-                     #       mode, (vips_image.width, vips_image.height), buffer, "raw")
-                    vips_image = None
-                    buffer = None
-                    
-                    if mode == "RGBA":
-                        pillows_image.save(thumbpath, format="webp")
-                    else:
-                        if pillows_image.mode != "RGB": # Convert to a standard RGB for robustness
-                            pillows_image = pillows_image.convert("RGB")
-                        pillows_image.save(thumbpath, format="webp")
-
-                    #pillows_image.save(thumbpath)
-                    imagefile.thumbnail = thumbpath
-
-                    imagetk_image = ImageTk.PhotoImage(pillows_image)
-                    load_thumb(imagetk_image)
-
-                except Exception as e: # Pillow fallback
-                    print(f"Pyvips couldn't create thumbnail: {imagefile.name} : Error: {e}. Trying with pillows.")
-                    try:
-                        with Image.open(imagefile.path) as pillows_image:
-
-                            pillows_image.thumbnail((gui.thumbnailsize,gui.thumbnailsize))
-
-                            if pillows_image.mode != "RGB": # Convert to a standard RGB for robustness
-                                pillows_image = pillows_image.convert("RGB")
-
-                            pillows_image.save(thumbpath)
-                            imagefile.thumbnail = thumbpath
-
-                            imagetk = ImageTk.PhotoImage(pillows_image)
-                            load_thumb(imagetk)
-
-                    except Exception as e:
-                        print(f"Pillows couldn't create thumbnail: {imagefile.name} : Error: {e}")
-        def gen_name(imagefile):
         
-            #---------
-            imagefile.truncated_filename = self.truncate_text(imagefile)
-            if imagefile.frame:
-                imagefile.frame.obj2.set(imagefile.truncated_filename)
-            if imagefile.destframe:
-                imagefile.destframe.obj2.set(imagefile.truncated_filename)
-        def gen_frames(imagefile): # session just calls this for displayedlist -> called only after gen_anim_data for all. Now this has framecounts.
-            if self.fileManager.program_is_exiting:
-                return
-            "If at framelimit, add to animation queue if not there already."
-            if self.fileManager.gui.concurrent_frames >= self.fileManager.max_concurrent_frames:
-                return
-            # dont remove newcoming from queue, as we want to maintain order.
-            # remove only when gen is complete. lazy_load = False
+        # Queues
+        self.thumb_queue = queue.Queue()
+        self.frame_queue = queue.Queue()
 
-            # gen_frames is only called once if succesfull.
-            # On completion, imagefile is removed from animation queue and added to running.
-            # Clear frames just in case.
-            if not isinstance(imagefile.frames, list): imagefile.frames = []
-            if not isinstance(imagefile.frametimes, list): imagefile.frametimes = []
+        # Worker threads
+        self.thumb_worker = None
+        self.frame_worker = None
+        self.stop_event = threading.Event()
+        self.worker_ready = threading.Event()
+        self._cf_lock = threading.Lock()
+        self._cf_cond = threading.Condition(self._cf_lock)
+        self._left_lock = threading.Lock()
+        self.left = 0
+        self.left_f = 0
 
-            #self.fileManager.animate.remove_animation(imagefile) # replace with a thumbnail?
-            imagefile.frames.clear()
-            imagefile.frametimes.clear()
-            imagefile.framecount = 0
-            imagefile.index = 0
-            imagefile.lazy_loading = True
+        self.truncator = ThumbManager.CachedTruncator(self)
 
-            if imagefile.ext in self.video_formats: #webm
-                try:
-                    reader = get_reader(imagefile.path)
-                    fps = (reader.get_meta_data().get('fps', 24))
-                    imagefile.delay = int(round((1 / fps)*1000))
-                    if round(imagefile.file_size/1.048576/1000000,2) > 10:
-                        #print(f"{imagefile.name} is too big for grid animation.")
-                        imagefile.framecount = 2 # to register as "animated"
-                        if imagefile in self.fileManager.animation_queue:
-                            self.fileManager.animation_queue.remove(imagefile)
-                        return
- 
-                    for frame in reader:
-                        if self.fileManager.program_is_exiting:
-                            return
-                        elif self.fileManager.gui.concurrent_frames > self.fileManager.max_concurrent_frames:
-                            return
+        # Thread pool sizes
+        self.thumb_workers = min(3, fileManager.threads)  # parallel thumbs
+        self.frame_workers = min(2, fileManager.threads)  # parallel frames
+
+    def start_background_worker(self):
+        if self.stop_event.is_set():
+            self.stop_event.clear()
+
+        # recreate executors if missing
+        if not getattr(self, "thumb_pool", None):
+            self.thumb_pool = ThumbManager.DaemonThreadPoolExecutor(thread_name_prefix="(Pool) T_thread", max_workers=self.thumb_workers)
+        if not getattr(self, "frame_pool", None):
+            self.frame_pool = ThumbManager.DaemonThreadPoolExecutor(thread_name_prefix="(Pool) F_thread", max_workers=self.frame_workers)
+
+        # start worker threads only if dead
+        if not getattr(self, "_thumb_worker_running", False):
+            self._thumb_worker_running = True
+            self.thumb_after_id = self.gui.after(100, self._thumb_worker)
+
+        # start worker threads only if dead
+        if not getattr(self, "_frame_worker_running", False):
+            self._frame_worker_running = True
+            self.frame_after_id = self.gui.after(100, self._frame_worker)
+
+    def stop_background_worker(self):
+        """Tell workers to stop, but never block the main thread."""
+        self.stop_event.set()
+        if self.thumb_after_id:
+            self.gui.after_cancel(self.thumb_after_id)
+        if self.frame_after_id:
+            self.gui.after_cancel(self.frame_after_id)
+
+        # cancel new jobs
+
+        for pool in (self.thumb_pool, self.frame_pool):
+            if pool:
+                pool.shutdown(wait=False, cancel_futures=True)
+
+        self.thumb_pool = None
+        self.frame_pool = None
+        # clear queues so get() unblocks
+        for q in (self.thumb_queue, self.frame_queue):
+                with q.mutex:
+                    q.queue.clear()
                     
-                        image = Image.fromarray(frame)
-                        image.thumbnail((gui.thumbnailsize,gui.thumbnailsize))
-                        tk_image = ImageTk.PhotoImage(image)
-                        imagefile.frames.append(tk_image)
-                        imagefile.framecount += 1
-                        imagefile.frametimes.append(imagefile.delay)
-                        imagefile.lazy_loading = False
-
-                except Exception as e:
-                    print(f"Error in frame generation for grid: {e}")
-                    if imagefile in self.fileManager.animation_queue:
-                        imagefile.framecount = 2
-                        self.fileManager.animation_queue.remove(imagefile)
-                    return
-                finally:
-                    if reader:
-                        reader.close()
-            else: # Load frames for GIF, WEBP
-                try:
-                    try:
-                        frames = mimread(imagefile.path, memtest="2000MB")
-                    except Exception as e:
-                        if imagefile in self.fileManager.animation_queue: # too big, we should never animate this again. old thumbnail is in place.
-                            imagefile.framecount = 2
-                            self.fileManager.animation_queue.remove(imagefile)
-                        print(imagefile.name, e)
-                        return
-                    temp = []
-                    for x in frames:
-                        if self.fileManager.program_is_exiting:
-                            return
-                        elif self.fileManager.gui.concurrent_frames > self.fileManager.max_concurrent_frames: #add to queue / full
-                            return
-                                    
-                        frame_rgb = np.array(x)
-                        frame_pil = Image.fromarray(frame_rgb)
-                        frame_pil.thumbnail((256,256), Image.Resampling.LANCZOS)
-                        frame_tk = ImageTk.PhotoImage(frame_pil)
-                        temp.append(frame_tk)
-                    if not len(temp) == len(imagefile.frames):
-                        imagefile.frames = temp # If you clear the original list, the old list pointers will dissappear for a while and the loop will be interrupted.
-                        imagefile.frametimes = [frame.meta['duration'] for frame in get_reader(imagefile.path)]
-                        imagefile.framecount = len(imagefile.frames)
-                    imagefile.lazy_loading = False
-                    
-                except Exception as e:
-                    print(e)
-                    if imagefile in self.fileManager.animation_queue:
-                        imagefile.framecount = 2
-                        self.fileManager.animation_queue.remove(imagefile)
-                    return
-            if len(imagefile.frames) > 1:
-                if imagefile in self.fileManager.animation_queue:
-                    self.fileManager.animation_queue.remove(imagefile)
-                self.animate.add_animation(imagefile)
-
-        def multithread():
-            if self.gen_thread != None:
-                self.gen_thread.join()
-            self.fileManager.program_is_exiting = False
-            self.gen_thread = self.new_thread
-            # when gen called from dest, know it. check if img exists, set it. if doesnt continue loading img to guidata.
-            static = [x for x in objects]
-            gen_truncated_names = [x for x in objects if x.truncated_filename == "..."]
-            animated = [x for x in objects if x.ext in self.animated_thumb_formats]
-            while not self.fileManager.program_is_exiting:
-                try:
-                    if queue:
-                        queue_trail()
-                        return
-                    max_workers = max(1,self.threads*2)
-            
-                    with ThreadPoolExecutor(max_workers=max_workers) as executor: # NAMES
-                        executor.map(gen_name, gen_truncated_names)
-
-                    gui.manage_lines(f"Names shortened in: {self.fileManager.timer.stop()}", clear=True)
-                    self.fileManager.timer.start()
-
-                    with ThreadPoolExecutor(max_workers=max_workers) as executor: # THUMBS
-                        executor.map(gen_thumb, static)
-
-                    gui.manage_lines(f"Thumbnails generated in: {self.fileManager.timer.stop()}")
-                    #gui.manage_lines(f"Private Line: {mem}")
-                    self.fileManager.timer.start()
+        # schedule async cleanup on a short delay so we don't block GUI thread
+        self._thumb_worker_running = False
+        self._frame_worker_running = False
 
 
-                    for x in animated:
-                        self.fileManager.animation_queue.append(x)
-                    max_workers = max(1,self.threads)
-                    with ThreadPoolExecutor(max_workers=max_workers) as executor: # FRAMES
-                        executor.map(gen_frames, animated)
-
-                    gui.manage_lines(f"Thumbframes generated in: {self.fileManager.timer.stop()}")
-                    self.fileManager.timer.start()
-
-                except Exception as e:
-                    print("Error in generating thumbs and frames", e)
-                break
+    # --- Thumbnail Worker ---
+    def _thumb_worker(self):
+        if self.stop_event.is_set():
+            self._thumb_worker_running = False
             return
 
-        if gridsquares and isinstance(gridsquares[0], tk.Frame): # Can pass gridsquares or objects. More control.
-            objects = [x.obj for x in gridsquares]
-        else:
-            objects = gridsquares
-        if self.gen_thread == None or self.gen_thread.is_alive(): 
-            self.fileManager.program_is_exiting = True
-        self.new_thread = Thread(target=multithread, daemon=True)
-        self.new_thread.start()
-
-    def unload(self, gridsquares, dest=False): # thread? ### need thread because unload is very slow for 1000 pics.
-        gui = self.gui
-        def multithread3():
+        while not self.thumb_queue.empty():
             try:
-                max_workers = max(1,self.threads*2)
-                with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix = "unload-anim") as executor:
-                   
-                   executor.map(unload_animated, gridsquares)
-                max_workers = max(1,self.threads*2)
-                with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix = "unload-static") as executor:
-                   executor.map(unload_static, gridsquares)    
-                
+                item = self.thumb_queue.get_nowait()
+                self.thumb_pool.submit(self._process_thumb, item)
+            except queue.Empty:
+                break
             except Exception as e:
-                print("Error unloading thumbs and frames", e)
-            finally:
-                collect()
-                if self.fileManager.animation_queue:
-                    self.generate(self.fileManager.animation_queue, queue=True) # calls queue_trail()
+                print("Thumbnail pool submit error:", e)
+                break
 
-        def unload_static(gridsquare):
-            if dest == False:
+        self.thumb_after_id = self.gui.after(100, self._thumb_worker)
+
+    def _process_thumb(self, item):
+        def update_left():
+            self.left -= 1
+            gui.frame_gen_queue_var.set(f"Thumbs left: {self.left}")
+        fm = self.fileManager
+        gui = self.fileManager.gui
+        obj = item
+        try:
+            if self.stop_event.is_set():
+                return
+            self.gen_thumb(obj, size=gui.thumbnailsize, cache_dir=fm.data_dir)
+        except Exception as e:
+            print("Error encountered in Thumbmanager:", e)
+        finally:
+            self.thumb_queue.task_done()
+            gui.after(0, update_left)
+
+    # --- Frame Worker ---
+    def _frame_worker(self):
+        if self.stop_event.is_set():
+            self._frame_worker_running = False
+            return
+        while not self.frame_queue.empty():
+            try:
+                item = self.frame_queue.get_nowait()
+                self.frame_pool.submit(self._process_frame, item)
+            except queue.Empty:
+                break
+            except Exception as e:
+                print("Frame pool submit error:", e)
+                break
+        self.frame_after_id = self.gui.after(100, self._frame_worker)
+
+    def _process_frame(self, item):
+        def update_left(left_value):
+            self.left_f -= 1
+            gui.frame_gen_queue_var.set(f"Frames left: {self.left_f}")
+        fm = self.fileManager
+        gui = self.gui
+
+        obj = item
+        if self.stop_event.is_set():
+            try:
+                self.frame_queue.task_done()
+            except Exception:
+                pass
+            return
+
+        with self._cf_cond:
+            # loop until slot available or stop event or shutdown
+            while fm.concurrent_frames >= fm.max_concurrent_frames and not self.stop_event.is_set() \
+                and not self.stop_event.is_set():
+                self._cf_cond.wait(timeout=0.5)
+
+            if self.stop_event.is_set():
                 try:
-                    if hasattr(gridsquare, "canvas_image_id"):
-                        gridsquare.canvas.itemconfig(gridsquare.canvas_image_id, image=None)
-                        gridsquare.canvas.image = None
-                except Exception as e:
-                    print(e)
-            
-            if not gridsquare.obj.frame and not gridsquare.obj.destframe:
-                gridsquare.obj.guidata['img'] = None
+                    self.frame_queue.task_done()
+                except Exception:
+                    pass
+                return
 
-        def unload_animated(gridsquare):
-            if gridsquare.type == "GRID":
-                gridsquare.obj.frame = None
-            elif gridsquare.type == "DEST":
-                gridsquare.obj.destframe = None
+        try:
+            self.gen_frames(obj)
+        except Exception as e:
+            print("Frame generation error:", e)
+        finally:
+            try:
+                self.frame_queue.task_done()
+            except Exception:
+                pass
 
-            if gridsquare.obj.frames and not gridsquare.obj.frame and not gridsquare.obj.destframe:
-                gridsquare.obj.index = 0
-                gridsquare.obj.frames = []
-                gridsquare.obj.lazy_loading = True
-                
+            with self._left_lock:
+                self.left_f = max(0, self.left_f - 1)
+                left_value = self.left_f
+           
+            gui.after(0, lambda v=left_value: gui.frame_gen_queue_var.set(f"Frames left: {v}"))
+
+    def flush_all(self):
+        self.stop_event.set()
+
+        if self.thumb_after_id:
+            self.gui.after_cancel(self.thumb_after_id)
+        if self.frame_after_id:
+            self.gui.after_cancel(self.frame_after_id)
+        self._thumb_worker_running = False
+        self._frame_worker_running = False
+
+        # Drain queues
+        for q in (self.thumb_queue, self.frame_queue):
+            with q.mutex:
+                q.queue.clear()
         
-        self.fileManager.timer.start()
-        if gridsquares:
-            new_thread = Thread(target=multithread3, daemon=True)
-            new_thread.start()
+        self.stop_event.clear()
+        
+    # --- Generate method ---
+    def generate(self, imgfiles, dest=False):
+        gui = self.gui
+
+        # Queue thumbnails first
+        for x in imgfiles:
+            if not x.thumb:
+                self.left += 1
+                self.thumb_queue.put(x)
+            else:
+                pass
+
+        # Queue animated/video frames
+        for x in imgfiles:
+            if x.ext in self.anim_ext and not x.frames:
+                self.left_f += 1
+                self.frame_queue.put(x)
+                gui.gridmanager.change_square_color(x, "purple")
+        # Start worker threads
+        self.start_background_worker()
+
+    def gen_name(self, obj):
+        if self.fileManager.thumbs.stop_event.is_set() or not (obj.frame or obj.destframe): return
+        trunc = obj.truncated_filename or self.truncator.truncate(obj.name)
+        obj.truncated_filename = trunc
+        instances = [f for f in (obj.frame, obj.destframe) if f]
+        for x in instances:
+            x.obj2.set(trunc)
+            
+    def gen_thumb(self, obj, size, cache_dir, user="default", mode="as_is"): # session just calls this for displayedlist
+        gui = self.fileManager.gui
+        THUMB_FORMAT = self.fileManager.THUMB_FORMAT
+        def load_thumb(thumb):
+            "Loads thumb to canvas"
+            def run(thumb):
+                self.gen_name(obj)
+                instances = [f for f in (obj.frame, obj.destframe) if f]
+                if instances: obj.thumb = thumb
+                for x in instances:
+                    x.canvas.itemconfig(x.canvas_image_id, image=obj.thumb)
+            gui.after_idle(run, thumb)
+        # first we check if we need to stop, and make sure id is generated.
+        if self.stop_event.is_set(): return
+        if user=="default" and not (obj.frame or obj.destframe): return
+        elif user == "mobilenet":
+            if obj.embed is not None and obj.color_embed is not None: return # no mobilenet or color inferring needed
+        else:
+            if not obj.id: obj.gen_id()
+
+        if user == "default" and obj.thumb:
+            load_thumb(obj.thumb)
+            return
+            
+        pil_img = None
+        if cache_dir:
+            thumbnail_path = os.path.join(cache_dir, f"{obj.id}{THUMB_FORMAT}")
+        if cache_dir and os.path.exists(thumbnail_path): # default and train will have cache_dir
+            try:
+                if user != "default": return
+                with Image.open(thumbnail_path) as pil_img:
+                    thumb = ImageTk.PhotoImage(pil_img)
+                    load_thumb(thumb)
+                return
+            except Exception as e:
+                print(f"Pillows couldn't load thumbnail from cache: {obj.name} : Error: {e}.")
+
+        # if no found, we should generate it.
+        vips_used = False
+        if obj.ext in self.video_ext: #Webm, mp4
+            from imageio import get_reader
+            try:
+                reader = None
+                reader = get_reader(obj.path)
+                pil_img = Image.fromarray(reader.get_data(0))
+            except Exception as e:
+                print(f"Couldn't create thumbnail for video: {obj.name} : Error: {e}")
+            finally: 
+                if reader: reader.close()
+        else:
+            if mode == "as_is":
+                try:
+                    vips_img = pyvips.Image.thumbnail(obj.path, size)
+                    buffer = vips_img.write_to_memory()
+                    pformat = str(vips_img.interpretation).lower()
+                    if pformat == "srgb":
+                        if vips_img.bands == 3: pformat = "RGB"
+                        elif vips_img.bands == 4: pformat = "RGBA"
+                    elif pformat == "b-w": pformat = "L"
+                    elif pformat == "rgb16": pformat = "I;16"
+                    elif pformat == "grey16": pformat = "I;16"
+                    pil_img = Image.frombytes(pformat, (vips_img.width, vips_img.height), buffer, "raw")
+                    vips_used = True
+                except Exception as e: # Pillow fallback
+                    print(f"Pyvips couldn't create thumbnail: {obj.name} : Error: {e}.")
+            if not vips_used:
+                try:
+                    with Image.open(obj.path) as pil_img:
+                        pil_img = pil_img.copy()
+                except Exception as e:
+                    print(f"Pillows couldn't create thumbnail, either: {obj.name} : Error: {e}")
+
+        if not pil_img: 
+            return
+
+        # now we have a pil_img we should convert it if needed
+        if user == "default":
+            if pil_img.mode not in ("RGBA", "RGB"): # Train, infer and mobilenet want rgb
+                pil_img = pil_img.convert("RGBA")
+        if pil_img.mode != ("RGB"):
+            pil_img = pil_img.convert("RGB")
+
+        # resize according to mode
+        if mode == "as_is" and not vips_used: 
+            pil_img.thumbnail((size, size))
+        elif mode == "stretch": 
+            pil_img = pil_img.resize((size, size))
+        elif mode == "letterbox":
+            w, h = pil_img.size
+            scale = min(size / w, size / h)
+            new_w, new_h = int(w * scale), int(h * scale)
+            pil_img = pil_img.resize((new_w, new_h), Image.BILINEAR)
+            new_im = Image.new("RGB", (size, size), (114, 114, 114))
+            left = (size - new_w) // 2
+            top = (size - new_h) // 2
+            new_im.paste(pil_img, (left, top))
+            pil_img = new_im
+        elif mode == "center_crop":
+            w, h = pil_img.size
+            side = min(w, h)
+            left = (w - side) // 2
+            top = (h - side) // 2
+            pil_img = pil_img.crop((left, top, left + side, top + side))
+            pil_img = pil_img.resize((size, size), Image.BILINEAR)
+
+        # save it to cache if we can
+        if cache_dir and pil_img: # default and train
+            pil_img.save(thumbnail_path, format=THUMB_FORMAT[1:])
+            if user == "default": # for default, save path to imgfile and gen imgtk for it.
+                obj.thumbnail = thumbnail_path
+                thumb = ImageTk.PhotoImage(pil_img)
+                load_thumb(thumb)
+
+        if user == "classify":
+            return pil_img, obj # for classify
+        elif user == "mobilenet":
+            from numpy import array, uint8
+            return array(pil_img, dtype=uint8), obj # for mobilenet
+                
+    def gen_frames(self, obj):
+        """
+        Generate frames and place inside imagefile. Sets lazy_loading to True until done or exits otherwise.
+        If told to exit, clears everything it created, and sets lazy_loading to False.
+        Expects frames to be empty.
+
+        GIF, WEBP:
+            Uses pyvips -> numpy -> PIL -> ImageTk
+        MP4, WEBM:
+            Uses mediainfo -> av -> (PIL) -> ImageTk: av does the PIL transformation.
+        """
+        
+        gui = self.gui
+        size = gui.thumbnailsize
+        animate = self.fileManager.animate
+        path = obj.path
+        if self.stop_event.is_set(): 
+            return
+        
+        def gui_enable_animation(o=obj):
+            animate.add_animation(o)
+            self.gui.gridmanager.change_square_color(obj, "orange")
+        if obj.ext in self.video_ext:
+            from pymediainfo import MediaInfo
+            def pick_sampling_rate(duration: float, native_fps: float,min_fps: float = 12.0, max_frames: int = 500, mode: str = "stretch"):
+                """
+                Calculates desired fps and framecount for the extractors.
+                Allows us to crop the video to our desired amount of frames, and allows us to set minimum fps for frametimes.
+                pre:
+                        float:  duration
+                        float:  native_fps
+                        float:  min_fps     > 0.0
+                        int:    max_frames  > 0
+                        str:    mode        = stretch/limit
+                """
+
+                if duration == 0.0: 
+                    return native_fps if native_fps != 0.0 else min_fps
+                cap_rate = max_frames / duration # highest fps if we dont crop duration, but respect max_frames.
+
+                if mode == "stretch": # respect only max_frames.
+                    if native_fps * duration <= max_frames:
+                        sampling_fps = native_fps # native fps is used if the frames would be under max_frames.
+                    else:
+                        sampling_fps = cap_rate
+
+                elif mode == "limit": # respect min_fps.
+                    if native_fps * duration <= max_frames:
+                        sampling_fps = native_fps
+                    elif cap_rate >= min_fps: # prefers higher fps before min_fps
+                        sampling_fps = cap_rate
+                    else:
+                        sampling_fps = min_fps # respects min_fps, but will exceed max_frames
+
+                # never exceed the video's own frame-rate
+                sampling_fps = min(sampling_fps, native_fps)
+                
+                frame_count = min(max_frames, round(duration * sampling_fps))
+
+                return sampling_fps, frame_count         
+            def get_fps_and_duration(path: str):
+                mi = MediaInfo.parse(path)
+                vt = next((t for t in mi.tracks if t.track_type=="Video"), None)
+                gt = next((t for t in mi.tracks if t.track_type=="General"), None)
+                if not vt or not gt:
+                    raise RuntimeError("Missing tracks")
+                # fps
+                if vt.frame_rate_num and vt.frame_rate_den:
+                    fps = float(vt.frame_rate_num) / float(vt.frame_rate_den)
+                else:
+                    fps = float(vt.frame_rate or 0) or 24.0
+                # duration in seconds
+                duration = float(gt.duration or 0) / 1000.0
+                return fps, duration                        
+            def extract_with_pyav(path: str, timestamps: list, frametime_ms: int):
+                """
+                Return a list of n randomly-sampled PIL.Image frames from path using PyAV.
+                """
+                import av
+                # First, probe duration
+                container = av.open(path)
+                video_stream = container.streams.video[0]
+                time_base = video_stream.time_base
+                
+                for t in timestamps:
+                    if self.stop_event.is_set() or not (obj.frame or obj.destframe):
+                        gui.after_idle(obj.clear_frames)
+                        self.gui.gridmanager.change_square_color(obj, "red")
+                        break
+                    container.seek(int(t / time_base), any_frame=False, backward=True, stream=video_stream)
+                    for packet in container.demux(video_stream):
+                        for frame in packet.decode():
+                            if frame.pts * time_base >= t:
+                                img = frame.to_image()
+                                img.thumbnail((size, size))
+                                obj.frames.append((ImageTk.PhotoImage(img), frametime_ms))
+                                if len(obj.frames) == 2:
+                                    self.gui.after_idle(gui_enable_animation)
+                                break
+                        else:
+                            continue
+                        break
+
+            try:
+                fps, duration = get_fps_and_duration(path)
+                sampling_fps, n = pick_sampling_rate(duration=duration, native_fps=fps, min_fps=12, max_frames=100, mode="limit")
+                frametime_ms = int(round(1000.0 / sampling_fps))
+                timestamps = [(i / sampling_fps) for i in range(n)]
+            
+                extract_with_pyav(path, timestamps, frametime_ms)
+            except Exception as e:
+                print("error in gen frames (av)", e)
+
+        elif obj.ext in self.anim_ext:
+            with Image.open(obj.path, "r") as img:
+                i = 0
+                while True:
+                    if self.stop_event.is_set() or not (obj.frame or obj.destframe):
+                        gui.after_idle(obj.clear_frames)
+                        self.gui.gridmanager.change_square_color(obj, "red")
+                        return
+                    try:
+                        
+                        img.seek(i)
+                        duration = img.info.get('duration', 100) or 100
+                        
+                        frame = img.copy().convert("RGBA")
+                        frame.thumbnail((gui.thumbnailsize, gui.thumbnailsize))
+                        obj.frames.append((ImageTk.PhotoImage(frame), duration))
+                        i += 1
+
+                        if len(obj.frames) == 2:
+                            self.gui.after_idle(gui_enable_animation)
+                    except EOFError:
+                        break
+                    except Exception as e:
+                        print("gen fraems error:", e)
+                        break
+
+        if len(obj.frames) <= 1:
+            gui.after_idle(obj.clear_frames)
+            self.gui.gridmanager.change_square_color(obj, obj.color)
+        obj.change_color_flag = True
 
 class Animate:
-    def __init__(self, fileManager, square_colour):
+    def __init__(self, fileManager):
         self.fileManager = fileManager
         self.gui = fileManager.gui
-        self.running = set() # Stores every frame going to be animated or animating.
-        self.square_colour = square_colour
-        #self.running should hold an obj. if its guidata has "frame" or "destframe", it animates those dynamically if it finds them with the same frames and index
-        #important is that self.running shouldnt contain two same objects. 
-        # 1. Make it hold objs. # only one obj can be in loop at once, else index goes brr. This is why the running set is here. #
-        # 2. Make the animate method check if dest or grid version exists, apply current frame to both. #
-        # 3. Have something removing the version from guidata if it is unloaded. Should happen as we unanimate / as we unload the image in general.
+        self.gridmanager = self.gui.gridmanager
+
+        self.running = {}  # obj -> after_id (for cancellation)
 
     def add_animation(self, obj):
+        """Start per-object animation respecting frame delays."""
         if obj in self.running:
+            return  # already animating
+
+        obj.index = 0
+        self._step(obj)
+
+    def _step(self, obj):
+        gui = self.gui
+        instances = [f for f in (obj.frame, obj.destframe) if f]
+
+        # stop if object no longer visible or has no frames
+        if not instances or not obj.frames:
+            self.stop(obj)
             return
-        self.running.add(obj)
-        self.start_animations(obj)
-    def remove_animation(self, obj): # make remove of guidata in unload or remove square, then, loop will exit itself.
-        # or make another list just for the other dest. probably simpelr. tell start animation what self running it tracks from. remove anim same.
-        if obj in self.running:
-            self.running.remove(obj)
-    def start_animations(self, obj):
-        def lazy(obj): # d0 th9s
-            if self.gui.do_anim_loading_colors:
-                if obj.frame:
-                    obj.frame.canvas['background'] = "red" # note this points to gridsquare canvas.
-            if obj not in self.running: # Stop if not in "view" or in self.running
-                return
-            if not obj.frames: # No frames have been initialized. Or were removed.
-                self.remove_animation(obj)
-                return
-            if not obj.lazy_loading and len(obj.frames) != obj.framecount: # All frames generated doesnt match expected (only webm, dead?)
-                print("Error, frames generated doesnt match expected")
-                self.remove_animation(obj)
-                return
-            if not obj.lazy_loading and len(obj.frames) == obj.framecount: # All frames ready. (second part only webm, dead)
-                if self.gui.do_anim_loading_colors:
-                    if obj.frame:
-                        obj.frame.canvas['background'] = "green"
-                loop(obj)
-            else:
-                animate_these = []
 
-                if obj.frame: animate_these.append(obj.frame)
-                if obj.destframe: animate_these.append(obj.destframe)
+        # update image on both canvases
+        frame_img = obj.frames[obj.index][0]
+        for f in instances:
+            try:
+                f.canvas.itemconfig(f.canvas_image_id, image=frame_img)
+            except Exception:
+                pass
 
-                if not animate_these:
-                    self.remove_animation(obj)
-                    return
+        # optional color refresh
+        if obj.change_color_flag:
+            obj.change_color_flag = False
+            self.gridmanager.change_square_color(obj, obj.color)
 
-                for i in animate_these:    
-                    try:
-                        if len(obj.frames) > obj.index: # When next frame is available, but not all of them exist yet.
-                            i.canvas.itemconfig(i.canvas_image_id, image=obj.frames[obj.index])
-                            obj.index = (obj.index + 1) % obj.framecount
-                            i.canvas.after(obj.frametimes[obj.index], lambda: lazy(obj))
-                        else: # Frame must wait to ge generated, wait.
-                            i.canvas.after(obj.delay, lambda: lazy(obj))  #default delay instead 100 ms.
-                    except Exception as e:
-                        self.remove_animation(obj)
-                        print("Error in lazy:", e)
-        def loop(obj):
-            "Indefinite loop on a seperate thread until it just ends"
-            if not obj.frame and not obj.destframe: # if no instances, exit loop
-                self.remove_animation(obj)
-                return
-            #if not obj.frames or not obj.frametimes or (len(obj.frames) != len(obj.frames)): # we are missing frames or frametimes.
-            #    self.remove_animation(obj)
-            #    return
-            animate_these = []
-            if obj.frame:
-                animate_these.append(obj.frame) # but how would I retrieve the dests? # maybe attribute in_grids = {} could iterate over that simply.
-            if obj.destframe: 
-                animate_these.append(obj.destframe)
+        # advance frame index safely
+        obj.index = (obj.index + 1) % len(obj.frames)
+        delay = obj.frames[obj.index][1] or 100
 
-            for i in animate_these:
-                try:
-                    i.canvas.itemconfig(i.canvas_image_id, image=obj.frames[obj.index]) #change the frame
-                    obj.index = (obj.index + 1) % obj.framecount
-                    self.fileManager.gui.after(obj.frametimes[obj.index], lambda: loop(obj)) #run again.
-                except:
-                    return
-            
+        # schedule next frame
+        after_id = gui.after(delay, lambda: self._step(obj))
+        self.running[obj.id] = after_id
 
-        lazy(obj) # Non threaded
+    def stop(self, obj):
+        """Stop one animation and clear references."""
+        after_id = self.running.pop(obj.id, None)
+        if after_id:
+            try:
+                self.gui.after_cancel(after_id)
+            except Exception:
+                pass
+        obj.index = 0
+
+    def remove_animation(self, obj):
+        """Alias for stop()."""
+        self.stop(obj)
+
+    def stop_all(self):
+        """Stop all running animations."""
+        for obj in list(self.running):
+            self.stop(obj)
 
 class Timer:
-    "Timer for benchmarking"
     def __init__(self):
-        self.creation_time = None
+        self.creation_time = 0
     def start(self):
-        self.creation_time = perf_counter()
+        self.creation_time = time.perf_counter()
     def stop(self):
-        current_time = perf_counter()
+        current_time = time.perf_counter()
         elapsed_time = current_time - self.creation_time
         return f"{elapsed_time:.3f} s"
 
 if __name__ == '__main__':
+    vipsbin = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vips-dev-8.17", "bin")
+    os.environ['PATH'] = os.pathsep.join((vipsbin, os.environ['PATH']))
+    os.add_dll_directory(vipsbin)
+    import pyvips
+    ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    mp.freeze_support()
+    mp.set_start_method('spawn', force=True)
     mainclass = SortImages()
+    
