@@ -16,6 +16,7 @@ class GUIManager(tk.Tk):
     second_window_viewer = None
     focused_on_secondwindow = False
     last_model = None
+    displayed_obj = None
     def __init__(self, fileManager, jprefs) -> None:
         super().__init__()
         self.fileManager = fileManager
@@ -74,7 +75,6 @@ class GUIManager(tk.Tk):
         user = jprefs.get("user", {})
         self.thumbnailsize = int(user.get("thumbnailsize", 256))
         self.prediction_thumbsize = int(user.get("prediction_thumbsize", 224))
-        self.display_order = tk.StringVar(value=paths.get("display_order", "Filename"))
         self.hotkeys = user.get("hotkeys", "123456qwerty7890uiopasdfghjklzxcvbnm")
         self.force_scrollbar = bool(user.get("force_scrollbar", True))
         self.auto_load = bool(user.get("auto_load", True))
@@ -85,13 +85,17 @@ class GUIManager(tk.Tk):
         
         tech = jprefs.get("technical", {})
         self.filter_mode = tech.get("quick_preview_filter") if tech.get("quick_preview_filter") in ["NEAREST", "BILINEAR", "BICUBIC", "LANCZOS"] else "BILINEAR"
-        self.quick_preview_size_threshold = int(tech.get("quick_preview_size_threshold", 5))
         #threads                # Exlusively for fileManager
         #max_concurrent_frames  # Exlusively for fileManager
         #autosave               # Exlusively for fileManager
 
         gui = jprefs.get("qui", {}) # should be spelled gui XD
-        self.squares_per_page_intvar = tk.IntVar(value=int(gui.get("squares_per_page", 40)))
+        self.squares_per_page_intvar = tk.IntVar(value=int(gui.get("squares_per_page", 17)))
+        a = gui.get("display_order")
+        if a not in ("Filename", "Date"):
+            a = "Filename"
+        self.display_order = tk.StringVar(value=a)
+
         self.show_next = tk.BooleanVar(value=bool(gui.get("show_next", True)))
         self.dock_view = tk.BooleanVar(value=bool(gui.get("dock_view", True)))
         self.dock_side = tk.BooleanVar(value=bool(gui.get("dock_side", True)))
@@ -249,13 +253,33 @@ class GUIManager(tk.Tk):
                     if obj.frames:
                         obj.clear_frames()
 
+        self.prediction = tk.BooleanVar(value=False)
+        
         order_menu.add_radiobutton(label="Filename",value="Filename", variable=self.display_order, command=self.sort_imagelist)
-        order_menu.add_radiobutton(label="Latest", value="Latest", variable=self.display_order, command=self.sort_imagelist)
+        order_menu.add_radiobutton(label="Date", value="Date", variable=self.display_order, command=self.sort_imagelist)
+        order_menu.add_radiobutton(label="Size", value="Size", variable=self.display_order, command=self.sort_imagelist)
+        order_menu.add_radiobutton(label="Dimensions", value="Dimensions", variable=self.display_order, command=self.sort_imagelist)
         order_menu.add_radiobutton(label="Nearest", value="Nearest", variable=self.display_order, command=self.sort_imagelist)
         order_menu.add_radiobutton(label="Confidence", value="Confidence", variable=self.display_order, command=self.sort_imagelist)
+        order_menu.entryconfig("Nearest", state="disabled")
+        self.order_menu = order_menu
+        order_menu.entryconfig("Confidence", state="disabled")
+        order_menu.add_separator()
+        def test():
+            if self.prediction.get():
+                order_menu.entryconfig("Confidence", state="active")
+                imagefiles = [x for x in self.fileManager.imagelist if x.pred == None or self.last_model != self.model_path]
+                imagefiles.extend([x.obj for x in self.gridmanager.unassigned if x.obj.pred == None or self.last_model != self.model_path])
+                if imagefiles:
+                    self.model_infer(self.model_path, imagefiles)
+                    self.display_order.set("Confidence")
+            else:
+                order_menu.entryconfig("Confidence", state="normal")
+                order_menu.entryconfig("Confidence", state="disabled")
+        order_menu.add_checkbutton(label="Group by Prediction", variable=self.prediction, command=test)
 
         view_menu.add_checkbutton(label="Show-next", variable=self.show_next)
-        view_menu.add_checkbutton(label="Single-Image", variable=self.standalone_var, command=toggle_standalone_mode)
+        #view_menu.add_checkbutton(label="Single-Image", variable=self.standalone_var, command=toggle_standalone_mode)
         view_menu.add_checkbutton(label="Statusbar", variable=self.show_statusbar, command=self.toggle_statusbar)
         view_menu.add_checkbutton(label="Dock Type", variable=self.dock_view, command=self.change_viewer)
         view_menu.add_checkbutton(label="Dock side", variable=self.dock_side, command=self.change_dock_side)
@@ -378,10 +402,10 @@ Show Predictions:
             return
         entry.delete(0, tk.END)
         entry.insert(0, path)
-        if type == "dst":
+        if type == "dst" and hasattr(self, "folder_explorer") and self.folder_explorer:
             self.folder_explorer.set_view(path)
         elif type == "src":
-            self.fileManager.validate()
+            self.fileManager.validate("button")
 
     def first_page_buttons(self):
         but_t = self.button_text_colour
@@ -451,13 +475,14 @@ Show Predictions:
             x.bind("<Button-3>", lambda e, x=x, t=t: self.filedialog(x, type=t))
 
     def guisetup(self):
+        self.order_menu.entryconfig("Nearest", state="normal")
         filemanager = self.fileManager
         but_t = self.button_text_colour
         but_c = self.button_colour
         but_c_a = self.button_colour_when_pressed
         but_c_a_t = self.button_text_colour_when_pressed
 
-        arrowkeys = ["<Up>", "<Down>", "<Left>", "<Right>", "<space>", "<F2>", "<Control-z>", "<Control-Z>"]
+        arrowkeys = ["<Up>", "<Down>", "<Left>", "<Right>", "<Return>","<space>", "<F2>", "<Control-z>", "<Control-Z>"]
         for arrowkey in arrowkeys:
             self.bind_all(f"{arrowkey}", lambda e: filemanager.navigator.bindhandler(e))
 
@@ -473,8 +498,7 @@ Show Predictions:
         move_all_b = tk.Button(self.first_frame, text="Move All", command=self.fileManager.moveall, bg=but_c, fg=but_t, 
                                activebackground = but_c_a, activeforeground=but_c_a_t,)
         
-
-        view_options = ["Unassigned", "Assigned", "Moved", "Animated", "Predictions"]
+        view_options = ["Unassigned", "Assigned", "Moved"]
         self.current_view = tk.StringVar(value="Unassigned")
         self.current_view.trace_add("write", lambda *args: self.current_view_changed())
 
@@ -517,7 +541,8 @@ Show Predictions:
         imagegridframe = self.imagegridframe
         if m_frame.winfo_width() != 1:
             self.middlepane_width = m_frame.winfo_width()
-
+        
+        self.displayed_obj = None
         m_frame.configure(width = self.middlepane_width)
         self.focused_on_secondwindow = False
         if self.dock_view.get():
@@ -589,70 +614,162 @@ Show Predictions:
                 toppane.add(m_frame, weight = 0)
     
     def sort_imagelist(self):
-        MODE = self.display_order.get().lower()
+        # size, dimensions
+        # first CLEAR the imagegrid...
         from operator import attrgetter
+        from natsort import natsorted
+        from PIL import Image
+        if self.fileManager.first_run: return
+
+        def main_thread():
+            self.current_view_changed()
+
+        MODE = self.display_order.get().lower()
         self.fileManager.imagelist.extend(reversed([x.obj for x in self.gridmanager.unassigned]))
         self.gridmanager.unassigned.clear()
-        if self.current_view.get() == "Predictions":
-            # reorder by confidence.
-            CONF_THRESHOLD = 0.4            
-            no_pred = []
-            predictable = []
-            for x in self.fileManager.imagelist:
-                if x.pred:
-                    predictable.append(x)
-                else:
-                    no_pred.append(x)
+        self.gridmanager.gridsquarelist.clear()
+        if self.prediction.get():
+            def run():
+                # reorder by confidence.
+                CONF_THRESHOLD = 0.4            
+                no_pred = []
+                predictable = []
+                for x in self.fileManager.imagelist:
+                    if x.pred:
+                        predictable.append(x)
+                    else:
+                        no_pred.append(x)
 
-            # group together with same predicted label.
-            classes = {}
-            for x in predictable:
-                if classes.get(x.pred, None) == None:
-                    classes[x.pred] = []
-                classes[x.pred].append(x)
+                # group together with same predicted label.
+                classes = {}
+                for x in predictable:
+                    if classes.get(x.pred, None) == None:
+                        classes[x.pred] = []
+                    classes[x.pred].append(x)
 
-            # distinguish using colors
-            for key, c in classes.items():
-                c[:] = [x for x in c if x.conf >= CONF_THRESHOLD]
-                if len(c) < 2:
-                    continue
-                
-                if MODE.lower() == "filename":
-                    from operator import attrgetter
-                    from natsort import natsorted
-                    classes[key] = natsorted(c, key=attrgetter("name"), reverse=True)
-                elif MODE.lower() == "latest":
-                    for obj in c:
-                        obj.mod_time = os.path.getmtime(obj.path)
-                    c.sort(key=attrgetter("mod_time"), reverse=False)
-                elif MODE.lower() == "nearest":
-                    self.fileManager.reorder_as_nearest(c)
-                elif MODE.lower() == "confidence":
-                    c.sort(key=lambda x: x.conf, reverse=False) 
-            classes = sorted(list(classes.values()), key=lambda x: len(x), reverse=False) # sorted by class and conf
+                # distinguish using colors
+                for key, c in classes.items():
+                    c[:] = [x for x in c if x.conf >= CONF_THRESHOLD]
+                    if len(c) < 2:
+                        continue
+                    
+                    if MODE.lower() == "filename":
+                        classes[key] = natsorted(c, key=attrgetter("name"), reverse=True)
+                    elif MODE.lower() == "date":
+                        for obj in c:
+                            obj.mod_time = os.path.getmtime(obj.path)
+                        c.sort(key=attrgetter("mod_time"), reverse=False)
+                    elif MODE == "size":
+                        for obj in c:
+                            file_stats = os.stat(obj.path)
+                            obj.file_size = file_stats.st_size
+                        c.imagelist.sort(key=attrgetter("file_size"), reverse=False)
+                    elif MODE == "dimensions":
+                        from imageio import get_reader
+                        for obj in self.fileManager.imagelist:
+                            if obj.dimensions == (-2, 0.0):
+                                if obj.ext in ("mp4", "webm"):
+                                    try:
+                                        reader = None
+                                        reader = get_reader(obj.path)
+                                        pil_img = Image.fromarray(reader.get_data(0))
+                                        w, h = pil_img.size
+                                        ratio = w/h # ratio 
+                                        if w == h: orientation = 0.0
+                                        elif w < h: orientation = -1.0
+                                        else: orientation = 1.0
+                                        obj.dimensions = (orientation, ratio)
+                                    except Exception as e:
+                                        print(f"Couldn't read: {obj.name} : Error: {e}")
+                                    finally: 
+                                        if reader: reader.close()
+                                else:
+                                    with Image.open(obj.path) as pil_img:
+                                        w, h = pil_img.size
+                                        ratio = w/h # ratio
+                                        if w == h: orientation = 0.0
+                                        elif w < h: orientation = -1.0
+                                        else: orientation = 1.0
+                                        obj.dimensions = (orientation, ratio)
+                                        
+                        self.fileManager.imagelist.sort(key=attrgetter("dimensions"), reverse=False)
 
-            predictable = []
-            for x in classes:
-                predictable.extend(x)
+                    elif MODE.lower() == "nearest":
+                        self.fileManager.reorder_as_nearest(c)
+                    elif MODE.lower() == "confidence":
+                        c.sort(key=lambda x: x.conf, reverse=False) 
+                classes = sorted(list(classes.values()), key=lambda x: len(x), reverse=False) # sorted by class and conf
 
-            self.fileManager.imagelist = predictable + no_pred
-            self.gridmanager.change_view([])
-            self.fileManager.navigator.view_change()
-            to_load = self.squares_per_page_intvar.get() - len(self.gridmanager.displayedlist)
-            left = len(self.fileManager.imagelist)
-            items = min(to_load, left)
-            if items > 0: self.gridmanager.load_more(amount=items)
+                predictable = []
+                for x in classes:
+                    predictable.extend(x)
+
+                def helper():
+                    self.fileManager.imagelist = predictable + no_pred
+                    self.gridmanager.change_view([])
+                    self.fileManager.navigator.view_change()
+                    to_load = self.squares_per_page_intvar.get() - len(self.gridmanager.displayedlist)
+                    left = len(self.fileManager.imagelist)
+                    items = min(to_load, left)
+                    if items > 0: self.gridmanager.load_more(amount=items)
+                self.after(1, helper)
+            def helper():
+                self.fileManager.reorder_as_nearest(self.fileManager.imagelist)
+                self.after(1, run)
+            if MODE == "nearest":
+                a = threading.Thread(target=helper, daemon=True)
+                a.start()
+            else:
+                a = threading.Thread(target=run, daemon=True)
+                a.start()
             return
-
         elif MODE == "filename":
-            from natsort import natsorted
             self.fileManager.imagelist = natsorted(self.fileManager.imagelist, key=attrgetter("name"), reverse=True)
-        elif MODE == "latest":
+        elif MODE == "date":
             for obj in self.fileManager.imagelist:
                 obj.mod_time = os.path.getmtime(obj.path)
             self.fileManager.imagelist.sort(key=attrgetter("mod_time"), reverse=False)
-        elif MODE == "nearest":
-            self.fileManager.reorder_as_nearest(self.fileManager.imagelist)
+        elif MODE == "size":
+            for obj in self.fileManager.imagelist:
+                file_stats = os.stat(obj.path)
+                obj.file_size = file_stats.st_size
+            self.fileManager.imagelist.sort(key=attrgetter("file_size"), reverse=False)
+        elif MODE == "dimensions":
+            from imageio import get_reader
+            for obj in self.fileManager.imagelist:
+                if obj.dimensions == (-2, 0.0):
+                    if obj.ext in ("mp4", "webm", "mkv", "m4v", "mov"):
+                        try:
+                            reader = None
+                            reader = get_reader(obj.path)
+                            pil_img = Image.fromarray(reader.get_data(0))
+                            w, h = pil_img.size
+                            ratio = w/h # ratio 
+                            if w == h: orientation = 0.0
+                            elif w < h: orientation = -1.0
+                            else: orientation = 1.0
+                            obj.dimensions = (orientation, ratio)
+                        except Exception as e:
+                            print(f"Couldn't read: {obj.name} : Error: {e}")
+                        finally: 
+                            if reader: reader.close()
+                    else:
+                        with Image.open(obj.path) as pil_img:
+                            w, h = pil_img.size
+                            ratio = w/h # ratio
+                            if w == h: orientation = 0.0
+                            elif w < h: orientation = -1.0
+                            else: orientation = 1.0
+                            obj.dimensions = (orientation, ratio)
+
+            self.fileManager.imagelist.sort(key=attrgetter("dimensions"), reverse=False)
+        elif MODE == "nearest": # threaded gen
+            def helper1():
+                self.fileManager.reorder_as_nearest(self.fileManager.imagelist)
+                self.after(1, main_thread)
+            a = threading.Thread(target=helper1, daemon=True)
+            a.start()
+            return
         elif MODE == "confidence":
             # reorder by confidence.
             CONF_THRESHOLD = 0.4            
@@ -682,52 +799,32 @@ Show Predictions:
                 predictable.extend(x)
             self.fileManager.imagelist = predictable + no_pred
 
-        self.current_view_changed()
-
-        if self.current_view.get() == "Animated":
-            """for obj in self.fileManager.imagelist:
-                obj.mod_time = os.path.getmtime(obj.path)"""
-            anim = []
-            thumb = []
-            for obj in self.fileManager.imagelist:
-                if obj.ext in self.fileManager.thumbs.anim_ext:
-                    if obj.ext in ("gif", "webp"): thumb.append(obj)
-                    else: anim.append(obj)
-                else: thumb.append(obj)
-            self.fileManager.imagelist = thumb + anim
+        main_thread()
+        
         
     def current_view_changed(self, selected_option=None):
         "When view is changed, send the wanted list to the gridmanager for rendering"
         mgr = self.gridmanager
         fileManager = self.fileManager
+        if fileManager.first_run: return
         selected_option = self.current_view.get() if selected_option == None else selected_option
 
         if selected_option == "Unassigned":
-            list_to_display = mgr.unassigned
+            if not self.prediction.get():
+                list_to_display = mgr.unassigned
+            else:
+                imagefiles = [x for x in self.fileManager.imagelist if x.pred == None or self.last_model != self.model_path]
+                imagefiles.extend([x.obj for x in mgr.unassigned if x.obj.pred == None or self.last_model != self.model_path])
+                if imagefiles:
+                    self.model_infer(self.model_path, imagefiles)
+                else:
+                    self.display_order.set("Confidence")
+                    self.sort_imagelist()
+                return
         elif selected_option == "Assigned":
             list_to_display = mgr.assigned
         elif selected_option == "Moved":
             list_to_display = mgr.moved
-        elif selected_option == "Animated":
-            imagefiles = [x for x in self.fileManager.imagelist if x.pred == None or self.last_model != self.model_path]
-            imagefiles.extend([x.obj for x in mgr.unassigned if x.obj.pred == None or self.last_model != self.model_path])
-            self.sort_imagelist()
-            self.gridmanager.change_view([])
-            self.fileManager.navigator.view_change()
-            to_load = self.squares_per_page_intvar.get() - len(self.gridmanager.displayedlist)
-            left = len(self.fileManager.imagelist)
-            items = min(to_load, left)
-            if items > 0: self.gridmanager.load_more(amount=items)
-            return
-        elif selected_option == "Predictions":            
-            imagefiles = [x for x in self.fileManager.imagelist if x.pred == None or self.last_model != self.model_path]
-            imagefiles.extend([x.obj for x in mgr.unassigned if x.obj.pred == None or self.last_model != self.model_path])
-            if imagefiles:
-                self.model_infer(self.model_path, imagefiles)
-            else:
-                self.display_order.set("Confidence")
-                self.sort_imagelist()
-            return
 
         mgr.change_view(list_to_display)
         fileManager.navigator.view_change()
@@ -865,7 +962,7 @@ Show Predictions:
     def displayimage(self, obj):
         "Display image in viewer"
         
-
+        self.displayed_obj = obj
         if self.dock_view.get(): # Dock
             if not self.Image_frame:
                 
@@ -882,9 +979,11 @@ Show Predictions:
         else: # Window
             if not self.second_window_viewer:                    
                 self.second_window_viewer = Application(savedata=self.viewer_prefs, gui=self)
+                self.second_window_viewer.app2.set_inclusion(self.fileManager.ddp)
                 #self.loader = AsyncImageLoader(self.second_window_viewer.set_image)
             self.second_window_viewer.master.lift()
             self.second_window_viewer.set_image(None if obj == None else obj.path, obj=obj)
+            #self.after_idle(self.second_window_viewer.master.focus)
             #self.loader.request_load(None if obj is None else obj.path, obj)
 
         self.focused_on_secondwindow = True
@@ -925,7 +1024,8 @@ Show Predictions:
         filemanager.thumbs.stop_background_worker()
         animate.running.clear()
 
-        if self.second_window_viewer: self.second_window_viewer.window_close()
+        if self.second_window_viewer: 
+            self.second_window_viewer.window_close()
         if hasattr(dest_viewer, "destwindow"): dest_viewer.close_window()
         if self.Image_frame: self.Image_frame.save_json()
         filemanager.saveprefs(self)
@@ -1022,7 +1122,7 @@ Show Predictions:
             cmd = [
                 python_exe, script,
                 "--data", self.fileManager.train_dir,
-                "--epochs", str(40),
+                "--epochs", str(100),
                 "--name", "latest_model"
             ]
 
@@ -1088,7 +1188,7 @@ Show Predictions:
             cmd = [
                 python_exe, script,
                 "--data", self.fileManager.train_dir,
-                "--epochs", str(40),
+                "--epochs", str(100),
                 "--name", name
             ]
             
@@ -1138,7 +1238,7 @@ Show Predictions:
                 print(f"  Subfolder: {abs_root}")
 
                 for file in files:
-                    if file.lower().endswith(("png", "gif", "jpg", "jpeg", "bmp", "pcx", "tiff", "webp", "psd", "jfif", "mp4", "webm")):
+                    if file.lower().endswith(("png", "gif", "jpg", "jpeg", "bmp", "pcx", "tiff", "webp", "psd", "jfif", "mp4", "mkv", "m4v", "mov", "webm")):
                         data[label].append((os.path.join(root, file)))
         return data
         
@@ -1348,7 +1448,7 @@ class GridManager:
         gui = self.gui
         filelist = self.fileManager.imagelist
 
-        if gui.current_view.get() == "Unassigned" or gui.current_view.get() == "Animated" or self.gui.current_view.get() == "Predictions": pass
+        if gui.current_view.get() == "Unassigned": pass
         else: return
         
         amount = amount if amount else gui.squares_per_page_intvar.get()
@@ -1363,9 +1463,12 @@ class GridManager:
 
         generated = []
         for obj in sublist:
-            gridsquare = self.makegridsquare(gui.imagegrid, obj)
-            generated.append(gridsquare)
-        if self.gui.current_view.get() == "Predictions":
+            if not obj.gridsquare:
+                gridsquare = self.makegridsquare(gui.imagegrid, obj)
+                generated.append(gridsquare)
+            else:
+                generated.append(obj.gridsquare)
+        if self.gui.prediction.get():
             for x in generated:
                 if x.obj.conf:
                     percentage = f"{x.obj.conf:.2f}"
@@ -1440,7 +1543,7 @@ class GridManager:
             order = "insert"
         
         if insert:
-            order = insert
+            order = insert[0]
 
         for sqr in squares:
             gui.imagegrid.window_create(
@@ -1448,7 +1551,7 @@ class GridManager:
             sqr.obj.frame = sqr
         if insert:
             for x in squares:
-                self.displayedlist.insert(0, x)
+                self.displayedlist.insert(insert[1], x)
         else:
             self.displayedlist.extend(squares)
         
@@ -1491,7 +1594,7 @@ class GridManager:
     
     def move_to_assigned(self, marked):
         gui = self.gui
-        if gui.current_view.get() in ("Unassigned", "Animated", "Predictions"):
+        if gui.current_view.get() == "Unassigned":
             handled_list = self.unassigned
         elif gui.current_view.get() == "Moved":
             handled_list = self.moved
