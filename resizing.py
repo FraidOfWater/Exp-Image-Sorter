@@ -10,7 +10,7 @@ vipsbin = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vips-dev-8.1
 os.environ['PATH'] = os.pathsep.join((vipsbin, os.environ['PATH']))
 os.add_dll_directory(vipsbin)
 import pyvips
-
+import gc
 class AsyncImageLoader:
     def __init__(self, viewer):
         self.viewer = viewer
@@ -402,39 +402,57 @@ class Application(tk.Frame):
             self.app.master.update()
 
         def destroy(self, threaded=True):
-            #self.player.set_hwnd(0)
-            self.player.stop()
-            self.player.release()
-            if getattr(self, "events", None):
-                self.events.event_detach(vlc.EventType.MediaPlayerPlaying)
-                self.events.event_detach(vlc.EventType.MediaPlayerEndReached)
+            import gc
+            try:
+                # Detach events early
+                if getattr(self, "events", None):
+                    self.events.event_detach(vlc.EventType.MediaPlayerPlaying)
+                    self.events.event_detach(vlc.EventType.MediaPlayerEndReached)
+                    self.events = None
 
-            if getattr(self, "media_list_player", None):
-                self.media_list_player.stop()
-                self.media_list_player.release()
-                self.media_list_player = None
+                # Stop media list player first
+                if getattr(self, "media_list_player", None):
+                    self.media_list_player.stop()
+                    self.media_list_player.release()
+                    self.media_list_player = None
 
-            if getattr(self, "media", None):
-                self.media = None
+                # Stop the main player synchronously
+                if getattr(self, "player", None):
+                    try:
+                        self.player.set_hwnd(0)  # ensure handle cleared before stopping
+                    except Exception:
+                        pass
 
+                    # Stop and release directly
+                    self.player.stop()
+                    self.player.release()
+                    self.player = None
 
-            if getattr(self, "media_list", None):
-                self.media_list.release()
-                self.media_list = None
+                # Release media objects
+                if getattr(self, "media_list", None):
+                    self.media_list.release()
+                    self.media_list = None
 
-            self.events = None
+                if getattr(self, "media", None):
+                    self.media.release()
+                    self.media = None
 
-            if self.video_frame:
+                # Give VLC time to fully release resources
+                self.app.after(100, lambda: self._finalize_destroy())
+
+            except Exception as e:
+                print("Destroy error:", e)
+                gc.collect()
+
+        def _finalize_destroy(self):
+            # now safe to destroy GUI widgets
+            if getattr(self, "video_frame", None):
                 self.video_frame.grid_forget()
                 self.video_frame.destroy()
-            if self.canvas:
+            if getattr(self, "canvas", None):
                 self.canvas.destroy()
-
-            self.player = None
-            self.media_list_player = None
-            self.media_list = None
-            self.media = None
-            self.events = None
+            import gc
+            gc.collect()
 
         def hide(self, event=None):
             try:
@@ -847,7 +865,7 @@ class Application(tk.Frame):
 
         self.filenames = []
         temp = filedialog.askopenfilenames(
-            filetypes=[("Image files", "*.png *.jpg *.jpeg *.bmp *.pcx *.tiff *.psd *.jfif *.gif *.webp *.webm *.mp4 *.avif")]
+            filetypes=[("Image files", "*.png *.jpg *.jpeg *.bmp *.pcx *.tiff *.psd *.jfif *.gif *.webp *.webm *.mp4 *.mkv *.mov *.m4v *.avif")]
         )
         if isinstance(temp, tuple): self.filenames = list(temp)
         if not self.filenames:
@@ -869,7 +887,7 @@ class Application(tk.Frame):
         self.filenames = list(x for x in file_list if x.endswith((  ".png", ".jpg", ".jpeg",
                                                                                             ".bmp", ".pcx", ".tiff",
                                                                                             ".psd", ".jfif", ".gif",
-                                                                                            ".webp", ".webm", ".mp4", ".avif")))
+                                                                                            ".webp", ".webm", ".mp4", ".mkv", ".m4v", "mov", ".avif")))
         if not self.filenames:
             return
         self.filename_index = 0
@@ -1073,6 +1091,8 @@ class Application(tk.Frame):
 
     def window_close(self, e=None):
         from send2trash import send2trash
+        if self.gui:
+            self.gui.displayed_obj = None
         self.save_json()
         for x in self.undo:
             path = os.path.normpath(x[0])
@@ -1191,12 +1211,12 @@ class Application(tk.Frame):
         """Runs in a background thread, purely for decoding."""
         try:
             from PIL import Image
-            img = Image.open(path)
-            # Optional: disable full load for very large files to avoid memory spikes
-            img.draft("RGBA", (4096, 4096))
-            if img.mode != "RGBA":
-                img = img.convert("RGBA")
-            return img
+            with Image.open(path) as img:
+                # Optional: disable full load for very large files to avoid memory spikes
+                #img.draft("RGBA", (4096, 4096))
+                if img.mode != "RGBA":
+                    img = img.convert("RGBA")
+                return img
         except Exception as e:
             print("Background load error:", e)
             return None
@@ -1230,13 +1250,14 @@ class Application(tk.Frame):
         
     "Display"
     def _set_info(self, filename, ext, is_video=False):
+        
         if not is_video:
             x, y = (self.pil_image.width, self.pil_image.height)
+            return (x, y)
         self.master.winfo_toplevel().title(f"{self.title} - {os.path.basename(filename)} - {self.filename_index+1}/{len(self.filenames)}")
 
         size_mb = os.path.getsize(filename) / (1024*1024)
         self.label_image_size_var.set(f"{size_mb:^5.1f}MB")
-
         self.label_image_format_var.set(f"{ext.upper() if is_video else self.pil_image.format:^4}:")
         self.label_image_mode_var.set(f"{ext.upper() if is_video else self.pil_image.mode:^4}")
         
@@ -1299,24 +1320,25 @@ class Application(tk.Frame):
       
     def _set_picture(self, filename):
         "Close the handle and load full copy to memory."
-        
         self.zoom_fit(self.pil_image)
+        self.pil_image.close()
         self.a = False
 
         self.loader.request_load(filename)
         
-    def _set_animation(self, obj=None):
-        self.is_gif = True
+    def _set_animation(self, filename, obj=None):
         self.zoom_fit(self.pil_image)
         self.pil_image.close()
-        self.open_thread = Thread(target=self._preload_frames, args=(self.filename,), name="(Thread) Viewer frame preload", daemon=True)
-        self.open_thread.start()
+        self.a = False
 
-        self.timer1 = perf_counter()
-        
-
-        #self._preload_frames(self.pil_image)
-        #self._update_frame()
+        try:
+            self.pil_image.seek(1)
+            self.is_gif = True
+            self.open_thread = Thread(target=self._preload_frames, args=(self.filename,), name="(Thread) Viewer frame preload", daemon=True)
+            self.open_thread.start()
+            self.timer1 = perf_counter()
+        except:
+            self.loader.request_load(filename)
         
     def _set_video(self):
         def close_vlc():
@@ -1360,10 +1382,10 @@ class Application(tk.Frame):
         if not self.reset(filename): return # returns False if we cant clear the canvas or cant set the image. (unsupported format)
         
         self.filename = filename
-        self.ext = filename.rsplit(".", 1)[1]
-        
+        self.ext = filename.rsplit(".", 1)[1].lower()
+        self.obj = obj
         thumbpath = None if not obj or self.thumbnail_var.get().lower() == "no" else obj.thumbnail
-        if self.ext in ("mp4", "webm"): # is video
+        if self.ext in ("mp4", "webm", "mkv", "m4v", "mov"): # is video
             if thumbpath:
                 self._set_thumbnail(thumbpath=thumbpath)
             else:
@@ -1383,17 +1405,15 @@ class Application(tk.Frame):
         if self.ext in ("gif", "webp"): # is animation
             if thumbpath:
                 self._set_thumbnail(thumbpath=thumbpath)
-            self._set_animation(obj)
-            self.a = False
+
+            self._set_animation(filename, obj)
         else: # is picture
-            #self._set_picture(obj)
             if thumbpath:
                 self._set_thumbnail(thumbpath=thumbpath)
 
-            self.zoom_fit(self.pil_image)
-            self.a = False
-
-            self.loader.request_load(filename)
+            self._set_picture(obj)
+            """self.loader.request_load(filename)"""
+        
 
     def reset(self, filename):
         def close_vlc():
@@ -1415,6 +1435,7 @@ class Application(tk.Frame):
                     self.divider.pack(expand=False, fill=tk.X)
                     self.frame_statusbar.pack(expand=False, fill=tk.X)
 
+        self.obj = None
         for call in self.draw_queue:
             self.after_cancel(call)
         self.draw_queue.clear()
@@ -1460,9 +1481,9 @@ class Application(tk.Frame):
             pass
         else:
             ext = filename.rsplit(".", 1)[1]
-            supported_formats = {"png", "gif", "jpg", "jpeg", "bmp", "pcx", "tiff", "webp", "psd", "jfif", "avif", "mp4", "webm"}
+            supported_formats = {"png", "gif", "jpg", "jpeg", "bmp", "pcx", "tiff", "webp", "psd", "jfif", "avif", "mp4", "mkv", "m4v", "mov", "webm"}
             if ext in supported_formats:
-                if ext not in ("mp4", "webm"):
+                if ext not in ("mp4", "webm", "mkv", "m4v", "mov"):
                     #self.update()
                     close_vlc()
                     #self.update()
@@ -1508,7 +1529,6 @@ class Application(tk.Frame):
 
         except EOFError: 
             if i == 1:
-                handle.seek(0)
                 self.after(0, fallback)
                 print("Error in _preload_frames (eoferror), falling back as a static image.")
         
@@ -1669,6 +1689,7 @@ class Application(tk.Frame):
         if self.image_id: self.canvas.itemconfig(self.image_id, image=imagetk)
         else: self.image_id = self.canvas.create_image(0, 0, anchor='nw', image=imagetk, tags="_IMG")
         self.image = imagetk
+        self.app2.bring_forth()
         
 
         if self.gui and drag: 
