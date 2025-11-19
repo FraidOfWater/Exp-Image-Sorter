@@ -25,6 +25,7 @@ class ImageViewer:
         self.search_minimized = False
         self.locked_search_index = 0  # remembers selected index when minimized
         self.search_memory = {}
+        self.recent_searches = []
         self.search_active = False
         self.search_text = ""
         self.search_results = []
@@ -42,7 +43,7 @@ class ImageViewer:
         # remember search box position/size
         self.search_box_pos = [30, 30]
         self.search_box_size = [340, 60]
-
+        
         # dragging / resizing
         self.dragging = False
         self.resizing = False
@@ -68,7 +69,7 @@ class ImageViewer:
     # ----------------------------
     def display_instructions(self):
         self.canvas.delete("sorter")
-        msg = "Press Ctrl+F to select inclusion folder.\nCtrl+E for exclusion folder."
+        msg = "Press Spacebar to activate search.\nType to search.\n↑, ↓ to Navigate.\nEnter to Confirm."
         self.canvas.create_text(
             self.root.winfo_width()//2,
             self.root.winfo_height()//2,
@@ -209,6 +210,9 @@ class ImageViewer:
             print(f"Selected folder: {full_path}")
             if hasattr(self.root.winfo_toplevel(), "fileManager"):
                 self.root.winfo_toplevel().fileManager.setDestination({"path": full_path, "color": "#FFFFFF"}, caller="sorter")
+            elif hasattr(self.root.winfo_toplevel(), "master") and hasattr(self.root.winfo_toplevel().master, "fileManager"):
+                self.root.winfo_toplevel().master.fileManager.setDestination({"path": full_path, "color": "#FFFFFF"}, caller="sorter")
+            
 
         # space: open search / update search
         # keypress: update search / open search
@@ -269,9 +273,22 @@ class ImageViewer:
                     partial = self.search_text.lower().replace("/", "\\")
                     full = name.lower().replace("/", "\\")
 
-                    self.search_memory[partial] = (name, self.selected_index)
+                    # User typed one word, so match the whole word to that upward from last so flut and we select fluttershy will go flit-fluttershy to that, but under not.
+                    # so its basically if flut in q, index. 
+                    # flut, flutt, flutte
+                    # 0     1       0
+                    to_remove = []
+                    for i, x in enumerate(self.search_memory.copy()):
+                        self.search_memory[partial[:i+1]] = (name, self.selected_index)
                     self.search_memory[full] = (name, self.selected_index)
                     rel = os.path.join(self.include_folder, rel, name)
+                    for i, x in enumerate(self.recent_searches):
+                        if rel == x:
+                            to_remove.append(i)
+                            break
+                    for i in to_remove:
+                        del self.recent_searches[i]
+                    self.recent_searches.append(rel) # rel, name combined so we get right box here...
                     if rel not in self.hotkey_memory:
                         self.hotkey_memory.append(rel)
                         if self.hotkey_active:
@@ -303,7 +320,7 @@ class ImageViewer:
                 elif len(e.char) == 1 and e.char.isprintable():
                     self.search_text += e.char
                     self.update_search()
-
+            
     def start_search(self, first_char):
         self.search_active = True
         self.search_text = first_char
@@ -334,34 +351,65 @@ class ImageViewer:
         q = self.search_text.lower().replace("/", "\\")
         qs = q.split(" ")
 
-        # if all true, if / in relative and if not in basename
-        self.search_results = []
-        for n, r in self.cached_dirs:
-            r = os.path.dirname(r)
-            if all((("\\" in q or "/" in q) and q in r.lower()) or (("\\" not in q or "/" not in q) and q in n.lower()) for q in qs): # rel
-                self.search_results.append((n, r))
+        if q == "":
+            self.search_results = self.cached_dirs
+            # remove from list the cached. add to start of list.
+            rem = []
+            for i, x in enumerate(self.search_results):
+                name, rel = x
+                path = os.path.join(self.include_folder, rel, name)
+                if path in self.recent_searches:
+                    rem.append(i)
+            for i in rem:
+                del self.search_results[i]
+            
+            self.search_results = [(os.path.basename(x), os.path.dirname(x)) for x in reversed(self.recent_searches)] + self.search_results
+        else:
+            # if all true, if / in relative and if not in basename
+            self.search_results = []
+            for n, r in self.cached_dirs:
+                r = os.path.dirname(r)
+                if all((("\\" in q or "/" in q) and q.replace("/", "").replace("\\", "") in r.lower()) or (("\\" not in q or "/" not in q) and q in n.lower()) for q in qs): # rel
+                    self.search_results.append((n, r))
 
-        self.search_results.sort(key=lambda x: (len(x[0]), x[0])) # sort based on name length and alphabetically.
-        self.search_results.sort(key=lambda x: len(x[1].split("\\"))) # sort based on path length
+            self.search_results.sort(key=lambda x: (len(x[0]), x[0])) # sort based on name length and alphabetically.
+            self.search_results.sort(key=lambda x: len(x[1].split("\\"))) # sort based on path length
+            
+            # get partial path from , need to assign a, ab, abc, abcd! use current search as key, get complete nam
+                    # restore remembered index if available
+            # ignore for multi variable searches
+            idx = None
+            if self.search_results and qs[0] and len(qs) == 1:
+                query_length = len(q)
+                for x in sorted(list(self.search_memory.keys()), key=lambda x: len(x)-query_length): # find closest match.
+                    if x.startswith(q):
+                        idx = self.search_memory[x][1]
+                        if idx < len(self.search_results):
+                            self.selected_index = idx
+                        else:
+                            self.selected_index = 0
+                        break
+            if self.selected_index > len(self.search_results) - 1:
+                self.selected_index = 0
+                self.scroll_offset = 0
 
-        os.path.split
+            if idx != None:
+                key = None
+                for x in self.search_memory:
+                    if x.startswith(qs[0]):
+                        key = x
+                        break
+                if key != None:
+                    tup = self.search_memory[key] # looks if partial has index, full name pair.
+                    if tup:  # full name
+                        name, i = tup
+                        for i, x in enumerate(self.search_results): # get index where search is, then remove it from index and add it to cached index
+                            if x[0] == name:
+                                del self.search_results[i]
+                                self.search_results.insert(idx, x)
+                                break
 
-        # restore remembered index if available
-        # ignore for multi variable searches
-        if self.search_results and qs[0] and len(qs) == 1:
-            query_length = len(q)
-            for x in sorted(list(self.search_memory.keys()), key=lambda x: len(x)-query_length): # find closest match.
-                if q in x:
-                    idx = self.search_memory[x][1]
-                    if idx < len(self.search_results):
-                        self.selected_index = idx
-                    else:
-                        self.selected_index = 0
-                    break
-                else:
-                    if self.selected_index > len(self.search_results) - 1:
-                        self.selected_index = 0
-                        self.scroll_offset = 0
+
 
         self.update_search_box()
     
@@ -393,6 +441,13 @@ class ImageViewer:
         if not self.search_ui:
             self.create_search_box()
             self.update_search_box()
+    
+    def bring_forth(self):
+        if self.search_ui:
+            self.canvas.lift(self.search_ui["box"])
+            self.canvas.lift(self.search_ui["text"])
+            for x in self.search_ui["results"]:
+                self.canvas.lift(x)
 
     def update_search_box(self):
         if not self.search_ui:
