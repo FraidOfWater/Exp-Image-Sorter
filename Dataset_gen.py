@@ -47,6 +47,8 @@ class Dataset_gen:
                 futures.append(executor.submit(self.filemanager.thumbs.gen_thumb, obj, size=self.thumbsize, cache_dir=cache_dir, user="train", mode="as_is")) #name is for filename truncation, done along the thumbnail.
             for f in as_completed(futures):
                 i += 1
+                if i % 100 == 0:
+                    print(i)
                 self.filemanager.gui.train_status_var.set(str(i))
 
         ids = set(x.id for x in files1)
