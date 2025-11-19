@@ -583,6 +583,7 @@ class FolderExplorer(ttk.Frame):
 
     def on_right_click(self, event, btn=None):
         ignored_events = ("ttk::panedwindow", "tk_optionMenu", 'entry', "ttk::entry", "ttk::button", "ttk::frame", "ttk::checkbutton", "scrollbar")
+        if isinstance(event.widget, str): return # buttonpress event
         if event.widget._w.startswith(self.canvas._w): self.focus()
         
         master = event.widget.winfo_toplevel()
