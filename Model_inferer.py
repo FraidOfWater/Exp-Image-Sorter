@@ -7,18 +7,29 @@ from time import perf_counter
 import concurrent.futures
 
 def load_thumbs_parallel(images, thumbsize, gen_thumb):
-    thumbs = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, 4), thread_name_prefix="gen_for_model") as executor:
-        results = executor.map(
-            lambda obj: gen_thumb(obj, size=thumbsize, cache_dir=None, user="classify", mode="as_is"),
-            images
-        )
-        for result in results:
+    """Parallel thumbnail generation with deterministic order."""
+    thumbs = [None] * len(images)
+    objs = [None] * len(images)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="gen_for_model") as executor:
+        futures = {executor.submit(gen_thumb, obj, size=thumbsize, cache_dir=None, user="classify", mode="as_is"): i
+                   for i, obj in enumerate(images)}
+        for f in concurrent.futures.as_completed(futures):
+            i = futures[f]
+            result = f.result()
             if isinstance(result, tuple):
                 img, obj = result
                 if img is not None and obj is not None:
-                    thumbs.append(img)
-    return thumbs
+                    thumbs[i] = img
+                    objs[i] = obj
+
+    # Filter out failed loads while preserving order
+    valid = [(img, obj) for img, obj in zip(thumbs, objs) if img is not None and obj is not None]
+    if not valid:
+        return [], []
+    thumbs, objs = zip(*valid)
+    return list(thumbs), list(objs)
+
 
 class ImagePathDataset(Dataset):
     def __init__(self, images, thumbs, transform=None):
@@ -54,7 +65,7 @@ class Model_inferer:
         MODEL_PATH = self.model_path
         DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-
+        images = sorted(images, key=lambda x: x.name)
 
         model = YOLO(MODEL_PATH)
         model.to(DEVICE)
@@ -85,7 +96,7 @@ class Model_inferer:
             transforms.ToTensor()
         ])"""
         
-        thumbs = load_thumbs_parallel(images, self.thumbsize, self.gen_thumb)
+        thumbs, objs = load_thumbs_parallel(images, self.thumbsize, self.gen_thumb)
         dataset = ImagePathDataset(images=images, thumbs=thumbs, transform=transform)
         loader = DataLoader(dataset, batch_size=32, shuffle=False)
 
@@ -94,9 +105,11 @@ class Model_inferer:
         import os
 
         SAVE_TRANSFORMED = False
-        SAVE_DIR = "center_crop"
+        if SAVE_TRANSFORMED:
+            SAVE_DIR = "center_crop"
+            os.makedirs(SAVE_DIR, exist_ok=True)
         to_pil = ToPILImage()
-        os.makedirs(SAVE_DIR, exist_ok=True)
+        
         from PIL import ImageDraw
         with torch.no_grad():
             for batch_i, (images, paths, ids) in enumerate(loader):
@@ -133,4 +146,5 @@ class Model_inferer:
             imagefile.conf = res["conf"]
             imagefile.pred = self.fm.model_classes.get(res["pred"], res["pred"])
         self.fm.gui.display_order.set("Confidence")
+        self.fm.reorder_as_nearest(images, optimization=(thumbs, objs))
         self.fm.gui.after_idle(self.fm.gui.sort_imagelist)
