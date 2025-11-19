@@ -9,42 +9,49 @@ from concurrent.futures import ThreadPoolExecutor
 from gui import GUIManager
 from navigator import Navigator
 
-# rework
-    # consider old colors from customgrid. (and the button style)
-    # consider customgrid vlc controls. (style)
-    # use customgrid instead of tktext.
+# new folders dont updat in sorter search.
+# bugs . image loads when any image is loaded
+# bugs . undo doesnt add correctly to grid, wont updat in nav, hotkeys wont stay in the filename in folder view, delete doesnt work sometimes?
+#testing
+    # lists are ordered correctly? like moved? Show animated is broken.
+    # test if predictions, training works for gpu only and if they are gpu now or only cpu?
     # sessions: do the work, what should be cached, saved. Autosave?
     # investigate single-image-mode
-    # all resizing options in main menu bar.
-    # get rid of menu bar, have a setting window
+    # all viewer options in menubar
+    # get rid of menu bar, have a setting window (via hotkey)
     # compare new and old vlc implementation
-    # old ui is so good?
-    # see if old colors is better (color gen)
-    # maybe remove arrows from the folder buttons , the font has to change at least.
     # themes doesnt work. also make purple theme?
-#testing
-    # should test vlc as we removed updates.
-    # moved is in reverse order? # test, may be fixed
-    # make sure predictions works w cpu and otherwise, and setdest works correctly for it
-    # test sorting system.
-    # are anim loading colors correct? do dests get corect colors, does this show in moved, assigned?
-    # prediction view colors, and assigning by RETURN key.
 
-# tweaks
+# refactor rework:
+    # should make the new featuers into ONE module
+
+# sorter:
+    # minimized out state, space?
+    # the search view has some bugs, index not where it should, the memory should remember at every interaction not every entert
     # sorter should add scroll offset to where it knows index is
-    # delete scroll functionality from folders? (caps lock confusion)
+    # delete scroll functionality from folders? (caps lock confusion) or like red outline for it to say its active.
     # resizing signature: remove unused stuff just use a config file...
-    # resizing no "fast" or "quality" but "sharp" and "smooth"
-    # sort stalls or loading icons:
-    # scroll doesnt work for folder view?
+
+# binding rework
+    # move bindings to central
+
+# canvas rework
+    # use customgrid instead of tktext.
+    # sometimes the navigator spasms out at the end of the list.
+    # ctrlz, delete dont work on predictions, ctrl z:d doesnt add to the grid correctly, cant be interacted with?
+    # better exclusions viewer ( canvas)
+    # are anim loading colors correct? do dests get corect colors, does this show in moved, assigned?
+
+# ui rework
+    # maybe remove arrows from the folder buttons , the font has to change at least.
+    # see if old colors is better (color gen)
     # make advanced do useful stuff
-
-# window responsiveness:
- # grid redraws abysmal
- # folder frame has no color so resizing looks laggy.
-
-# memory leaks:
-    # no apparent.
+    # scroll doesnt work for folder view?
+    # sorting should display a load icon for long operations.
+    # tooltips.
+    # consider old colors from customgrid. (and the button style)
+    # consider customgrid vlc controls. (style)
+    # old ui is so good?
 
 class Imagefile:
     ANIMATION = "ANIMATION"
@@ -59,11 +66,12 @@ class Imagefile:
         self.dest = ""
         self.thumbnail = None           # Path to the cached thumbnail in data directory
         self.moved = False              # Used to track if img is sorted
-        self.ext = ext
+        self.ext = ext.lower()
         self.color = None # dest color
         self.embed = None
         self.color_embed = None
         self.predicted_path = None
+        self.dimensions = (-2, 0.0)
         "Hash"
         self.id = None              # Hash of img name, mod_time and file_size. This is faster to hash than whole file binary stream.
         self.mod_time = None        # Used by sortimages. Used to hash id.
@@ -136,7 +144,7 @@ class Imagefile:
 class SortImages:
     
     THUMB_FORMAT = ".webp"
-    supported_formats = {"png", "gif", "jpg", "jpeg", "bmp", "pcx", "tiff", "webp", "psd", "jfif", "mp4", "webm", "avif"}
+    supported_formats = {"png", "gif", "jpg", "jpeg", "bmp", "pcx", "tiff", "webp", "psd", "jfif", "mp4", "mkv", "mov", "m4v", "webm", "avif"}
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     data_dir = os.path.join(script_dir, "data")
@@ -168,7 +176,7 @@ class SortImages:
         "Sortimages setups the program. It creates imagefiles from the folder given, loads and saves prefs, loads and saves sessions, and starts up the gui and other modules."
         
         self.jthemes = self.load_themes()
-
+        self.first_run = True
         "Timekeeping and throttling"
         self.timer = Timer()        # Time since creation.
 
@@ -261,7 +269,6 @@ class SortImages:
             },
             "technical": {
                 "quick_preview_filter": gui.filter_mode,
-                "quick_preview_size_threshold": gui.quick_preview_size_threshold,
                 "threads": self.threads,
                 "max_concurrent_frames": self.max_concurrent_frames,
                 "autosave_session":self.autosave,
@@ -416,7 +423,7 @@ class SortImages:
         gui.winfo_toplevel().title(f"EXP: {gui.images_sorted_strvar.get()}")
         
         self.gui.update()
-        self.navigator.first()
+        #self.navigator.first()
 
     def load_themes(self):
         try:
@@ -464,17 +471,30 @@ class SortImages:
         print(self.timer.stop())
 
     def setDestination(self, dest, caller=None):
-        if hasattr(caller, "keysym") and caller.keysym == "Delete" and self.gui.Image_frame.app2.search_minimized: pass
-        elif self.gui.Image_frame and self.gui.Image_frame.app2.search_active and hasattr(caller, "type") and caller.type != tk.EventType.ButtonPress: # if viewer displays something and search is active, ignore all hotkeypresses.
-            return
+        if caller:
+            f = self.gui.focus_get()
+            if hasattr(f, "widgetName") and f.widgetName == "entry": return
+            viewer_open = self.gui.Image_frame or self.gui.second_window_viewer
+            search_open = False if not viewer_open else viewer_open.app2.search_active
+
+            if caller == "autosort" and search_open: return
+            if caller == "sorter" or caller == "autosort": # Pressing enter while search is active or we are in prediction view and we pressed enter key to auto assign.
+                print("SORTER CALL")
+                pass
+            elif caller.type == tk.EventType.ButtonPress: # clicking on a button
+                pass
+            elif isinstance(caller.widget, tk.Entry): # writing in an entry box.
+                return
+            elif caller.type == tk.EventType.KeyPress: # pressing a hotkey
+                if caller.keysym == "Delete":
+                    pass
+                elif search_open: 
+                    return
+
+        # if viewer open and search box active, ignore all keypresses
+        # if viewer open and minimized, ignore all keypresses except "Delete"
         "Ignored"
         if True:
-            "Ignore calls from certain widgets"
-            if caller and caller != "sorter" and isinstance(caller.widget, tk.Entry):
-                #print("came from entry")
-                return
-            #if caller == None: print("Button")
-            #else: print("Key")
             "Ignore calls if they are spammed"
             current_time = time.perf_counter()
             if current_time - self.last_call_time < 0.1: return
@@ -556,7 +576,7 @@ class SortImages:
         gridmanager.move_to_assigned(marked) # dont activate when
 
         # Load more
-        if gui.auto_load and (gui.current_view.get() == "Unassigned" or gui.current_view.get() == "Predictions") and gui.squares_per_page_intvar.get() > len(gridmanager.displayedlist): 
+        if gui.auto_load and (gui.current_view.get() == "Unassigned") and gui.squares_per_page_intvar.get() > len(gridmanager.displayedlist): 
             to_load = gui.squares_per_page_intvar.get() - len(gridmanager.displayedlist)
             left = len(self.imagelist)
             items = min(to_load, left)
@@ -575,13 +595,30 @@ class SortImages:
         gui.images_left_stats_strvar.set(
             f"Left: {len(gridmanager.assigned)}/{len(gridmanager.gridsquarelist)-len(gridmanager.assigned)-len(gridmanager.moved)}/{len(self.imagelist)}")
     
-    def validate(self): # new session
+    def validate(self, btn=None): # new session
+        if btn and self.first_run: 
+            return
+        else:
+            self.first_run = False
         gui = self.gui
         timer = self.timer; timer.start()
         self.sdp = gui.source_entry_field.get()
         self.ddp = gui.destination_entry_field.get()
         samepath = (self.sdp == self.ddp)
 
+        if os.path.isdir(self.sdp):
+            pass
+        else:
+            gui.source_entry_field.delete(0, tk.END)
+            gui.source_entry_field.insert(0, "ERROR INVALID PATH")
+            
+            
+        if os.path.isdir(self.ddp):
+            pass
+        else:
+            gui.destination_entry_field.delete(0, tk.END)
+            gui.destination_entry_field.insert(0, "ERROR INVALID PATH")
+        
         if os.path.isdir(self.sdp) and os.path.isdir(self.ddp):
             if not hasattr(self.gui, "folder_explorer"):
                 gui.guisetup()
@@ -604,14 +641,9 @@ class SortImages:
             self.imagelist = self.walk(self.sdp, samepath)
             timer.start()
             gui.gridmanager.load_more()
-        else:
-            gui.source_entry_field.delete(0, tk.END)
-            gui.destination_entry_field.delete(0, tk.END)
-            gui.source_entry_field.insert(0, "ERROR INVALID PATH")
-            gui.destination_entry_field.insert(0, "ERROR INVALID PATH")
         
         self.gui.update_idletasks()
-        self.navigator.first()
+        #self.navigator.first()
 
     def walk(self, src, samepath):
         imagelist = []
@@ -629,7 +661,7 @@ class SortImages:
             if samepath: break
 
         from operator import attrgetter
-        if self.gui.display_order.get().lower() == "latest":
+        if self.gui.display_order.get().lower() == "date":
             for obj in imagelist:
                 obj.mod_time = os.path.getmtime(obj.path)
             imagelist.sort(key=attrgetter("mod_time"), reverse=False) # 65 ######## false
@@ -646,32 +678,66 @@ class SortImages:
                 if obj.frame: obj.frame.checked.set(False)
                 if obj.destframe: obj.destframe.checked.set(False)
 
-    def reorder_as_nearest(self, imagefiles):
+    def reorder_as_nearest(self, imagefiles, optimization=False):
         import numpy as np
         import concurrent.futures
+        import time
         TARGET_SIZE = (224, 224)
         BATCH_SIZE = 64
-        SAVE_PATH = r"C:\Users\4f736\Downloads\sort\results"
+        #SAVE_PATH = r"C:\Users\4f736\Downloads\sort\results"
         PRESET = 1 # 2
-        os.makedirs(SAVE_PATH, exist_ok=True)
-
+        #os.makedirs(SAVE_PATH, exist_ok=True)
+        start = time.perf_counter()
         TARGET_SIZE = 224  # used by pyvips.thumbnail()
+
         def load_images_threadsafe(imagefiles):
             """Load, resize, and pad images with black bars to TARGET_SIZE using PyVips (multi-threaded)."""
-            images, objs = [], []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=max(1,self.threads-1), thread_name_prefix="mobilenet_thumbs") as executor:
-                futures = [executor.submit(self.thumbs.gen_thumb, obj, size=TARGET_SIZE, cache_dir=None, user="mobilenet", mode="letterbox") for obj in imagefiles]
+            images = [None] * len(imagefiles)
+            objs = [None] * len(imagefiles)
+
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=max(1, self.threads - 1), thread_name_prefix="mobilenet_thumbs"
+            ) as executor:
+                futures = {executor.submit(self.thumbs.gen_thumb, obj, size=TARGET_SIZE, cache_dir=None, user="mobilenet", mode="letterbox"): i
+                        for i, obj in enumerate(imagefiles)}
+
                 for f in concurrent.futures.as_completed(futures):
+                    i = futures[f]
                     result = f.result()
-                    if isinstance(result, tuple): 
+                    if isinstance(result, tuple):
                         img, obj = result
                         if img is not None and obj is not None:
-                            images.append(img)
-                            objs.append(obj)
+                            images[i] = img
+                            objs[i] = obj
 
-            if not images: return np.empty((0, TARGET_SIZE, TARGET_SIZE, 3), dtype=np.uint8), []
-            return np.stack(images), objs
-        
+            # Filter out failed loads while preserving order
+            valid = [(img, obj) for img, obj in zip(images, objs) if img is not None and obj is not None]
+            if not valid:
+                return np.empty((0, TARGET_SIZE, TARGET_SIZE, 3), dtype=np.uint8), []
+            
+            images, objs = zip(*valid)
+            return np.stack(images), list(objs)
+
+        def letterbox(img, size):
+            w, h = img.size
+            new_im = Image.new("RGB", (size, size), (114, 114, 114))
+            left = (size - w) // 2
+            top = (size - h) // 2
+            new_im.paste(img, (left, top))
+            return new_im
+        def threaded_letterboxing(images):
+            thumbs = [None] * len(images)
+
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=max(1, self.threads - 1), thread_name_prefix="mobilenet_thumbs"
+            ) as executor:
+                futures = {executor.submit(letterbox, img, size=TARGET_SIZE): i for i, img in enumerate(images)}
+                for f in concurrent.futures.as_completed(futures):
+                    i = futures[f]
+                    thumbs[i] = f.result()
+
+            return thumbs
+
         def get_mobilenet_embeddings(images):
             """Compute MobileNet feature embeddings in batches."""
             import torch
@@ -790,20 +856,27 @@ class SortImages:
                             break
             return order
         
-        test = sorted(imagefiles, key=lambda x: x.name)
-        images, objs_to_encode = load_images_threadsafe(test)
+        if optimization:
+            images, objs_to_encode = optimization
+            images = threaded_letterboxing(images)
+            if not images: images, objs_to_encode = np.empty((0, TARGET_SIZE, TARGET_SIZE, 3), dtype=np.uint8), []
+            else:
+                images = np.stack(images)
+        else:
+            test = sorted(imagefiles, key=lambda x: x.name)
+            images, objs_to_encode = load_images_threadsafe(test)
         
         alpha = 0.7 if PRESET == 1 else 0.4
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1,self.threads-1), thread_name_prefix="mobilenet-colors") as executor:
-            dominant_colors = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, self.threads - 1), thread_name_prefix="mobilenet-colors") as executor:
             func = get_dominant_center_color if PRESET == 1 else get_median_center_color
-            futures = [executor.submit(func, img) for img in images]
+            futures = {executor.submit(func, img): i for i, img in enumerate(images)}
+            dominant_colors = [None] * len(images)
+
             for f in concurrent.futures.as_completed(futures):
-                dominant_color = f.result()
-                dominant_colors.append(dominant_color)
-                np.array(dominant_colors, dtype=np.float32)
-                np.array(dominant_colors, dtype=np.float32)
+                i = futures[f]
+                dominant_colors[i] = f.result()
+
             color_emb_new = np.array(dominant_colors, dtype=np.float32)
 
             for obj, col in zip(objs_to_encode, color_emb_new):
@@ -814,6 +887,11 @@ class SortImages:
                 for obj, emb in zip(objs_to_encode, embeddings_new):
                     obj.embed = np.asarray(emb, dtype=np.float32)
 
+
+        if optimization: 
+            print(time.perf_counter()-start)
+            
+            return
         objs_with_both = [
             obj for obj in test
             if getattr(obj, "embed", None) is not None and getattr(obj, "color_embed", None) is not None
@@ -838,6 +916,8 @@ class SortImages:
 
         remaining = [o for o in imagefiles if o not in objs_with_both]
         imagefiles[:] = ordered_objs + remaining
+
+        print(time.perf_counter()-start)
 
     def update_info(self, old=None):
         def get_memory_usage():
@@ -957,8 +1037,8 @@ class ThumbManager:
                     traceback.print_exc()
 
     thumb_ext = {"png", "jpg", "jpeg", "bmp", "pcx", "tiff", "psd", "jfif", "gif", "webp", "avif"}
-    anim_ext = {"gif", "webp", "webm", "mp4"}
-    video_ext = {"webm", "mp4"}
+    anim_ext = {"gif", "webp", "webm", "mp4", "mkv", "m4v", "mov"}
+    video_ext = {"webm", "mp4", "mkv", "m4v", "mov"}
     thumb_pool = None
     frame_pool = None
     def __init__(self, fileManager):
@@ -966,6 +1046,9 @@ class ThumbManager:
         self.gui = fileManager.gui
         self.threads = fileManager.threads
         self.data_dir = fileManager.data_dir
+
+        self.thumb_after_id = None
+        self.frame_after_id = None
         
         # Queues
         self.thumb_queue = queue.Queue()
@@ -985,8 +1068,8 @@ class ThumbManager:
         self.truncator = ThumbManager.CachedTruncator(self)
 
         # Thread pool sizes
-        self.thumb_workers = min(3, fileManager.threads)  # parallel thumbs
-        self.frame_workers = min(2, fileManager.threads)  # parallel frames
+        self.thumb_workers = min(5, fileManager.threads)  # parallel thumbs
+        self.frame_workers = min(3, fileManager.threads)  # parallel frames
 
     def start_background_worker(self):
         if self.stop_event.is_set():
@@ -1263,13 +1346,11 @@ class ThumbManager:
         elif mode == "stretch": 
             pil_img = pil_img.resize((size, size))
         elif mode == "letterbox":
+            pil_img.thumbnail((size, size))
             w, h = pil_img.size
-            scale = min(size / w, size / h)
-            new_w, new_h = int(w * scale), int(h * scale)
-            pil_img = pil_img.resize((new_w, new_h), Image.BILINEAR)
             new_im = Image.new("RGB", (size, size), (114, 114, 114))
-            left = (size - new_w) // 2
-            top = (size - new_h) // 2
+            left = (size - w) // 2
+            top = (size - h) // 2
             new_im.paste(pil_img, (left, top))
             pil_img = new_im
         elif mode == "center_crop":
@@ -1374,28 +1455,28 @@ class ThumbManager:
                 """
                 import av
                 # First, probe duration
-                container = av.open(path)
-                video_stream = container.streams.video[0]
-                time_base = video_stream.time_base
-                
-                for t in timestamps:
-                    if self.stop_event.is_set() or not (obj.frame or obj.destframe):
-                        gui.after_idle(obj.clear_frames)
-                        self.gui.gridmanager.change_square_color(obj, "red")
-                        break
-                    container.seek(int(t / time_base), any_frame=False, backward=True, stream=video_stream)
-                    for packet in container.demux(video_stream):
-                        for frame in packet.decode():
-                            if frame.pts * time_base >= t:
-                                img = frame.to_image()
-                                img.thumbnail((size, size))
-                                obj.frames.append((ImageTk.PhotoImage(img), frametime_ms))
-                                if len(obj.frames) == 2:
-                                    self.gui.after_idle(gui_enable_animation)
-                                break
-                        else:
-                            continue
-                        break
+                with av.open(path) as container:
+                    video_stream = container.streams.video[0]
+                    time_base = video_stream.time_base
+                    
+                    for t in timestamps:
+                        if self.stop_event.is_set() or not (obj.frame or obj.destframe):
+                            gui.after_idle(obj.clear_frames)
+                            self.gui.gridmanager.change_square_color(obj, "red")
+                            break
+                        container.seek(int(t / time_base), any_frame=False, backward=True, stream=video_stream)
+                        for packet in container.demux(video_stream):
+                            for frame in packet.decode():
+                                if frame.pts * time_base >= t:
+                                    img = frame.to_image()
+                                    img.thumbnail((size, size))
+                                    obj.frames.append((ImageTk.PhotoImage(img), frametime_ms))
+                                    if len(obj.frames) == 2:
+                                        self.gui.after_idle(gui_enable_animation)
+                                    break
+                            else:
+                                continue
+                            break
 
             try:
                 fps, duration = get_fps_and_duration(path)
