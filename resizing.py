@@ -858,6 +858,8 @@ class Application(tk.Frame):
         canvas.bind("<Configure>", self.window_resize)
         if self.standalone:
             canvas.bind("<Button-3>", self.window_close)
+        else:
+            canvas.bind("<Button-3>", lambda e: self.set_image(None))
 
     "Events"
     def menu_open_clicked(self, event=None): #ui
@@ -1212,11 +1214,11 @@ class Application(tk.Frame):
         try:
             from PIL import Image
             with Image.open(path) as img:
-                # Optional: disable full load for very large files to avoid memory spikes
-                #img.draft("RGBA", (4096, 4096))
                 if img.mode != "RGBA":
-                    img = img.convert("RGBA")
-                return img
+                    img1 = img.convert("RGBA")
+                else:
+                    img1 = img.copy()
+                return img1
         except Exception as e:
             print("Background load error:", e)
             return None
@@ -1328,16 +1330,17 @@ class Application(tk.Frame):
         
     def _set_animation(self, filename, obj=None):
         self.zoom_fit(self.pil_image)
-        self.pil_image.close()
         self.a = False
 
         try:
             self.pil_image.seek(1)
+            self.pil_image.close()
             self.is_gif = True
             self.open_thread = Thread(target=self._preload_frames, args=(self.filename,), name="(Thread) Viewer frame preload", daemon=True)
             self.open_thread.start()
             self.timer1 = perf_counter()
-        except:
+        except Exception as e:
+            print(e)
             self.loader.request_load(filename)
         
     def _set_video(self):
@@ -1375,9 +1378,6 @@ class Application(tk.Frame):
         self.current_load_token = object()
         " Give image path and display it "
         self.timer.start()
-        
-        """if hasattr(self, "loader") and self.loader:
-            self.loader.stop()"""
 
         if not self.reset(filename): return # returns False if we cant clear the canvas or cant set the image. (unsupported format)
         
@@ -1403,16 +1403,15 @@ class Application(tk.Frame):
             thumbpath = None
 
         if self.ext in ("gif", "webp"): # is animation
-            if thumbpath:
-                self._set_thumbnail(thumbpath=thumbpath)
+            """if thumbpath:
+                self._set_thumbnail(thumbpath=thumbpath)"""
 
             self._set_animation(filename, obj)
         else: # is picture
             if thumbpath:
                 self._set_thumbnail(thumbpath=thumbpath)
 
-            self._set_picture(obj)
-            """self.loader.request_load(filename)"""
+            self._set_picture(filename)
         
 
     def reset(self, filename):
@@ -1477,10 +1476,20 @@ class Application(tk.Frame):
         #self.canvas.delete("_IMG")
         
         if not filename or not os.path.exists(filename): 
+            self.image = None
+            self.canvas.delete("_IMG")
+            self.master.winfo_toplevel().title(self.title)
+            self.label_image_format_var.set(f"image info")
+            self.label_image_mode_var.set("")
+            self.label_image_dimensions_var.set("")
+            self.label_image_size_var.set("")
+            #self.update()
+            close_vlc()
+            #self.update()
             self.a = False
-            pass
+            return False
         else:
-            ext = filename.rsplit(".", 1)[1]
+            ext = filename.rsplit(".", 1)[1].lower()
             supported_formats = {"png", "gif", "jpg", "jpeg", "bmp", "pcx", "tiff", "webp", "psd", "jfif", "avif", "mp4", "mkv", "m4v", "mov", "webm"}
             if ext in supported_formats:
                 if ext not in ("mp4", "webm", "mkv", "m4v", "mov"):
@@ -1490,7 +1499,6 @@ class Application(tk.Frame):
                 self.f = True
                 return True
             
-                
             else:
                 self.image = None
                 self.canvas.delete("_IMG")
