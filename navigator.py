@@ -171,12 +171,10 @@ class Navigator:
 
         if self.old: self.default(self.old)
         else: return
-        if self.gui.Image_frame == None and self.gui.second_window_viewer == None: return
 
         self.old = None
         if len(lista) == 0: return # no images left
-        
-        print(self.index)
+
         if self.window_focused == "DEST":
             if  self.index >= len(lista):
                 self.old = lista[-1]
@@ -189,9 +187,9 @@ class Navigator:
             if self.index < len(lista): # in limits
                 self.old = lista[self.index]
         
-        self.selected(self.old)
-        if self.gui.show_next.get():
-            if self.old:
+        if self.old:
+            self.selected(self.old)
+            if self.gui.show_next.get() and (self.gui.Image_frame or self.gui.second_window_viewer):
                 self.gui.displayimage(self.old.obj)
 
     def ask_prefilled_text(self, parent, title, message, default_text=""):
@@ -201,19 +199,20 @@ class Navigator:
     def bindhandler(self, event):
         #print("registered:", event)
         def advance():
-            if self.gui.show_next.get() and old != self.old and (self.gui.Image_frame != None or self.gui.second_window_viewer != None):
+            if self.gui.show_next.get() and old != self.old and ((self.gui.Image_frame != None and self.gui.Image_frame.filename) or self.gui.second_window_viewer != None):
                 self.gui.displayimage(self.old.obj)
         def undo():
             # move last from assigned to unassigned if any.
-            if self.gridmanager.assigned and self.gui.current_view.get() in ("Unassigned", "Predictions") :
+            if self.gridmanager.assigned and self.gui.current_view.get() in ("Unassigned",) :
                 index, listindex, last = self.gridmanager.undo.pop()
                 self.gridmanager.assigned.remove(last)
                 self.gridmanager.unassigned.insert(listindex, last)
+                #self.displayedlist.insert(listindex, last)
                 last.obj.dest = ""
-                self.gridmanager.add_squares([(last)], insert=index)
+                self.gridmanager.add_squares([(last)], insert=(index, listindex))
                 self.default(self.old)
-                self.selected(self.displayedlist[0])
-                self.old = self.displayedlist[0]
+                self.selected(self.displayedlist[listindex])
+                self.old = self.displayedlist[listindex]
                 if self.gui.show_next.get():
                     if self.old:
                         self.gui.displayimage(self.old.obj)
@@ -278,7 +277,7 @@ class Navigator:
             else: scroll_up()
             advance()
         def highlight_up(reverse=None):
-            if self.gui.Image_frame and self.gui.Image_frame.app2.search_active: return
+            if ((self.gui.second_window_viewer and hasattr(self.gui.second_window_viewer, "app2") and self.gui.second_window_viewer.app2.search_active) or (self.gui.Image_frame and hasattr(self.gui.Image_frame, "app2") and self.gui.Image_frame.app2.search_active)): return
             if self.window_focused == "GRID":
                 columns = int(max(1, (self.gui.imagegrid.winfo_width()+2) / self.actual_gridsquare_width))
             elif self.window_focused == "DEST":
@@ -295,7 +294,7 @@ class Navigator:
             else: scroll_up()
             advance()
         def highlight_down(reverse=None):
-            if self.gui.Image_frame and self.gui.Image_frame.app2.search_active: return
+            if ((self.gui.second_window_viewer and hasattr(self.gui.second_window_viewer, "app2") and self.gui.second_window_viewer.app2.search_active) or (self.gui.Image_frame and hasattr(self.gui.Image_frame, "app2") and self.gui.Image_frame.app2.search_active)): return
             if self.window_focused == "GRID":
                 columns = int(max(1, (self.gui.imagegrid.winfo_width()+2) / self.actual_gridsquare_width))
             elif self.window_focused == "DEST":
@@ -311,13 +310,19 @@ class Navigator:
             if reverse: scroll_up(reverse=True)
             else: scroll_down()
             advance()
-        
-        def spacebar():
-            if self.old and self.old.obj.predicted_path:
-                print("Sent:", self.old.obj.name[:20], "to", self.old.obj.predicted_path)
-                c =  "#FFFFFF" #self.gui.folder_explorer.color_cache[self.old.obj.predicted_path]
-                dest = {"path": self.old.obj.predicted_path, "color": c}
-                self.fileManager.setDestination(dest)
+        def space(reverse=None):
+            if self.gui.second_window_viewer: 
+                self.gui.second_window_viewer.master.focus()
+        def autosort():
+            if self.old:
+                """if self.old.obj != self.gui.displayed_obj:
+                    self.gui.displayimage(self.old.obj)"""
+                
+                if self.old.obj.predicted_path:
+                    print("Sent:", self.old.obj.name[:20], "to", self.old.obj.predicted_path)
+                    c =  "#FFFFFF" #self.gui.folder_explorer.color_cache[self.old.obj.predicted_path]
+                    dest = {"path": self.old.obj.predicted_path, "color": c}
+                    self.fileManager.setDestination(dest, caller="autosort")
         def rename():
             if not self.old: return
             title = "Rename Image"
@@ -356,22 +361,30 @@ class Navigator:
 
         if event.state == 4 and event.keysym in ("z", "Z"):
             undo()
-        elif event.keysym == "space":
-            spacebar()
+        elif event.keysym == "Return":
+            #if self.gui.current_view.get() == "Predictions":
+            autosort()
         elif event.keysym == "F2":
             rename()
         elif event.keysym == "Delete":
             trash()
+            """elif event.keysym == "Escape":
+                if self.gui.second_window_viewer:
+                    self.gui.displayed_obj = None
+                    self.gui.second_window_viewer.window_close()
+                if self.gui.Image_frame: self.gui.Image_frame.filename = None"""
         else:
             action = {"Left": highlight_right,
                     "Right": highlight_left,
                     "Down": highlight_up,
-                    "Up": highlight_down
+                    "Up": highlight_down,
+                    "space": space
                 } if reverse else {
                     "Left": highlight_left,
                     "Right": highlight_right,
                     "Down": highlight_down,
-                    "Up": highlight_up
+                    "Up": highlight_up,
+                    "space": space
                 }
             old = self.old
             action[event.keysym](reverse)
@@ -382,7 +395,7 @@ class Navigator:
             return
         
         f_color = frame.obj.dest_color if frame.obj.dest != "" else self.gui.square_default
-        f_color = frame.obj.color if self.gui.current_view.get() == "Predictions" else f_color
+        f_color = frame.obj.color if self.gui.prediction.get() else f_color
         try:
             frame.configure(highlightcolor = f_color,  highlightbackground = f_color) # Trying to access destroyed destsquare? # If dest is closed, remove self.old if any frame was there.
             frame.canvas.configure(bg=f_color, highlightcolor=f_color, highlightbackground = f_color)
