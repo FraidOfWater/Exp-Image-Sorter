@@ -17,7 +17,7 @@ if exist "%folderToDelete2%" (
     echo Folder not found: %folderToDelete2%
 )
 
-pyinstaller sortimages_multiview.py --name SIME-QOL --noconfirm
+pyinstaller sortimages_multiview.py --name SIME-QOL --noconfirm --noconsole
 
 :: Set the name of the file to copy and the destination for the file
 set "fileToCopy=libvlc.dll"  :: Change this to your actual file name
@@ -32,8 +32,8 @@ set "fileToCopy3=themes.json"  :: Change this to your actual file name
 set "fileDestination3=dist\SIME-QOL\themes.json"  :: Change this to your actual destination folder
 
 :: Set the name of the file to copy and the destination for the file
-set "folderToCopy=vips-dev-8.16"  :: Change this to your actual file name
-set "folderCopyDestination=dist\SIME-QOL\_internal\vips-dev-8.16"  :: Change this to your actual destination folder
+set "folderToCopy=vips-dev-8.17"  :: Change this to your actual file name
+set "folderCopyDestination=dist\SIME-QOL\_internal\vips-dev-8.17"  :: Change this to your actual destination folder
 
 :: Set the name of the file to copy and the destination for the file
 set "folderToCopy2=plugins"  :: Change this to your actual file name
