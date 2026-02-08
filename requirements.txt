@@ -1,3 +1,7 @@
+#pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu130
+#or probably one your gpu supports?
+#note, install these FIRST as yolo will install the CPU versions.
+
 psutil
 pillow
 natsort
@@ -15,5 +19,4 @@ python-vlc
 faiss-cpu
 pyperclip
 
-#pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu130
-#or probably one your gpu supports?
+
