@@ -397,7 +397,7 @@ class ImageGrid(tk.Frame):
                     overlay_pad_y = 4
                     overlay_font = ("Arial", 12, "bold")
                     overlay_fg = "white"
-                    overlay_bg = self.fileManager.gui.main_colour  # black background
+                    overlay_bg = self.fileManager.gui.d_theme["main_colour"]
 
                     # Create group for overlays
                     # Confidence (bottom-right corner)
