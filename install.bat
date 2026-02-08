@@ -1,2 +1,2 @@
-pip install pillow pyvips imageio imageio[ffmpeg] numpy python-vlc psutil pyinstaller colorthief scikit-learn
+pip install -r requirements.txt 
 pause
