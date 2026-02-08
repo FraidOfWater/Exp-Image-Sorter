@@ -438,7 +438,8 @@ class SortImages:
         current_view = gui.current_view.get()
         if imagegrid.current_selection is not None and self.navigator.window_focused == "GRID":
             index = self.imagegrid.current_selection
-            selection = imagegrid.image_items[index] # selection
+            if len(imagegrid.image_items) > index:
+                selection = imagegrid.image_items[index] # selection
 
         igrid_marked = gui.imagegrid.selected.copy()
         
@@ -448,7 +449,8 @@ class SortImages:
         if hasattr(self.gui.folder_explorer, "destw") and self.gui.folder_explorer.destw != None and self.gui.folder_explorer.destw.winfo_exists():
             if gui.folder_explorer.destw.current_selection is not None and self.navigator.window_focused == "DEST":
                 index = gui.folder_explorer.destw.current_selection
-                d_selection = gui.folder_explorer.destw.image_items[index] # selection
+                if len(gui.folder_explorer.destw.image_items) > index:
+                    d_selection = gui.folder_explorer.destw.image_items[index] # selection
             dgrid_marked = gui.folder_explorer.destw.selected.copy()
             gui.folder_explorer.destw.selected.clear()
         
@@ -1750,7 +1752,7 @@ class Predictions:
             label_path_dict = self.get_folder_contents_with_labels(self.gui.categories, self.gui.excludes)
 
             self.gui.train_status_var.set("Building dataset...")
-            from Dataset_gen import Dataset_gen
+            from Advanced_sorting import Dataset_gen
             Data = Dataset_gen(self.fileManager.train_dir, label_path_dict, self.gui.prediction_thumbsize, self.fileManager)       
             path_hash_lookup = Data.gen_thumbs()
             Data.split(0.9)
@@ -1786,7 +1788,7 @@ class Predictions:
             label_path_dict = self.get_folder_contents_with_labels([folder_path for _, folder_path, _, _, _ in self.gui.buttons])
             
             self.gui.train_status_var.set("Building dataset...")
-            from Dataset_gen import Dataset_gen
+            from Advanced_sorting import Dataset_gen
             Data = Dataset_gen(self.fileManager.train_dir, label_path_dict, self.gui.prediction_thumbsize, self.fileManager)       
             path_hash_lookup = Data.gen_thumbs()
             Data.split(0.9)
