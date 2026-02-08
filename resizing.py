@@ -4,13 +4,11 @@ from PIL import Image, ImageTk
 from collections import OrderedDict
 from threading import Thread, Lock, Event
 from tkinter import ttk
-from sorter import ImageViewer
 Image.MAX_IMAGE_PIXELS = 346724322
 vipsbin = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vips-dev-8.17", "bin")
 os.environ['PATH'] = os.pathsep.join((vipsbin, os.environ['PATH']))
 os.add_dll_directory(vipsbin)
 import pyvips
-import gc
 class AsyncImageLoader:
     def __init__(self, viewer):
         self.viewer = viewer
@@ -484,7 +482,7 @@ class Application(tk.Frame):
                  zoom_magnitude: float=None, rotation_degrees: int=None, unbound_var: bool=None, 
                  disable_menubar: bool=None, statusbar: bool=None, 
                  initial_filter: Image.Resampling=None, drag_quality: Image.Resampling=None, anti_aliasing: bool=None, thumbnail_var: str=None,
-                 filter_delay: int=None, show_advanced: bool=None, quick_render: bool=None,
+                 filter_delay: int=None, thumb_qual: int=None, show_advanced: bool=None, quick_render: bool=None,
                  show_ram: bool=None,
                  canvas_color=None, text_color=None, 
                  button_color=None, active_button_color=None, 
@@ -512,9 +510,11 @@ class Application(tk.Frame):
         self.standalone = True if master == None else False
         self.title = "Python Media Viewer"
         self.a = False
+        self.app2 = None
         if self.standalone:
             if gui:
                 master = tk.Toplevel()
+                self.app2 = master.master.fileManager.navigator.search_widget
             else:
                 master = tk.Tk()
                 master.bind('<KeyPress-Left>', lambda e: self.key_press(-1))
@@ -528,6 +528,8 @@ class Application(tk.Frame):
             master.geometry(geometry or savedata.get("geometry", None) or "800x600")
             master.title(self.title)
             master.protocol("WM_DELETE_WINDOW", self.window_close)
+        else:
+            self.app2 = master.master.master.fileManager.navigator.search_widget
 
         if True:
             self.zoom_magnitude = zoom_magnitude or float(savedata.get("zoom_magnitude", 1.25))
@@ -546,6 +548,7 @@ class Application(tk.Frame):
             self.anti_aliasing.trace_add("write", lambda *_: (self._zoom_cache.clear(), self._imagetk_cache.clear(), self.draw_image(self.pil_image)))
             self.thumbnail_var = tk.StringVar(value=thumbnail_var or savedata.get("thumbnail_var", "Quality"))
             self.filter_delay = tk.IntVar(value=filter_delay or int(savedata.get("final_filter_delay", 200)))
+            self.thumb_qual = tk.IntVar(value=thumb_qual or int(savedata.get("thumb_qual", 32)))
             self.show_advanced = tk.BooleanVar(value=show_advanced or savedata.get("show_advanced", False))
             self.show_advanced.trace_add("write", lambda *_: self.toggle_advanced())
             self.show_ram = tk.BooleanVar(value=show_ram or savedata.get("show_ram", False))
@@ -673,7 +676,6 @@ class Application(tk.Frame):
         view_menu = tk.Menu(menu_bar, tearoff=tk.OFF)
         menu_bar.add_cascade(label="View", menu=view_menu)
 
-        self.unbound_var = self.unbound_var
         view_menu.add_checkbutton(
             label="Unbound Pan",
             variable=self.unbound_var)
@@ -714,11 +716,16 @@ class Application(tk.Frame):
 
         view_menu.add_command(label="Hints", command=hints)
         
-        self.master.bind_all("<Control-o>", self.menu_open_clicked)
-        self.master.bind_all("<Control-d>", self.menu_open_dir_clicked)
+        
+        if self.gui:
+            pass
+        else:
+            self.master.bind_all("<Control-o>", self.menu_open_clicked)
+            self.master.bind_all("<Control-d>", self.menu_open_dir_clicked)
 
         if not self.disable_menubar and self.master.config().get("menu"): # disable menubar for embedded view. (not supported)
             self.master.config(menu=menu_bar)
+        #self.master.config(menu=menu_bar)
 
     def create_status_bar(self):  
         def get_memory_usage():
@@ -771,6 +778,7 @@ class Application(tk.Frame):
         )
         
         options = ["Nearest", "Bilinear", "Bicubic", "Lanczos", "Pyvips"]
+        options2 = ["No quick filter", "Nearest", "Bilinear", "Bicubic", "Lanczos"]
         self.selected_option = tk.StringVar(value=self.savedata.get("filter", "Nearest").lower().capitalize())
         
         self.selected_option.trace_add("write", lambda *_: (self._zoom_cache.clear(), self._imagetk_cache.clear(), setattr(self, "filter", Application.QUALITY[self.selected_option.get()]), self.draw_image(self.pil_image)))
@@ -801,13 +809,24 @@ class Application(tk.Frame):
         )
 
         # Advanced
-        self.filter_delay_input_label = tk.Label(frame_statusbar, text="Delay:", anchor=tk.W, padx=5, background=self.colors["statusbar"], foreground=self.colors["text"])
+        self.filter_delay_input_label = tk.Label(frame_statusbar, text="Resizing delay:", anchor=tk.W, padx=5, background=self.colors["statusbar"], foreground=self.colors["text"])
         self.filter_delay_input = tk.Entry(frame_statusbar, textvariable=self.filter_delay, width=5, font=('Arial', 8), justify=tk.CENTER)
 
-        self.drag_quality_label = tk.Label(frame_statusbar, text="Drag:", anchor=tk.W, padx=5, background=self.colors["statusbar"], foreground=self.colors["text"])
+        self.thumb_qual_input_label = tk.Label(frame_statusbar, text="Thumb quality quality:", anchor=tk.W, padx=5, background=self.colors["statusbar"], foreground=self.colors["text"])
+        self.thumb_qual_input = tk.Entry(frame_statusbar, textvariable=self.thumb_qual, width=5, font=('Arial', 8), justify=tk.CENTER)
+
+        self.drag_quality_label = tk.Label(frame_statusbar, text="First:", anchor=tk.W, padx=5, background=self.colors["statusbar"], foreground=self.colors["text"])
         self.selected_option1 = tk.StringVar(value=self.drag_quality.name.lower().capitalize())
-        self.selected_option1.trace_add("write", lambda *_: setattr(self, "drag_quality", Application.QUALITY[self.selected_option1.get()]))
-        self.drag_quality_button = tk.OptionMenu(frame_statusbar, self.selected_option1, *options[:-1])
+        def helper():
+            if self.selected_option1.get() == "No quick filter":
+                self.quick_render.set(False)
+            else:
+                self.quick_render.set(True)
+                setattr(self, "drag_quality", Application.QUALITY[self.selected_option1.get()])
+            
+
+        self.selected_option1.trace_add("write", lambda *_: helper())
+        self.drag_quality_button = tk.OptionMenu(frame_statusbar, self.selected_option1, *options2)
         self.drag_quality_button.configure(
             background=self.colors["statusbar"],
             activebackground=self.colors["active_button"],
@@ -831,7 +850,7 @@ class Application(tk.Frame):
         self.anim_info.pack(side=tk.LEFT)
         if self.show_ram.get():
             self.ram_indicator.pack(side=tk.LEFT)
-        if self.show_advanced.get():
+        if self.show_advanced.get() or True:
             self.toggle_advanced()
         if self.statusbar.get():
             frame_statusbar.pack(side=tk.BOTTOM, fill=tk.X)
@@ -846,7 +865,6 @@ class Application(tk.Frame):
             self.divider.pack(fill=tk.X)
         canvas.update()
         self.canvas = canvas
-        self.app2 = ImageViewer(self.master, self.canvas)
         
     def bind_mouse_events(self):
         canvas = self.canvas
@@ -857,9 +875,12 @@ class Application(tk.Frame):
         canvas.bind("<MouseWheel>", self.mouse_wheel)
         canvas.bind("<Configure>", self.window_resize)
         if self.standalone:
-            canvas.bind("<Button-3>", self.window_close)
+            pass
+            #canvas.bind("<Button-3>", self.window_close)
         else:
-            canvas.bind("<Button-3>", lambda e: self.set_image(None))
+            #canvas.bind("<Button-3>", lambda e: self.set_image(None))
+            pass
+            
 
     "Events"
     def menu_open_clicked(self, event=None): #ui
@@ -993,7 +1014,7 @@ class Application(tk.Frame):
         )
 
     def mouse_double_click_left(self, event=None):
-        if event.state == 2:
+        if event and event.state == 2:
             return
         if self.pil_image:
             self.zoom_fit(self.pil_image)
@@ -1047,13 +1068,15 @@ class Application(tk.Frame):
 
     def toggle_advanced(self):
         widgets = [
+            self.thumb_qual_input,
+            self.thumb_qual_input_label,
             self.filter_delay_input,
             self.filter_delay_input_label,
             self.drag_quality_button,
             self.drag_quality_label
             ]
         for x in widgets:
-            if self.show_advanced.get():
+            if self.show_advanced.get() or True:
                 x.pack(side=tk.RIGHT, pady=0)
             else:
                 x.pack_forget()
@@ -1146,7 +1169,6 @@ class Application(tk.Frame):
         self.destroy()
         self.master.destroy()
      
-    
     # Affine transforms
     def reset_transform(self):
         self.mat_affine = np.eye(3)
@@ -1241,8 +1263,11 @@ class Application(tk.Frame):
             self._imagetk_cache.set_maxsize(0)
 
         if self.quick_render.get():
-            if self.drag_quality.name.lower() == self.filter.lower(): pass
-            elif self.filter.lower() == "pyvips" and self.drag_quality.name.lower() == "lanczos": pass
+            print(self.filter)
+            if type(self.filter) == Image.Resampling and self.drag_quality.name.lower() == self.filter.name.lower(): 
+                pass
+            elif self.filter == "pyvips": 
+                pass
             else:
                 id1 = self.after(1, lambda: self.draw_image(self.pil_image, initial_filter=self.drag_quality))
                 self.draw_queue.append(id1)
@@ -1273,13 +1298,12 @@ class Application(tk.Frame):
             self._zoom_cache.set_maxsize(0) # wont allow thumbnail in cache
             self._imagetk_cache.set_maxsize(0)
         f1 = Image.Resampling.NEAREST if self.thumbnail_var.get() == "Fast" else Image.Resampling.LANCZOS
-        
         if thumbpath:
             with Image.open(thumbpath) as thumb:
                 if self.thumbnail_var.get() == "Fast":
                     resized = thumb.copy()
                 else:
-                    vips_img = pyvips.Image.thumbnail(thumbpath, 64)
+                    vips_img = pyvips.Image.thumbnail(thumbpath, self.thumb_qual_input.get())
                     buffer = vips_img.write_to_memory()
                     mode = self.get_mode(vips_img)
                     resized = Image.frombytes(mode, (vips_img.width, vips_img.height), buffer, "raw")
@@ -1632,6 +1656,7 @@ class Application(tk.Frame):
                             resized = Image.frombytes(mode, (vips_img.width, vips_img.height), buffer, "raw")
                         else:
                             resized = pil_image.resize(size, resize_filter)
+                        print(size)
                     except Exception as e:
                         print("Error in draw:", e)
                         return
@@ -1697,8 +1722,8 @@ class Application(tk.Frame):
         if self.image_id: self.canvas.itemconfig(self.image_id, image=imagetk)
         else: self.image_id = self.canvas.create_image(0, 0, anchor='nw', image=imagetk, tags="_IMG")
         self.image = imagetk
-        self.app2.bring_forth()
-        
+        if self.app2:
+            self.app2.bring_forth()
 
         if self.gui and drag: 
             pass
@@ -1805,6 +1830,7 @@ class Application(tk.Frame):
         self.anti_aliasing.set(savedata.get("anti_aliasing", self.anti_aliasing.get()))
         self.thumbnail_var.set(savedata.get("thumbnail_var", self.thumbnail_var.get()))
         self.filter_delay.set(int(savedata.get("final_filter_delay", self.filter_delay.get())))
+        self.thumb_qual.set(int(savedata.get("thumb_qual", self.thumb_qual.get())))
         self.show_advanced.set(savedata.get("show_advanced", self.show_advanced.get()))
         self.show_ram.set(savedata.get("show_ram", self.show_ram.get()))
         self.volume = int(savedata.get("volume", self.volume))
@@ -1837,6 +1863,7 @@ class Application(tk.Frame):
                 "anti_aliasing": self.anti_aliasing.get(),
                 "thumbnail_var": self.thumbnail_var.get(),
                 "final_filter_delay": self.filter_delay.get(),
+                "thumb_qual": self.thumb_qual.get(),
                 "show_advanced": self.show_advanced.get(),
                 "show_ram": self.show_ram.get(),
                 "colors": self.colors,
