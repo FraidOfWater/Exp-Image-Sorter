@@ -8,6 +8,19 @@ import threading, multiprocessing as mp
 from concurrent.futures import ThreadPoolExecutor
 from gui import GUIManager
 from navigator import Navigator
+import multiprocessing as mp
+
+vipsbin = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vips-dev-8.17", "bin")
+os.environ['PATH'] = os.pathsep.join((vipsbin, os.environ['PATH']))
+os.add_dll_directory(vipsbin)
+import sys
+# For Python 3.8+, DLLs must be added via add_dll_directory
+if sys.platform == 'win32' and os.path.isdir(vipsbin):
+    os.add_dll_directory(vipsbin)
+
+import pyvips
+
+
 
 # undo wont add to destw, and undo cant act on destw changes?
 # autosave?
@@ -698,7 +711,11 @@ class SortImages:
                             obj.file_size = file_stats.st_size
                         c.sort(key=attrgetter("file_size"), reverse=False if self.last_sort[1] == False else True)
                     elif MODE == "dimensions":
-                        from imageio import get_reader
+                        try:
+                            from imageio import get_reader
+                        except Exception as e:
+                            get_reader = None
+                            print(f"[Warning] imageio.get_reader unavailable: {e}")
                         for obj in c:
                             if obj.dimensions == (-2, 0.0):
                                 if obj.ext in ("mp4", "webm"):
@@ -764,7 +781,11 @@ class SortImages:
                 obj.file_size = file_stats.st_size
             self.imagelist.sort(key=attrgetter("file_size"), reverse=False if self.last_sort[1] == False else True)
         elif MODE == "dimensions":
-            from imageio import get_reader
+            try:
+                from imageio import get_reader
+            except Exception as e:
+                get_reader = None
+                print(f"[Warning] imageio.get_reader unavailable: {e}")
             for obj in self.imagelist:
                 if obj.dimensions == (-2, 0.0):
                     if obj.ext in ("mp4", "webm", "mkv", "m4v", "mov"):
@@ -1417,9 +1438,15 @@ class ThumbManager:
         # if no found, we should generate it.
         vips_used = False
         if obj.ext in self.video_ext: #Webm, mp4
-            from imageio import get_reader
+            try:
+                from imageio import get_reader
+            except Exception as e:
+                get_reader = None
+                print(f"[Warning] imageio.get_reader unavailable: {e}")
             try:
                 reader = None
+                if get_reader is None:
+                    raise RuntimeError("imageio.get_reader unavailable")
                 reader = get_reader(obj.path)
                 pil_img = Image.fromarray(reader.get_data(0))
             except Exception as e:
@@ -1756,22 +1783,25 @@ class Predictions:
             Data = Dataset_gen(self.fileManager.train_dir, label_path_dict, self.gui.prediction_thumbsize, self.fileManager)       
             path_hash_lookup = Data.gen_thumbs()
             Data.split(0.9)
-            import sys
-            self.gui.gui.train_status_var.set("Starting model...")
-            script = os.path.join(os.path.dirname(__file__), "train_model.py")
-            python_exe = sys.executable
             
-            names_2_path = {os.path.basename(x): x for x in self.gui.categories}
-            cmd = [
-                python_exe, script,
-                "--data", self.fileManager.train_dir,
-                "--epochs", str(100),
-                "--name", name
-            ]
-            import subprocess
-            path_to_results_csv = os.path.join(self.fileManager.model_dir, "classify", "latest_run", "results.csv")
-
-            subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_CONSOLE)
+            self.gui.train_status_var.set("Starting model...")
+            
+            try:
+                # Import and run directly - no subprocess needed
+                from train_model import main as train_main
+                
+                train_main(
+                    data=self.fileManager.train_dir,
+                    epochs=100,
+                    name=name,
+                    model="yolo11s-cls.pt",
+                    output_dir=self.fileManager.model_dir
+                )
+            except Exception as e:
+                self.gui.train_status_var.set(f"Training error: {e}")
+                print(f"Training error: {e}")
+                return
+            
             self.gui.model_path = os.path.join(self.fileManager.model_dir, f"{name}.pt")
             
         if self.train_thread and self.train_thread.is_alive():
@@ -1794,9 +1824,6 @@ class Predictions:
             Data.split(0.9)
             
             self.gui.train_status_var.set("Starting model...")
-            import sys
-            script = os.path.join(os.path.dirname(__file__), "train_model.py")
-            python_exe = sys.executable
             names_2_path = {os.path.basename(x[1]): x[1] for x in self.gui.buttons}
 
             with open(os.path.join(self.fileManager.model_dir, "latest_model_paths.json"), "w") as f:
@@ -1804,17 +1831,22 @@ class Predictions:
                 json_dict["names_2_path"] = names_2_path
                 json.dump(json_dict, f, indent=4)
 
-            cmd = [
-                python_exe, script,
-                "--data", self.fileManager.train_dir,
-                "--epochs", str(100),
-                "--name", "latest_model"
-            ]
-
-            import subprocess
-            path_to_results_csv = os.path.join(self.fileManager.model_dir, "classify", "latest_run", "results.csv")
-
-            subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_CONSOLE)
+            try:
+                # Import and run directly - no subprocess needed
+                from train_model import main as train_main
+                
+                train_main(
+                    data=self.fileManager.train_dir,
+                    epochs=100,
+                    name="latest_model",
+                    model="yolo11s-cls.pt",
+                    output_dir=self.fileManager.model_dir
+                )
+                
+            except Exception as e:
+                self.gui.train_status_var.set(f"Training error: {e}")
+                print(f"Training error: {e}")
+                return
 
             self.model_path = os.path.join(self.fileManager.model_dir, f"latest_model.pt")
             self.gui.train_status_var.set("Model Ready.")
@@ -1856,12 +1888,12 @@ class Timer:
         return f"{elapsed_time:.3f} s"
 
 if __name__ == '__main__':
-    vipsbin = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vips-dev-8.17", "bin")
-    os.environ['PATH'] = os.pathsep.join((vipsbin, os.environ['PATH']))
-    os.add_dll_directory(vipsbin)
-    import pyvips
-    ctypes.windll.shcore.SetProcessDpiAwareness(1)
     mp.freeze_support()
+    ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    
+    # Only set start method in the main process
     mp.set_start_method('spawn', force=True)
+
+    # 3. Only start the app here
     mainclass = SortImages()
     
