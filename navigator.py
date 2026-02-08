@@ -183,12 +183,12 @@ class Navigator:
                 if event.state != 262147 and self.gui.folder_explorer.scroll_enabled and event.keysym in ("Up", "Down"):
                     self.gui.folder_explorer.nav(event.keysym)
                 else:
-                    if "toplevel" in event.widget._w:
+                    if "toplevel" in event.widget._w and not (hasattr(self.gui.second_window_viewer, "master") and event.widget == self.gui.second_window_viewer.master):
                         self.gui.folder_explorer.destw.navigate(event.keysym)
                     else:
                         self.gui.imagegrid.navigate(event.keysym)
                     if self.gui.show_next.get():
-                        if "toplevel" in event.widget._w:
+                        if "toplevel" in event.widget._w and not (hasattr(self.gui.second_window_viewer, "master") and event.widget == self.gui.second_window_viewer.master):
                             self.gui.displayimage(self.gui.folder_explorer.destw.image_items[self.gui.folder_explorer.destw.current_selection].file)
                         else:
                             self.gui.displayimage(self.imagegrid.image_items[self.imagegrid.current_selection].file)
