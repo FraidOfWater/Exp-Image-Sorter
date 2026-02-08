@@ -44,7 +44,7 @@ class ImageGrid(tk.Frame):
                         "square_text": "white"
                         }):
         super().__init__(master)
-        self.config(bg=bg)
+        self.config(bg=theme["grid_background_colour"])
         self.dest = dest
         self.fileManager = parent
         self.destination = destination
@@ -74,8 +74,6 @@ class ImageGrid(tk.Frame):
         self.cols = 0
         self.rows = 0
 
-        self.bg = bg
-
         self.id_index = 0
 
         self.image_items = []
@@ -100,7 +98,7 @@ class ImageGrid(tk.Frame):
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
-        self.canvas = tk.Canvas(self, highlightthickness=0, bg=bg)
+        self.canvas = tk.Canvas(self, highlightthickness=0, bg=theme["grid_background_colour"])
         
         # Apply the TTK Scrollbar with the custom style
         self.v_scroll = ttk.Scrollbar(self, orient="vertical", 
@@ -112,8 +110,6 @@ class ImageGrid(tk.Frame):
         # Use Grid here to prevent the 'packing' lag during window resize
         self.canvas.grid(row=0, column=0, sticky="nsew")
         self.v_scroll.grid(row=0, column=1, sticky="ns")
-
-        self.canvas.configure(bg=self.bg)  # Force recolor, otherwise managed automatically by tb.Window
 
         self.canvas.bind("<MouseWheel>",    self._on_mousewheel)
         self.canvas.bind("<Button-1>",      self._on_canvas_click)
@@ -397,7 +393,7 @@ class ImageGrid(tk.Frame):
                     overlay_pad_y = 4
                     overlay_font = ("Arial", 12, "bold")
                     overlay_fg = "white"
-                    overlay_bg = self.fileManager.gui.d_theme["main_colour"]
+                    overlay_bg = self.theme["main_colour"]
 
                     # Create group for overlays
                     # Confidence (bottom-right corner)
@@ -487,9 +483,8 @@ class ImageGrid(tk.Frame):
             default_bg = theme.get("square_default")
             grid_background_colour = theme.get("grid_background_colour")
             text_c = theme.get("square_text_colour")
-            self.bg = theme.get("grid_background_colour")
 
-            self.canvas.configure(bg=self.bg)
+            self.canvas.configure(bg=self.theme["grid_background_colour"])
             if item.file.dest == "":
                 item.file.color = default_bg
 
