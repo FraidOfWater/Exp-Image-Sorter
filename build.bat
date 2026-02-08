@@ -17,7 +17,15 @@ if exist "%folderToDelete2%" (
     echo Folder not found: %folderToDelete2%
 )
 
-pyinstaller sortimages_multiview.py --name SIME-QOL --noconfirm --noconsole
+:: Use PyInstaller with hidden imports and collect data for imageio to ensure package metadata
+pyinstaller sortimages_multiview.py --name SIME-QOL --noconfirm ^
+    --hidden-import=imageio ^
+    --hidden-import=imageio_ffmpeg ^
+    --hidden-import=imageio.plugins.ffmpeg ^
+    --collect-all imageio ^
+    --collect-all imageio_ffmpeg ^
+    --copy-metadata=imageio ^
+    --copy-metadata=imageio_ffmpeg
 
 :: Set the name of the file to copy and the destination for the file
 set "fileToCopy=libvlc.dll"  :: Change this to your actual file name
