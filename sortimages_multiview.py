@@ -9,49 +9,28 @@ from concurrent.futures import ThreadPoolExecutor
 from gui import GUIManager
 from navigator import Navigator
 
-# new folders dont updat in sorter search.
-# bugs . image loads when any image is loaded
-# bugs . undo doesnt add correctly to grid, wont updat in nav, hotkeys wont stay in the filename in folder view, delete doesnt work sometimes?
-#testing
-    # lists are ordered correctly? like moved? Show animated is broken.
-    # test if predictions, training works for gpu only and if they are gpu now or only cpu?
-    # sessions: do the work, what should be cached, saved. Autosave?
-    # investigate single-image-mode
-    # all viewer options in menubar
-    # get rid of menu bar, have a setting window (via hotkey)
-    # compare new and old vlc implementation
-    # themes doesnt work. also make purple theme?
+# undo wont add to destw, and undo cant act on destw changes?
+# autosave?
 
-# refactor rework:
-    # should make the new featuers into ONE module
+# option to disable gridviewer
+# menubar stuff into the gui
+# # compare new and old vlc implementation # aesthetic tweaks
+# purple theme
 
-# sorter:
-    # minimized out state, space?
-    # the search view has some bugs, index not where it should, the memory should remember at every interaction not every entert
-    # sorter should add scroll offset to where it knows index is
-    # delete scroll functionality from folders? (caps lock confusion) or like red outline for it to say its active.
-    # resizing signature: remove unused stuff just use a config file...
+# overlay in folders which draws over middlepane viewer (resizing), should probably be moved to sorter.py (other overlay code)
+# consolidate bindings to one bindhandler?
+# end of list behaviour?
+# anim debug colors?
+# scroll for grid?
 
-# binding rework
-    # move bindings to central
+# font change to folder buttons
+# old random colors back option button
+# tooltips
+# loading icon for long operations like sorting or training?
 
-# canvas rework
-    # use customgrid instead of tktext.
-    # sometimes the navigator spasms out at the end of the list.
-    # ctrlz, delete dont work on predictions, ctrl z:d doesnt add to the grid correctly, cant be interacted with?
-    # better exclusions viewer ( canvas)
-    # are anim loading colors correct? do dests get corect colors, does this show in moved, assigned?
-
-# ui rework
-    # maybe remove arrows from the folder buttons , the font has to change at least.
-    # see if old colors is better (color gen)
-    # make advanced do useful stuff
-    # scroll doesnt work for folder view?
-    # sorting should display a load icon for long operations.
-    # tooltips.
-    # consider old colors from customgrid. (and the button style)
-    # consider customgrid vlc controls. (style)
-    # old ui is so good?
+#statusbar removal, into title
+# load_images_amount?
+# settings button to dump the rest into so I can get rid of menubar?
 
 class Imagefile:
     ANIMATION = "ANIMATION"
@@ -72,6 +51,7 @@ class Imagefile:
         self.color_embed = None
         self.predicted_path = None
         self.dimensions = (-2, 0.0)
+        self.pos = None
         "Hash"
         self.id = None              # Hash of img name, mod_time and file_size. This is faster to hash than whole file binary stream.
         self.mod_time = None        # Used by sortimages. Used to hash id.
@@ -106,6 +86,7 @@ class Imagefile:
     def setdest(self, dest) -> None:
         "Sets imagefile dest and destcolor to desired."
         # if trashed flag, move to "trashed" folder inside our source_dir. during exit, trash these.
+        self.moved = False
         self.dest = dest["path"]
         self.dest_color = dest["color"]
 
@@ -142,7 +123,6 @@ class Imagefile:
             return False
 
 class SortImages:
-    
     THUMB_FORMAT = ".webp"
     supported_formats = {"png", "gif", "jpg", "jpeg", "bmp", "pcx", "tiff", "webp", "psd", "jfif", "mp4", "mkv", "mov", "m4v", "webm", "avif"}
 
@@ -161,6 +141,9 @@ class SortImages:
 
     imagelist = [] # Store all Imagefiles
     exclude = []
+    assigned = []
+
+    last_sort = (None, False)
 
     # Flow
     last_call_time = 0
@@ -174,7 +157,6 @@ class SortImages:
     
     def __init__(self) -> None:
         "Sortimages setups the program. It creates imagefiles from the folder given, loads and saves prefs, loads and saves sessions, and starts up the gui and other modules."
-        
         self.jthemes = self.load_themes()
         self.first_run = True
         "Timekeeping and throttling"
@@ -183,11 +165,15 @@ class SortImages:
         "Start modules"
         prefs = self.loadprefs()
         if prefs: self.THUMB_FORMAT = prefs.get("THUMB_FORMAT", self.THUMB_FORMAT)
+        
         self.gui = GUIManager(self, prefs)
+        self.predictions = Predictions(self)
         self.gui.initialize()       # Let GUI initialize fully now with loaded values.
+        self.imagegrid = self.gui.imagegrid
         self.navigator = Navigator(self) # Navigator highlights the current selection, main use is to be able to navigate using arrow or wasd keys ### (wasd not implemented)
         self.animate = Animate(self) # Animate module is dedicated for making things animated.
         self.thumbs = ThumbManager(self) # Thumbmanager generates thumbs, frames, truncated names and imagefile attributes, and reloads and unloads resources when needed.
+        
         self.gui.after(3000, self.update_info)
         self.val_thumb_cache(self.data_dir)
         self.gui.mainloop()
@@ -205,6 +191,7 @@ class SortImages:
             for entry in entries:
                 if entry.is_file() and entry.name.endswith(self.THUMB_FORMAT):
                     testable = entry
+                    break
         
         if not testable:
             print(f"Data folder is empty")
@@ -212,7 +199,7 @@ class SortImages:
         
 
         with Image.open(testable.path) as im:
-            width, height = im.width, im.height
+            width, height = im.size
         if max(width, height) != self.gui.thumbnailsize:
             try:
                 print("Removing data folder, thumbnailsize changed")
@@ -288,8 +275,8 @@ class SortImages:
                 "main_geometry": gui.winfo_geometry(),
                 "viewer_geometry": gui.viewer_geometry,
                 "destpane_geometry":gui.destpane_geometry,
-                "leftpane_width":gui.leftui.winfo_width(),
-                "middlepane_width":gui.middlepane_width,
+                "leftpane_width": max(gui.leftui.winfo_width(), 50),
+                "middlepane_width": gui.middlepane_width if int(gui.winfo_geometry().split("x", 1)[0])-gui.middlepane_width-gui.leftui.winfo_width() > gui.thumbnailsize//2 else gui.middlepane_width-gui.thumbnailsize//2,
                 "images_sorted":gui.images_sorted.get(),
             }
         }
@@ -310,11 +297,9 @@ class SortImages:
             print(("Failed to save session:", e))
     
     def savesession(self, asksavelocation):
-        "Saves session. Includes some imagefile data and assigned list ids. Sessions do not support thumbnail_cache_validation. So you cannot change thumbnailsize during one."
-        gui = self.gui
+        "Saves assigned without having to move them."
         "If there is nothing to save"
-        if len(self.imagelist) < 1 and len(gui.gridmanager.gridsquarelist) < 1:
-            return
+        if not self.assigned: return
 
         if asksavelocation:
             from tkinter import filedialog as tkFileDialog
@@ -326,42 +311,19 @@ class SortImages:
             savelocation = "last_session.json"
 
         if not savelocation: return
-
-        "Save imagefile attributes"
-        def make_list(squares, is_gridsquare=False):
-            imagesavedata = []
-            for obj in squares:
-                name = obj.name
-                imagesavedata.append({
-                    "name": name,
-                    "file_size": obj.file_size,
-                    "id": obj.id,
-                    "path": obj.path[:-len(name)],
-                    })
-
-                if is_gridsquare:
-                    if obj.dest != "":
-                        imagesavedata[-1]["dest"] = obj.dest
-                    if obj.moved == True:
-                        imagesavedata[-1]["moved"] = obj.moved
-
-            return imagesavedata
-
-        objs = [x for x in self.imagelist if not x.id or not x.moved or not x.dest]
-        imagelist = make_list(objs)
-
-        gridobjs = [x.obj for x in gui.gridmanager.gridsquarelist]
-        gridsquarelist = make_list(gridobjs, is_gridsquare=True)
-        
-        save = {"dest": self.ddp, "source": self.sdp, "thumbnailsize":gui.thumbnailsize, "display_order": gui.display_order.get(),
-                "imagelist": imagelist, "gridsquarelist": gridsquarelist}
+        seen = {}
+        assigned = []
+        for x in self.assigned:
+            seen[x.dest] = x.color
+            assigned.append((x.path, x.dest))
+        self.moved = []
+        save = {"destination": self.ddp, "source": self.sdp, "colors": seen, "assigned": assigned, "moved": self.moved}
 
         with open(os.path.join(self.script_dir, savelocation), "w+") as json_file:
             json.dump(save, json_file, indent=4)    
 
     def loadsession(self):
         gui = self.gui
-        gridmanager = gui.gridmanager
         "If there is no last session, early exit"
         if not (os.path.exists(gui.lastsession) and os.path.isfile(gui.lastsession)):
             print("No Last Session!")
@@ -371,10 +333,8 @@ class SortImages:
             sdata = json_file.read()
             savedata = json.loads(sdata)
 
-        gui.thumbnailsize=savedata['thumbnailsize']
-
         self.sdp = savedata['source']
-        self.ddp = savedata['dest']
+        self.ddp = savedata['destination']
 
         gui.guisetup()
 
@@ -383,47 +343,26 @@ class SortImages:
         print(f'Source:   "{self.sdp}"')
         print(f'Target:   "{self.ddp}"')
 
-        "Load imagefiles and imagelists from session.json"
-        def make_list(lista, lista_name):
-            for line in savedata[lista_name]:
-                name = line['name']
-                full_path = line['path']+name
-                if os.path.exists(full_path):
-                    obj = Imagefile(name, full_path, os.path.splitext(name)[1][1:].lower())
-                    if line['id']: # If None, (thumb never generated, skip it (processes the imagelist))
-                        obj.thumbnail = self.data_dir + "\\" + line['id'] + self.THUMB_FORMAT
-                    obj.dest=line.get("dest")
-                    if obj.dest == None: obj.dest = ""
-                    obj.id=line['id']
-                    obj.file_size=line['file_size']
-                    obj.moved = line.get("moved")
-                    if obj.moved == None: obj.moved = False
-                    lista.append(obj) # clear of moved and dest.
-        gridsquarelist = []
-        make_list(self.imagelist, "imagelist")
-        make_list(gridsquarelist, "gridsquarelist")
-        moved_or_assigned = []
-        unassigned = []
-        for x in gridsquarelist:
-            if x.moved or x.dest:
-                moved_or_assigned.append(x)
+        temp = []
+        for x in savedata["assigned"]:
+            path, dest = x
+            name = os.path.basename(path)
+            parts = name.rsplit(".", 1)
+            if len(parts) == 2:
+                n, ext = parts
+                ext = ext.lower()
             else:
-                unassigned.append(x)
-        unassigned.reverse()
-        self.imagelist.extend(unassigned)
-        "Sort order"
-        self.gui.display_order.set(savedata["display_order"])
+                n = parts[0]
+                ext = ""
+            obj = Imagefile(name, path, ext.lower())
+            obj.dest = dest
+            obj.color = savedata["colors"][dest]
+            temp.append(obj)
+            
+        self.assigned = temp
 
-        gui.gridmanager.load_session(moved_or_assigned) 
+        self.validate()
 
-        self.gui.images_left_stats_strvar.set(
-            f"Left: {len(gridmanager.assigned)}/{len(gridmanager.gridsquarelist)-len(gridmanager.assigned)-len(gridmanager.moved)}/{len(self.imagelist)}")
- 
-        gui.images_sorted_strvar.set(f"Sorted: {gui.images_sorted.get()}")
-        gui.winfo_toplevel().title(f"EXP: {gui.images_sorted_strvar.get()}")
-        
-        self.gui.update()
-        #self.navigator.first()
 
     def load_themes(self):
         try:
@@ -438,35 +377,25 @@ class SortImages:
     def moveall(self):
         self.timer.start()
         gui = self.gui
-        gridmanager = gui.gridmanager
-        gridmanager.undo.clear()
-        temp = gridmanager.assigned.copy()
-        reopen = "none"
+        imagegrid = gui.imagegrid
+        temp = self.assigned.copy()
 
-        old = None
-        """if gui.Image_frame != None:
-            old = gui.Image_frame.obj
-            gui.middlepane_frame.grid_forget()
-            gui.Image_frame.close()
-            gui.unbind("<Configure>") ###
-            gui.Image_frame = None
-            reopen = "window" ###
-"""
         successfull = []
-        for x in temp:
-            success = x.obj.move()
+        for obj in temp:
+            success = obj.move()
             if success: # If move was successfull
-                gridmanager.assigned.remove(x)
-                gridmanager.moved.append(x)
+                self.assigned.remove(obj)
+                #imagegrid.moved.append(x)
                 gui.images_left_stats_strvar.set(
-                    f"Left: {len(gridmanager.assigned)}/{len(gridmanager.gridsquarelist)-len(gridmanager.assigned)-len(gridmanager.moved)}/{len(self.imagelist)}")
+                    f"Left: {len(self.assigned)}/{len(self.all_objs)-len(self.assigned)}/{len(self.all_objs)}")
                 gui.images_sorted.set(gui.images_sorted.get()+1)
                 gui.images_sorted_strvar.set(f"Sorted: {gui.images_sorted.get()}")
                 gui.winfo_toplevel().title(f"EXP: {gui.images_sorted_strvar.get()}")
 
-                successfull.append(x)
-        if self.gui.current_view.get() == "Assigned":
-            gridmanager.remove_squares(successfull, unload=True)
+                successfull.append(obj)
+        
+        """if self.gui.current_view.get() == "Assigned":
+            imagegrid.remove_squares(successfull, unload=True)"""
 
         print(self.timer.stop())
 
@@ -501,99 +430,125 @@ class SortImages:
             else: self.last_call_time = current_time
 
         gui = self.gui
-        dest_viewer = gui.destination_viewer
-        gridmanager = gui.gridmanager
-        navigator = self.navigator
+        imagegrid = gui.imagegrid
         "Find all marked images"
 
-        marked = []
-        marked_dest = []
+        
+        selection = None
+        current_view = gui.current_view.get()
+        if imagegrid.current_selection is not None and self.navigator.window_focused == "GRID":
+            index = self.imagegrid.current_selection
+            selection = imagegrid.image_items[index] # selection
 
-        if navigator.old and gui.focused_on_secondwindow and gui.focused_on_secondwindow and dest["path"] != navigator.old.obj.dest:
-            marked.append(navigator.old)
-        # treat this as as standalone...
-        marked = [x for x in gridmanager.displayedlist if x.checked.get() and x not in marked] or marked
+        igrid_marked = gui.imagegrid.selected.copy()
+        
+        dgrid_marked = []
+        d_selection = None
 
-        "Add from destview"
-        if hasattr(dest_viewer, "destwindow"):
-            marked_dest.extend([x for x in dest_viewer.displayedlist if x.checked.get()])
+        if hasattr(self.gui.folder_explorer, "destw") and self.gui.folder_explorer.destw != None and self.gui.folder_explorer.destw.winfo_exists():
+            if gui.folder_explorer.destw.current_selection is not None and self.navigator.window_focused == "DEST":
+                index = gui.folder_explorer.destw.current_selection
+                d_selection = gui.folder_explorer.destw.image_items[index] # selection
+            dgrid_marked = gui.folder_explorer.destw.selected.copy()
+            gui.folder_explorer.destw.selected.clear()
+        
+        if selection and d_selection:
+            selection = None; d_selection = None
+            print("both active")
 
-        if not marked and not marked_dest:
-            return
+        if not dgrid_marked and not igrid_marked:
+            if selection: igrid_marked.append(selection)
+            if d_selection: dgrid_marked.append(d_selection)
 
-        # Handle these based on the views...
-        # for some reason the last picture from unassigned refuses to work....
-        def helper(x):
-            obj = x.obj
+        gui.imagegrid.selected.clear()
+
+        # not parsing through selections of destw yet.
+        # dont know if mvoed fill update assigned list...
+        
+        remove = []
+        add = []
+        for entry in igrid_marked: # from main to destw
+            obj = entry.file
             obj.setdest(dest)
-            x.checked.set(False)
             obj.color = dest['color']
-            self.gui.gridmanager.change_square_color(obj, obj.color)
+            if hasattr(self.gui.folder_explorer, "destw") and self.gui.folder_explorer.destw != None and self.gui.folder_explorer.destw.winfo_exists():
+                for i in range(0, len(self.gui.folder_explorer.destw.image_items)):
+                    if obj == self.gui.folder_explorer.destw.image_items[i].file: # already there, remove
+                        remove.append(obj)
+                        break
+                if self.gui.folder_explorer.destw.destination == dest["path"]: # if its destined there, add
+                    add.append(obj)
+                if remove: 
+                    self.gui.folder_explorer.destw.remove(remove)
+                if add: 
+                    self.gui.folder_explorer.destw.insert_first(add)
         
-        # Removal and refreshing
-        for x in marked + marked_dest:
-            helper(x)
-        
-        if hasattr(dest_viewer, "destwindow") and dest_viewer.dest_path != dest["path"]:
-            dest_viewer.remove_squares(marked_dest)
-        else:
-            dest_viewer.refresh_squares(marked_dest)
-            for x in marked_dest:
-                gridmanager.assigned.remove(x.obj.gridsquare)
-                gridmanager.assigned.append(x.obj.gridsquare)
-    
-        if marked_dest:
-            if self.gui.current_view.get() == "Assigned":
-                gridmanager.refresh_squares([x.obj.gridsquare for x in marked_dest]) # rem dest from grid
-
-        if hasattr(dest_viewer, "destwindow") and marked: # add to dest from grid, refresh from grid to dest
-            if dest["path"] == dest_viewer.dest_path:
-                if self.gui.current_view.get() == "Assigned":
-                    add = []
-                    refresh = []
-                    for x in marked:
-                        if x.obj.destsquare == None:
-                            add.append(x.obj)
-                        else:
-                            refresh.append(x.obj.destsquare)
-                    if refresh:
-                        print("refresh")
-                        dest_viewer.refresh_squares(refresh)
-                        for x in refresh:
-                            gridmanager.assigned.remove(x.obj.gridsquare)
-                            gridmanager.assigned.append(x.obj.gridsquare)
-                        
-                    if add:
-                        print("makegridsquare2")
-                        dest_viewer.add_objs(add)
-                else:
-                    dest_viewer.add_objs([x.obj for x in marked])
+        objs = [entry.file for entry in igrid_marked] # igrid handles itself here.
+        if objs:
+            if current_view == "Unassigned": # assigned list is not in order of added!
+                index = imagegrid.remove(objs)
+                self.assigned.extend(objs)
+                pass
             else:
-                print("different")
-                dest_viewer.remove_squares([x.obj.destsquare for x in marked if x.obj.destsquare])
-
-        # Other functionality
-        gridmanager.move_to_assigned(marked) # dont activate when
-
-        # Load more
-        if gui.auto_load and (gui.current_view.get() == "Unassigned") and gui.squares_per_page_intvar.get() > len(gridmanager.displayedlist): 
-            to_load = gui.squares_per_page_intvar.get() - len(gridmanager.displayedlist)
-            left = len(self.imagelist)
-            items = min(to_load, left)
-            if items > 0: gridmanager.load_more(amount=items)
+                imagegrid.remove(objs, unload=False)
+                imagegrid.insert_first(objs)
+                for obj in objs:
+                    self.assigned.remove(obj)
+                self.assigned.extend(objs)
         
-        # Display next image
-        if navigator.window_focused == "GRID" and navigator.old and len(gridmanager.displayedlist) > 0:
-            navigator.select_next(gridmanager.displayedlist)
-        elif navigator.window_focused == "DEST" and navigator.old and len(dest_viewer.displayedlist) > 0:
-            navigator.select_next(dest_viewer.displayedlist)
-        temp = 0 if not hasattr(dest_viewer, "destwindow") else len(dest_viewer.displayedlist) 
-        if gui.current_view.get() != "Assigned" and len(gridmanager.displayedlist) == 0 and temp == 0:
-            gui.displayimage(None)
-            pass
+        for entry in dgrid_marked:
+            obj = entry.file
+            obj.setdest(dest)
+            obj.color = dest['color']
+            for i in range(0, len(self.gui.folder_explorer.destw.image_items)):
+                if obj == self.gui.folder_explorer.destw.image_items[i].file: # already there, remove
+                    remove.append(obj)
+                    break
+            if self.gui.folder_explorer.destw.destination == dest["path"]: # if its destined there, add
+                add.append(obj)
+            if remove: 
+                self.gui.folder_explorer.destw.remove(remove)
+            if add: 
+                self.gui.folder_explorer.destw.insert_first(add)
+        
+        objs = [entry.file for entry in dgrid_marked] # igrid handles itself here.
+        if objs:
+            if current_view == "Unassigned": # assigned list is not in order of added!
+                pass
+            else:
+                remove = []
+                add = []
+                for obj in objs:
+                    for i in range(0, len(imagegrid.image_items)):
+                        if obj == imagegrid.image_items[i].file: # already there, remove
+                            remove.append(obj)
+                            self.assigned.remove(obj)
+                            break
+                    add.append(obj)
+
+                imagegrid.remove(remove)
+                imagegrid.insert_first(add)
+                self.assigned.extend(add)
+                
+        # Load more
+        if gui.auto_load and (current_view == "Unassigned"): self.load_more()
+
+        if caller and hasattr(caller, "widget") and "toplevel" in caller.widget._w:
+            if self.gui.folder_explorer.destw.current_selection is not None and self.gui.folder_explorer.destw.current_selection < len(self.gui.folder_explorer.destw.image_items):
+                selected_entry = self.gui.folder_explorer.destw.image_items[self.gui.folder_explorer.destw.current_selection]
+                self.gui.folder_explorer.destw.make_selection(selected_entry)
+                if self.gui.show_next.get():
+                    self.gui.displayimage(selected_entry.file)
+        else:
+            if imagegrid.current_selection is not None and imagegrid.current_selection < len(imagegrid.image_items):
+                selected_entry = imagegrid.image_items[imagegrid.current_selection]
+                imagegrid.make_selection(selected_entry)
+                if self.gui.show_next.get():
+                    self.gui.displayimage(selected_entry.file)
+
         # Update stats
         gui.images_left_stats_strvar.set(
-            f"Left: {len(gridmanager.assigned)}/{len(gridmanager.gridsquarelist)-len(gridmanager.assigned)-len(gridmanager.moved)}/{len(self.imagelist)}")
+            f"Left: {len(self.assigned)}/{len(self.all_objs)-len(self.assigned)}/{len(self.all_objs)}")
     
     def validate(self, btn=None): # new session
         if btn and self.first_run: 
@@ -611,39 +566,55 @@ class SortImages:
         else:
             gui.source_entry_field.delete(0, tk.END)
             gui.source_entry_field.insert(0, "ERROR INVALID PATH")
-            
+            gui.source_entry_field.xview_moveto(1.0)
             
         if os.path.isdir(self.ddp):
             pass
         else:
             gui.destination_entry_field.delete(0, tk.END)
             gui.destination_entry_field.insert(0, "ERROR INVALID PATH")
+            gui.destination_entry_field.xview_moveto(1.0)
         
         if os.path.isdir(self.sdp) and os.path.isdir(self.ddp):
             if not hasattr(self.gui, "folder_explorer"):
                 gui.guisetup()
-            if gui.gridmanager.gridsquarelist:
-                gui.gridmanager.clear_all()
+            #if gui.imagegrid.gridsquarelist:
+            #    gui.imagegrid.clear_all()
             if gui.Image_frame != None:
                 gui.Image_frame.set_image(None)
             if gui.second_window_viewer != None:
                 gui.second_window_viewer.set_image(None)
             gui.folder_explorer.set_view(self.ddp)
             gui.buttons = gui.folder_explorer.buttons.copy()
-
-            gui.lastsession = "last_session.json"
             
             print("")
-            print(f'New session:  "{"last_session.json"}"')
             print(f'Source:   "{self.sdp}"')
             print(f'Target:   "{self.ddp}"')
             
             self.imagelist = self.walk(self.sdp, samepath)
+            gui.images_left_stats_strvar.set(
+            f"Left: {len(self.assigned)}/{len(self.imagelist)-len(self.assigned)}/{len(self.imagelist)}")
+
+            self.gui.imagegrid.clear_canvas(unload=True)
+            self.sort_imagelist()
             timer.start()
-            gui.gridmanager.load_more()
-        
+
         self.gui.update_idletasks()
         #self.navigator.first()
+
+    def load_more(self):
+        count_in_grid = len(self.gui.imagegrid.image_items)
+        amount = self.gui.squares_per_page_intvar.get()
+        to_load = amount - count_in_grid
+        left = len(self.imagelist)
+        items = min(to_load, left)
+        if items <= 0: return
+        load = []
+        a = len(self.imagelist)
+        for i in range(a - 1, a-1-items, -1):
+            load.append(self.imagelist.pop(i))
+
+        self.gui.imagegrid.add(load)
 
     def walk(self, src, samepath):
         imagelist = []
@@ -659,26 +630,179 @@ class SortImages:
                     ext = ""
                 if ext in self.supported_formats:imagelist.append(Imagefile(name, os.path.join(root, name), ext))
             if samepath: break
-
-        from operator import attrgetter
-        if self.gui.display_order.get().lower() == "date":
-            for obj in imagelist:
-                obj.mod_time = os.path.getmtime(obj.path)
-            imagelist.sort(key=attrgetter("mod_time"), reverse=False) # 65 ######## false
-        else:
-            from natsort import natsorted
-            imagelist = natsorted(imagelist, key=attrgetter("name"), reverse=True)
+        if self.assigned:
+            identity_check = set([x.path for x in self.assigned])
+            return [x for x in imagelist if x.path not in identity_check]
         return imagelist
 
-    def clear(self, *args):
-        from tkinter.messagebox import askokcancel
-        if askokcancel("Confirm", "Really clear your selection?"):
-            for x in self.gui.gridmanager.gridsquarelist:
-                obj = x.obj
-                if obj.frame: obj.frame.checked.set(False)
-                if obj.destframe: obj.destframe.checked.set(False)
+    def sort_imagelist(self):
+        # remove from imagelist, but add back from image_items
+        from operator import attrgetter
+        from natsort import natsorted
+        from PIL import Image
+        if self.first_run: return
+        gui = self.gui
 
-    def reorder_as_nearest(self, imagefiles, optimization=False):
+        def after_tasks():
+            self.all_objs = self.imagelist.copy()
+            if self.gui.current_view.get() == "Unassigned":
+                self.load_more()
+        if self.gui.current_view.get() != "Unassigned": return
+        MODE = gui.display_order.get().lower()
+        grid_objects = [entry.file for entry in gui.imagegrid.image_items]
+        self.imagelist.extend(reversed(grid_objects))
+        gui.imagegrid.clear_canvas()
+        if self.last_sort[0] == MODE.lower():
+            self.last_sort = (self.last_sort[0], not self.last_sort[1])
+        else:
+            self.last_sort = (MODE.lower(), False)
+
+        if gui.prediction.get():
+            def run():
+                # reorder by confidence.
+                CONF_THRESHOLD = 0.4            
+                no_pred = []
+                predictable = []
+                for x in self.imagelist:
+                    if x.pred:
+                        predictable.append(x)
+                    else:
+                        no_pred.append(x)
+
+                # group together with same predicted label.
+                classes = {}
+                for x in predictable:
+                    if classes.get(x.pred, None) == None:
+                        classes[x.pred] = []
+                    classes[x.pred].append(x)
+
+                # distinguish using colors
+                for key, c in classes.items():
+                    c[:] = [x for x in c if x.conf >= CONF_THRESHOLD]
+                    if len(c) < 2:
+                        continue
+                    
+                    if MODE.lower() == "filename":
+                        classes[key] = natsorted(c, key=attrgetter("name"), reverse=True if self.last_sort[1] == False else False)
+                    elif MODE.lower() == "type":
+                        c.sort(key=lambda x: x.ext.lower(), reverse=False if self.last_sort[1] == False else True)
+                    elif MODE.lower() == "date":
+                        for obj in c:
+                            obj.mod_time = os.path.getmtime(obj.path)
+                        c.sort(key=attrgetter("mod_time"), reverse=False if self.last_sort[1] == False else True)
+                    elif MODE == "size":
+                        for obj in c:
+                            file_stats = os.stat(obj.path)
+                            obj.file_size = file_stats.st_size
+                        c.sort(key=attrgetter("file_size"), reverse=False if self.last_sort[1] == False else True)
+                    elif MODE == "dimensions":
+                        from imageio import get_reader
+                        for obj in c:
+                            if obj.dimensions == (-2, 0.0):
+                                if obj.ext in ("mp4", "webm"):
+                                    try:
+                                        reader = None
+                                        reader = get_reader(obj.path)
+                                        pil_img = Image.fromarray(reader.get_data(0))
+                                        w, h = pil_img.size
+                                        ratio = w/h # ratio 
+                                        if w == h: orientation = 0.0
+                                        elif w < h: orientation = -1.0
+                                        else: orientation = 1.0
+                                        obj.dimensions = (orientation, ratio)
+                                    except Exception as e:
+                                        print(f"Couldn't read: {obj.name} : Error: {e}")
+                                    finally: 
+                                        if reader: reader.close()
+                                else:
+                                    with Image.open(obj.path) as pil_img:
+                                        w, h = pil_img.size
+                                        ratio = w/h # ratio
+                                        if w == h: orientation = 0.0
+                                        elif w < h: orientation = -1.0
+                                        else: orientation = 1.0
+                                        obj.dimensions = (orientation, ratio)
+                                        
+                        c.sort(key=attrgetter("dimensions"), reverse=False if self.last_sort[1] == False else True)
+
+                    elif MODE.lower() == "nearest":
+                        self.reorder_as_nearest(c, reverse=self.last_sort[1])
+                    elif MODE.lower() == "confidence":
+                        c.sort(key=lambda x: x.conf, reverse=False if self.last_sort[1] == False else True) 
+                classes = sorted(list(classes.values()), key=lambda x: len(x), reverse=False if self.last_sort[1] == False else True) # sorted by class and conf
+
+                predictable = []
+                for x in classes:
+                    predictable.extend(x)
+
+                def helper():
+                    self.imagelist = predictable + no_pred
+                    after_tasks()
+                gui.after(1, helper)
+            def helper():
+                self.reorder_as_nearest(self.imagelist, reverse=self.last_sort[1])
+                gui.after(1, run)
+            if MODE == "nearest":
+                a = threading.Thread(target=helper, daemon=True)
+            else:
+                a = threading.Thread(target=run, daemon=True)
+            a.start()
+            return        
+        elif MODE == "filename":
+            self.imagelist = natsorted(self.imagelist, key=attrgetter("name"), reverse=True if self.last_sort[1] == False else False)
+        elif MODE == "type":
+            self.imagelist.sort(key=lambda x: x.ext.lower(), reverse=False if self.last_sort[1] == False else True)
+        elif MODE == "date":
+            for obj in self.imagelist:
+                obj.mod_time = os.path.getmtime(obj.path)
+            self.imagelist.sort(key=attrgetter("mod_time"), reverse=False if self.last_sort[1] == False else True)
+        elif MODE == "size":
+            for obj in self.imagelist:
+                file_stats = os.stat(obj.path)
+                obj.file_size = file_stats.st_size
+            self.imagelist.sort(key=attrgetter("file_size"), reverse=False if self.last_sort[1] == False else True)
+        elif MODE == "dimensions":
+            from imageio import get_reader
+            for obj in self.imagelist:
+                if obj.dimensions == (-2, 0.0):
+                    if obj.ext in ("mp4", "webm", "mkv", "m4v", "mov"):
+                        try:
+                            reader = None
+                            reader = get_reader(obj.path)
+                            pil_img = Image.fromarray(reader.get_data(0))
+                            w, h = pil_img.size
+                            ratio = w/h # ratio 
+                            if w == h: orientation = 0.0
+                            elif w < h: orientation = -1.0
+                            else: orientation = 1.0
+                            obj.dimensions = (orientation, ratio)
+                        except Exception as e:
+                            print(f"Couldn't read: {obj.name} : Error: {e}")
+                        finally: 
+                            if reader: reader.close()
+                    else:
+                        with Image.open(obj.path) as pil_img:
+                            w, h = pil_img.size
+                            ratio = w/h # ratio
+                            if w == h: orientation = 0.0
+                            elif w < h: orientation = -1.0
+                            else: orientation = 1.0
+                            obj.dimensions = (orientation, ratio)
+
+            self.imagelist.sort(key=attrgetter("dimensions"), reverse=True if self.last_sort[1] == False else False)
+        elif MODE == "nearest": # threaded gen
+            def helper1():
+                self.reorder_as_nearest(self.imagelist, reverse=self.last_sort[1])
+                gui.after(1, after_tasks)
+            a = threading.Thread(target=helper1, daemon=True) # dont freeze the program do it threaded
+            a.start()
+            print("Started thread to sort by Nearest Neighbour. Please wait.")
+            return
+
+        after_tasks()
+        #main_thread()
+        
+    def reorder_as_nearest(self, imagefiles, optimization=False, reverse=False):
         import numpy as np
         import concurrent.futures
         import time
@@ -916,6 +1040,8 @@ class SortImages:
 
         remaining = [o for o in imagefiles if o not in objs_with_both]
         imagefiles[:] = ordered_objs + remaining
+        if reverse:
+            imagefiles.reverse()
 
         print(time.perf_counter()-start)
 
@@ -934,11 +1060,11 @@ class SortImages:
             self.gui.current_ram_strvar.set(f"RAM: {get_memory_usage() / (1024 ** 2):.2f} MB")
 
         "Anim: displayedlist with frames/displayedlist with framecount/(queue)"
-        temp = [x for x in self.gui.gridmanager.displayedlist if x.obj.frames]
+        temp = [x for x in self.imagegrid.image_items if x.file.frames]
         self.gui.animation_stats_var.set(f"Anim: {len(self.animate.running)}/{len(temp)}")
 
         "Frames: frames + frames_dest / max"
-        temp = [x.obj.frames for x in self.gui.gridmanager.displayedlist if x.obj.frames]
+        temp = [x.file.frames for x in self.imagegrid.image_items if x.file.frames]
         c = 0
         for x in temp:
             c += len(x)
@@ -959,7 +1085,7 @@ class ThumbManager:
             self.char_width_cache = {}
             self.measure_calls = 0
             self.ellipsis = "...."
-            self.padding = 24
+            self.padding = 0
             self.ellipsis_width = self.gui.smallfont.measure(self.ellipsis)
 
         def truncate(self, filename):
@@ -1035,7 +1161,6 @@ class ThumbManager:
                 except Exception:
                     import traceback
                     traceback.print_exc()
-
     thumb_ext = {"png", "jpg", "jpeg", "bmp", "pcx", "tiff", "psd", "jfif", "gif", "webp", "avif"}
     anim_ext = {"gif", "webp", "webm", "mp4", "mkv", "m4v", "mov"}
     video_ext = {"webm", "mp4", "mkv", "m4v", "mov"}
@@ -1116,8 +1241,6 @@ class ThumbManager:
         self._thumb_worker_running = False
         self._frame_worker_running = False
 
-
-    # --- Thumbnail Worker ---
     def _thumb_worker(self):
         if self.stop_event.is_set():
             self._thumb_worker_running = False
@@ -1152,12 +1275,11 @@ class ThumbManager:
             self.thumb_queue.task_done()
             gui.after(0, update_left)
 
-    # --- Frame Worker ---
     def _frame_worker(self):
         if self.stop_event.is_set():
             self._frame_worker_running = False
             return
-        while not self.frame_queue.empty():
+        while not self.frame_queue.empty() and self.thumb_queue.unfinished_tasks == 0:
             try:
                 item = self.frame_queue.get_nowait()
                 self.frame_pool.submit(self._process_frame, item)
@@ -1222,18 +1344,12 @@ class ThumbManager:
         self._thumb_worker_running = False
         self._frame_worker_running = False
 
-        # Drain queues
         for q in (self.thumb_queue, self.frame_queue):
             with q.mutex:
                 q.queue.clear()
         
+    def generate(self, imgfiles):
         self.stop_event.clear()
-        
-    # --- Generate method ---
-    def generate(self, imgfiles, dest=False):
-        gui = self.gui
-
-        # Queue thumbnails first
         for x in imgfiles:
             if not x.thumb:
                 self.left += 1
@@ -1241,35 +1357,35 @@ class ThumbManager:
             else:
                 pass
 
-        # Queue animated/video frames
         for x in imgfiles:
             if x.ext in self.anim_ext and not x.frames:
                 self.left_f += 1
                 self.frame_queue.put(x)
-                gui.gridmanager.change_square_color(x, "purple")
-        # Start worker threads
+                #gui.imagegrid.change_square_color(x, "purple")
         self.start_background_worker()
 
     def gen_name(self, obj):
         if self.fileManager.thumbs.stop_event.is_set() or not (obj.frame or obj.destframe): return
         trunc = obj.truncated_filename or self.truncator.truncate(obj.name)
         obj.truncated_filename = trunc
-        instances = [f for f in (obj.frame, obj.destframe) if f]
-        for x in instances:
-            x.obj2.set(trunc)
-            
+        if obj.frame: self.gui.imagegrid.canvas.itemconfig(obj.frame.ids["label"], text=obj.truncated_filename)   
+        if obj.destframe: self.gui.folder_explorer.destw.canvas.itemconfig(obj.destframe.ids["label"], text=obj.truncated_filename)         
+
     def gen_thumb(self, obj, size, cache_dir, user="default", mode="as_is"): # session just calls this for displayedlist
         gui = self.fileManager.gui
         THUMB_FORMAT = self.fileManager.THUMB_FORMAT
         def load_thumb(thumb):
             "Loads thumb to canvas"
             def run(thumb):
+                if self.stop_event.is_set(): return
                 self.gen_name(obj)
                 instances = [f for f in (obj.frame, obj.destframe) if f]
                 if instances: obj.thumb = thumb
-                for x in instances:
-                    x.canvas.itemconfig(x.canvas_image_id, image=obj.thumb)
+                for f in instances:
+                    f.change_image(obj.thumb)
+
             gui.after_idle(run, thumb)
+
         # first we check if we need to stop, and make sure id is generated.
         if self.stop_event.is_set(): return
         if user=="default" and not (obj.frame or obj.destframe): return
@@ -1289,6 +1405,7 @@ class ThumbManager:
             try:
                 if user != "default": return
                 with Image.open(thumbnail_path) as pil_img:
+                    obj.thumbnail = thumbnail_path
                     thumb = ImageTk.PhotoImage(pil_img)
                     load_thumb(thumb)
                 return
@@ -1396,7 +1513,7 @@ class ThumbManager:
         
         def gui_enable_animation(o=obj):
             animate.add_animation(o)
-            self.gui.gridmanager.change_square_color(obj, "orange")
+            #self.gui.imagegrid.change_square_color(obj, "orange")
         if obj.ext in self.video_ext:
             from pymediainfo import MediaInfo
             def pick_sampling_rate(duration: float, native_fps: float,min_fps: float = 12.0, max_frames: int = 500, mode: str = "stretch"):
@@ -1462,7 +1579,7 @@ class ThumbManager:
                     for t in timestamps:
                         if self.stop_event.is_set() or not (obj.frame or obj.destframe):
                             gui.after_idle(obj.clear_frames)
-                            self.gui.gridmanager.change_square_color(obj, "red")
+                            #self.gui.imagegrid.change_square_color(obj, "red")
                             break
                         container.seek(int(t / time_base), any_frame=False, backward=True, stream=video_stream)
                         for packet in container.demux(video_stream):
@@ -1494,7 +1611,7 @@ class ThumbManager:
                 while True:
                     if self.stop_event.is_set() or not (obj.frame or obj.destframe):
                         gui.after_idle(obj.clear_frames)
-                        self.gui.gridmanager.change_square_color(obj, "red")
+                        #self.gui.imagegrid.change_square_color(obj, "red")
                         return
                     try:
                         
@@ -1516,74 +1633,216 @@ class ThumbManager:
 
         if len(obj.frames) <= 1:
             gui.after_idle(obj.clear_frames)
-            self.gui.gridmanager.change_square_color(obj, obj.color)
+            #self.gui.imagegrid.change_square_color(obj, obj.color)
         obj.change_color_flag = True
 
-class Animate:
+class Animate: # this can stay here. it must touch both gridviewers so..
     def __init__(self, fileManager):
-        self.fileManager = fileManager
         self.gui = fileManager.gui
-        self.gridmanager = self.gui.gridmanager
+        self.imagegrid = fileManager.imagegrid
 
         self.running = {}  # obj -> after_id (for cancellation)
 
     def add_animation(self, obj):
         """Start per-object animation respecting frame delays."""
-        if obj in self.running:
-            return  # already animating
+        if obj in self.running: return
 
         obj.index = 0
         self._step(obj)
 
     def _step(self, obj):
-        gui = self.gui
         instances = [f for f in (obj.frame, obj.destframe) if f]
 
-        # stop if object no longer visible or has no frames
         if not instances or not obj.frames:
-            self.stop(obj)
+            self.stop(obj.id)
             return
+        
+        # frame also has ref to the canvas! or it has a ref to function to change image.
 
-        # update image on both canvases
         frame_img = obj.frames[obj.index][0]
         for f in instances:
             try:
-                f.canvas.itemconfig(f.canvas_image_id, image=frame_img)
-            except Exception:
-                pass
+                f.change_image(frame_img)
+            except Exception as e:
+                print(e)
 
-        # optional color refresh
-        if obj.change_color_flag:
-            obj.change_color_flag = False
-            self.gridmanager.change_square_color(obj, obj.color)
-
-        # advance frame index safely
         obj.index = (obj.index + 1) % len(obj.frames)
         delay = obj.frames[obj.index][1] or 100
 
-        # schedule next frame
-        after_id = gui.after(delay, lambda: self._step(obj))
+        after_id = self.gui.after(delay, self._step, obj)
         self.running[obj.id] = after_id
 
-    def stop(self, obj):
-        """Stop one animation and clear references."""
-        after_id = self.running.pop(obj.id, None)
-        if after_id:
-            try:
-                self.gui.after_cancel(after_id)
-            except Exception:
-                pass
-        obj.index = 0
+    def stop(self, id1):
+        after_id = self.running.pop(id1, None)
+        if after_id: self.gui.after_cancel(after_id)
 
-    def remove_animation(self, obj):
-        """Alias for stop()."""
-        self.stop(obj)
+class Predictions:
+    def __init__(self, fileManager):
+        self.fileManager = fileManager
+        self.gui = fileManager.gui
+        self.train_thread = None
 
-    def stop_all(self):
-        """Stop all running animations."""
-        for obj in list(self.running):
-            self.stop(obj)
+    def select_model(self):
+        from tkinter import filedialog as tkFileDialog
+        self.gui.model_path = tkFileDialog.askopenfilename(defaultextension=".pt", filetypes=(("Model File", "*.pt"),),initialdir=self.fileManager.model_dir, title="Select a model to use.")
 
+    def open_category_manager(self):
+        def on_close():
+            self.gui.categories = [path for path, state in self.app.folder_states.items() if state == "category"]
+            self.gui.excludes = [path for path, state in self.app.folder_states.items() if state == "exclude"]
+            self.app.destroy()
+        from Advanced_sorting import FolderTreeApp
+        dest_root = self.destination_entry_field.get()
+        self.app = FolderTreeApp(dest_root, self.gui.categories, self.gui.excludes, self.manual_training) 
+        self.app.protocol("WM_DELETE_WINDOW", on_close)
+                 
+    def get_folder_contents_with_labels(self, destinations, excludes=[]):
+        categories = [os.path.abspath(c) for c in destinations]
+        excludes = set(os.path.abspath(e) for e in excludes)
+        data = {}
+        for category_path in categories:
+            label = os.path.basename(category_path)
+            label_list = data.get(label, [])
+            data[label] = label_list
+            print(f"[Category] {category_path}")
+
+            for root, dirs, files in os.walk(category_path):
+                abs_root = os.path.abspath(root)
+
+                # Prune dirs list to exclude excluded or category folders, so os.walk won't go into them
+                pruned_dirs = []
+                for d in dirs:
+                    d_abs = os.path.abspath(os.path.join(root, d))
+
+                    if any(d_abs == ex or d_abs.startswith(ex + os.sep) for ex in excludes):
+                        pass
+                    elif any(d_abs == cat for cat in categories):
+                        pass
+                    else:
+                        pruned_dirs.append(d)
+                dirs[:] = pruned_dirs
+                
+                print(f"  Subfolder: {abs_root}")
+
+                for file in files:
+                    if file.lower().endswith(("png", "gif", "jpg", "jpeg", "bmp", "pcx", "tiff", "webp", "psd", "jfif", "mp4", "mkv", "m4v", "mov", "webm")):
+                        data[label].append((os.path.join(root, file)))
+        return data
+         
+    def manual_training(self, name="latest_model"):
+        def train():   
+            self.gui.categories = [path for path, state in self.app.folder_states.items() if state == "category"]
+            self.gui.excludes = [path for path, state in self.app.folder_states.items() if state == "exclude"]
+            names_2_path = {os.path.basename(x): x for x in self.gui.categories}
+            with open(os.path.join(self.fileManager.model_dir, f"{name}_paths.json"), "w") as f:
+                json_dict = {}
+                json_dict["names_2_path"] = names_2_path
+                json.dump(json_dict, f, indent=4)
+
+            print("Category folders:")
+            for path in self.gui.categories:
+                print("  ", path)
+
+            print("Excluded folders:")
+            for path in self.excludes:
+                print("  ", path)
+
+            label_path_dict = self.get_folder_contents_with_labels(self.gui.categories, self.gui.excludes)
+
+            self.gui.train_status_var.set("Building dataset...")
+            from Dataset_gen import Dataset_gen
+            Data = Dataset_gen(self.fileManager.train_dir, label_path_dict, self.gui.prediction_thumbsize, self.fileManager)       
+            path_hash_lookup = Data.gen_thumbs()
+            Data.split(0.9)
+            import sys
+            self.gui.gui.train_status_var.set("Starting model...")
+            script = os.path.join(os.path.dirname(__file__), "train_model.py")
+            python_exe = sys.executable
+            
+            names_2_path = {os.path.basename(x): x for x in self.gui.categories}
+            cmd = [
+                python_exe, script,
+                "--data", self.fileManager.train_dir,
+                "--epochs", str(100),
+                "--name", name
+            ]
+            import subprocess
+            path_to_results_csv = os.path.join(self.fileManager.model_dir, "classify", "latest_run", "results.csv")
+
+            subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_CONSOLE)
+            self.gui.model_path = os.path.join(self.fileManager.model_dir, f"{name}.pt")
+            
+        if self.train_thread and self.train_thread.is_alive():
+            print("Already running.")
+            return
+        self.train_thread = threading.Thread(target=train, name="Manual-training", daemon=True)
+        self.train_thread.start()
+    
+    def automatic_training(self):
+        "Generate all files from destinations. Assign as categories. Need self.labels... Inferring size and pred_dir location."
+        def train():
+            self.gui.train_status_var.set("Labelling dataset...")
+
+            label_path_dict = self.get_folder_contents_with_labels([folder_path for _, folder_path, _, _, _ in self.gui.buttons])
+            
+            self.gui.train_status_var.set("Building dataset...")
+            from Dataset_gen import Dataset_gen
+            Data = Dataset_gen(self.fileManager.train_dir, label_path_dict, self.gui.prediction_thumbsize, self.fileManager)       
+            path_hash_lookup = Data.gen_thumbs()
+            Data.split(0.9)
+            
+            self.gui.train_status_var.set("Starting model...")
+            import sys
+            script = os.path.join(os.path.dirname(__file__), "train_model.py")
+            python_exe = sys.executable
+            names_2_path = {os.path.basename(x[1]): x[1] for x in self.gui.buttons}
+
+            with open(os.path.join(self.fileManager.model_dir, "latest_model_paths.json"), "w") as f:
+                json_dict = {}
+                json_dict["names_2_path"] = names_2_path
+                json.dump(json_dict, f, indent=4)
+
+            cmd = [
+                python_exe, script,
+                "--data", self.fileManager.train_dir,
+                "--epochs", str(100),
+                "--name", "latest_model"
+            ]
+
+            import subprocess
+            path_to_results_csv = os.path.join(self.fileManager.model_dir, "classify", "latest_run", "results.csv")
+
+            subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_CONSOLE)
+
+            self.model_path = os.path.join(self.fileManager.model_dir, f"latest_model.pt")
+            self.gui.train_status_var.set("Model Ready.")
+        
+        if self.train_thread and self.train_thread.is_alive():
+            print("Already running.")
+            return
+        if self.gui.imagegrid.image_items:
+            self.train_thread = threading.Thread(target=train, name="Auto-training", daemon=True)
+            self.train_thread.start()
+        else:
+            print("You must start a new session before auto-training to generate the destinations.")
+    
+    def model_infer(self, model=None, imagefiles=[]):
+        if not imagefiles:
+            return
+        self.gui.train_status_var.set("Loading model...")
+        from Advanced_sorting import Model_inferer
+        model_inferer = Model_inferer(self.fileManager, model, self.gui.prediction_thumbsize)
+        for x in imagefiles:
+            if x.id == None:
+                x.gen_id()
+        lookup = {x.id: x for x in imagefiles}
+        self.gui.train_status_var.set("Sorting...")
+
+        thread = threading.Thread(target=model_inferer.infer, args=(imagefiles, lookup), daemon=True)
+        thread.start()
+
+        self.last_model = model
+        
 class Timer:
     def __init__(self):
         self.creation_time = 0
