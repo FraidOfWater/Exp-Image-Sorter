@@ -12,5 +12,7 @@ pymediainfo
 av
 pyvips
 python-vlc
+faiss-cpu
 
-pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu130
+#pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu130
+#or probably one your gpu supports?
