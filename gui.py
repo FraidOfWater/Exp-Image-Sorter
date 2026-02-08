@@ -327,8 +327,9 @@ Group by Prediction (Order):
 
         # 3. Use relative positioning to center it
         middle_label.place(relx=0.5, rely=0.5, anchor="center")
+        self.middle_label = middle_label
 
-        imagegrid = ImageGrid(toppane, parent=self.fileManager, thumb_size=self.thumbnailsize, center=False, bg=self.d_theme["grid_background_colour"], 
+        imagegrid = ImageGrid(toppane, parent=self.fileManager, thumb_size=self.thumbnailsize, center=False, 
                                     theme=self.d_theme)
         self.destgrid = None
         leftui.grid_propagate(False)
@@ -588,6 +589,9 @@ Group by Prediction (Order):
         self.imagegrid.add(list_to_display)
         
     def change_theme(self, theme_name):
+        self.theme.set(theme_name)
+        
+        
         def set_vals(theme):
             def recursive(children, all_children={}):
                 def add_to_dict(key):
@@ -656,6 +660,14 @@ Group by Prediction (Order):
         theme = self.themes[theme_name]
         self.d_theme = theme
 
+        self.viewer_prefs["colors"] = {
+                "canvas": self.d_theme["viewer_bg"],
+                "statusbar": self.d_theme["main_colour"],
+                "button": self.d_theme["button_colour"],
+                "active_button": self.d_theme["button_colour_when_pressed"],
+                "text": self.d_theme["field_text_colour"]
+                }
+
         self.config(bg=theme["main_colour"])
         self.style.configure('Theme_dividers.TPanedwindow', background=theme["pane_divider_colour"])
 
@@ -666,8 +678,10 @@ Group by Prediction (Order):
             self.Image_frame.style.configure("bg.TFrame", background=theme["viewer_bg"])
             self.Image_frame.canvas.config(bg=theme["viewer_bg"])
 
-        self.imagegrid.configure(bg=theme["grid_background_colour"])
+        self.imagegrid.configure(bg=self.d_theme["grid_background_colour"])
+        self.imagegrid.canvas.configure(bg=theme["grid_background_colour"])
         self.imagegrid.change_theme(theme=self.d_theme)
+        self.middle_label.config(bg=theme["viewer_bg"])
 
         if hasattr(self, "folder_explorer") and hasattr(self.folder_explorer, "destw") and self.folder_explorer.destw != None and self.folder_explorer.destw.winfo_exists():
             self.folder_explorer.destw.configure(bg=theme["grid_background_colour"])
