@@ -18,5 +18,3 @@ pyvips
 python-vlc
 faiss-cpu
 pyperclip
-
-
