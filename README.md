@@ -5,7 +5,7 @@ Description:
 Scenario:
 - Are you sorting images to specific folders via windows file-manager? Well no more, this program lets you preview images, animations and videos, and move them to preset folders using only your keyboard.
 
-This is a fork of Simple-Image-Sorter by Legendsmith https://github.com/Legendsmith/Simple-Image-Sorter. Code from this project may freely be added upstream.
+This is a fork of Simple-Image-Sorter by Legendsmith https://github.com/Legendsmith/Simple-Image-Sorter. Code from this project may be freely added upstream.
 
 # Changes: #
 
