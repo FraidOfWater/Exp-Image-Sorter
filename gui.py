@@ -85,11 +85,11 @@ class GUIManager(tk.Tk):
 
         self.viewer_prefs = jprefs.get("viewer", {})
         self.viewer_prefs["colors"] = self.viewer_prefs.get("colors", None) or {
-                "canvas": "#303276",
-                "statusbar": "#202041",
-                "button": "#24255C",
-                "active_button": "#303276",
-                "text": "#FFFFFF"
+                "canvas": self.d_theme["viewer_bg"],
+                "statusbar": self.d_theme["main_colour"],
+                "button": self.d_theme["button_colour"],
+                "active_button": self.d_theme["button_colour_when_pressed"],
+                "text": self.d_theme["field_text_colour"]
                 }
 
         if self.main_geometry: self.geometry(self.main_geometry)
