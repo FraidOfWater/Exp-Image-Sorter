@@ -4,6 +4,8 @@ from tkinter import ttk
 import tkinter as tk
 from tkinter import simpledialog
 import os
+from sorter import ImageViewer
+
 class PrefilledInputDialog(simpledialog.Dialog):
     def __init__(self, parent, title, message, default_text=""):
         self.message = message
@@ -52,32 +54,29 @@ class Navigator:
             self.widget = widget
             self.keysym = keysym
             self.state = state
-
-    #if focus on destviewer, use dest displayedlist for indexing. how to check... have variable that updates based on what is focused and check that for every action.
-    "Presets"
     def __init__(self, fileManager):
         " This module handles key-presses and mouse-clicks. It is responsible for turning on and off the colored frame around images if they are selected."
         "Also handles special events, such as changing views and select next"
         self.gui = fileManager.gui
         gui = self.gui
-        self.gridmanager = gui.gridmanager
+        self.imagegrid = gui.imagegrid
         self.fileManager = fileManager
-        self.displayedlist = self.gridmanager.displayedlist
         style = ttk.Style()
         self.style = style
-        style.configure("Theme_square1.TCheckbutton", background=gui.square_text_box_colour, foreground=gui.square_text_colour) # Theme for Square
-        style.configure("Theme_square2.TCheckbutton", background=gui.square_text_box_selection_colour, foreground=gui.square_text_colour) # Theme for Square (selected)
+        style.configure("Theme_square1.TCheckbutton", background=gui.d_theme["square_text_box_colour"], foreground=gui.d_theme["square_text_colour"]) # Theme for Square
+        style.configure("Theme_square2.TCheckbutton", background=gui.d_theme["square_text_box_selection_colour"], foreground=gui.d_theme["square_text_colour"]) # Theme for Square (selected)
         
         self.toggle = False
         self.gui.bind_all("<Button-2>", self.middle_mouse_button)
         self.gui.bind_all("<MouseWheel>", self.scroll_imagegrid)
         self.index = 0
-        self.old = None # Last changed frame / Default PREVIOUS / Always current selection (for showing next upon moves)
 
         self.window_focused = "GRID"
 
-        self.actual_gridsquare_width = self.gui.thumbnailsize + self.gui.gridsquare_padx + self.gui.square_border_size + self.gui.whole_box_size
-        self.actual_gridsquare_height = self.gui.thumbnailsize + self.gui.gridsquare_pady + self.gui.square_border_size + self.gui.whole_box_size + self.gui.checkbox_height
+        self.actual_gridsquare_width = self.gui.thumbnailsize + self.gui.d_theme["gridsquare_padx"] + self.gui.d_theme["square_border_size"] + self.gui.d_theme["whole_box_size"]
+        self.actual_gridsquare_height = self.gui.thumbnailsize + self.gui.d_theme["gridsquare_pady"] + self.gui.d_theme["square_border_size"] + self.gui.d_theme["whole_box_size"] + self.gui.d_theme["checkbox_height"]
+
+        self.search_widget = ImageViewer(self) # needs current canvas and ?
     
     def middle_mouse_button(self, event):
         if event.state != 2: return
@@ -95,24 +94,6 @@ class Navigator:
             self.bindhandler(Navigator.Dummy("scroll", "Right", event.state))
         else:
             self.bindhandler(Navigator.Dummy("scroll", "Left", event.state))
-
-    def select(self, new, event):
-        if event.state == 2:
-            return
-        "From a click event, removes highlight from previous frame, adds it to the clicked one"
-        #if new == self.old and self.old: #show next scenario <- what? this breaks, and doesnt seem to have anything in common with show next.
-        #    return #### test
-        self.window_focused = "GRID"
-        self.displayedlist = self.gridmanager.displayedlist
-        if new == None: return
-        if self.old:
-            self.default(self.old)
-        if new:
-            self.selected(new)
-            self.index = self.displayedlist.index(new) #updates index
-            self.gui.displayimage(new.obj)
-            self.old = new #updates old
-        self.gui.update()
     
     def open_file(self, frame, event):
         if event.state == 2:
@@ -122,206 +103,34 @@ class Navigator:
         import subprocess
         subprocess.Popen(r'explorer /select,"{}"'.format(os.path.abspath(obj.path)))
 
-    def first(self):
-        self.window_focused = "GRID"
-        self.displayedlist = self.gridmanager.displayedlist
-        if not self.displayedlist: return
-        self.index = 0
-        self.old = self.displayedlist[0]
-        self.selected(self.old)
-        self.gui.displayimage(self.old.obj)
-
-    def dest_select(self, new):
-        "From a click event, removes highlight from previous frame, adds it to the clicked one"
-        self.window_focused = "DEST"
-        self.displayedlist = self.gridmanager.displayedlist
-        if new == self.old and self.old: #show next scenario
-            return
-        if self.old:
-            self.default(self.old)
-        self.selected(new)
-        self.old = new #updates old
-        
-        self.index = self.gui.destination_viewer.displayedlist.index(new) #updates index
-        
-        self.gui.displayimage(new.obj)
-
-    def view_change(self):
-        "When view is changed, remove highlight from previous frame, adds it to the first frame"
-        lista = self.displayedlist
-        if self.old:
-            self.default(self.old)
-            self.old = None
-        if not self.gui.show_next.get() or len(lista) == 0:
-            return
-        if self.gui.current_view.get() == "Assigned" or self.gui.current_view.get() == "Moved":
-            if self.gui.Image_frame != None or self.gui.second_window_viewer != None:
-                # Assigned list is *displayed* in "last added"-manner. (by tkinter, so here we use [-1], as that is newest in list)
-                self.selected(lista[-1])
-                self.old = lista[-1]
-                self.gui.displayimage(lista[-1].obj)
-        else:
-            if self.gui.Image_frame != None or self.gui.second_window_viewer != None:
-                self.selected(lista[0])
-                self.old = lista[0]
-                self.gui.displayimage(lista[0].obj)
-
-    def select_next(self, lista):
-        "Called by setdestination, removes highlight from previous frame, adds it to the one entering index"
-
-        if self.old: self.default(self.old)
-        else: return
-
-        self.old = None
-        if len(lista) == 0: return # no images left
-
-        if self.window_focused == "DEST":
-            if  self.index >= len(lista):
-                self.old = lista[-1]
-            elif self.index == 0:
-                self.old = lista[self.index]
-            else:
-                self.old = lista[self.index-1]
-
-        else:
-            if self.index < len(lista): # in limits
-                self.old = lista[self.index]
-        
-        if self.old:
-            self.selected(self.old)
-            if self.gui.show_next.get() and (self.gui.Image_frame or self.gui.second_window_viewer):
-                self.gui.displayimage(self.old.obj)
-
     def ask_prefilled_text(self, parent, title, message, default_text=""):
         dialog = PrefilledInputDialog(parent, title, message, default_text)
         return dialog.result
     
     def bindhandler(self, event):
         #print("registered:", event)
-        def advance():
-            if self.gui.show_next.get() and old != self.old and ((self.gui.Image_frame != None and self.gui.Image_frame.filename) or self.gui.second_window_viewer != None):
-                self.gui.displayimage(self.old.obj)
         def undo():
             # move last from assigned to unassigned if any.
-            if self.gridmanager.assigned and self.gui.current_view.get() in ("Unassigned",) :
-                index, listindex, last = self.gridmanager.undo.pop()
-                self.gridmanager.assigned.remove(last)
-                self.gridmanager.unassigned.insert(listindex, last)
-                #self.displayedlist.insert(listindex, last)
-                last.obj.dest = ""
-                self.gridmanager.add_squares([(last)], insert=(index, listindex))
-                self.default(self.old)
-                self.selected(self.displayedlist[listindex])
-                self.old = self.displayedlist[listindex]
-                if self.gui.show_next.get():
-                    if self.old:
-                        self.gui.displayimage(self.old.obj)
-                self.gui.update()
+            if self.fileManager.assigned and self.gui.current_view.get() in ("Unassigned",) :
+                last = self.fileManager.assigned.pop()
+                last.color = None
+                last.dest = ""
+                self.imagegrid.insert_first(last, last.pos)
+                self.gui.displayimage(last)
         #updownleftright = 38,40,37,39
-        def scroll_up(reverse=None):
-            if self.window_focused == "GRID":
-                target_grid = self.gui.imagegrid
-                columns = int(max(1, (target_grid.winfo_width()+2) / self.actual_gridsquare_width))
-            elif self.window_focused == "DEST":
-                target_grid = self.gui.destination_viewer.destgrid
-                columns = int(max(1, (target_grid.winfo_width()+1) / self.actual_gridsquare_width))
-
-            rows = int((len(self.displayedlist) + columns - 1) / columns)
-            if reverse:
-                current_row = (len(self.displayedlist)-self.index-1) // columns
-            else:
-                current_row = self.index // columns
-            first_visible_row = round(target_grid.yview()[0] * rows)  # Index of the first visible item
-            #print(f"In a row: {columns}, rows: {rows}, current_row: {current_row}, first visible row: {first_visible_row}, last visible row: {last_visible_row}")
-            if first_visible_row > current_row: # Scroll up
-                target_scroll = (first_visible_row-1) / rows
-                target_grid.yview_moveto(target_scroll)
-        def scroll_down(reverse=None):
-            if self.window_focused == "GRID":
-                target_grid = self.gui.imagegrid
-                columns = int(max(1, (target_grid.winfo_width()+2) / self.actual_gridsquare_width))
-            elif self.window_focused == "DEST":
-                target_grid = self.gui.destination_viewer.destgrid
-                columns = int(max(1, (target_grid.winfo_width()+1) / self.actual_gridsquare_width))
-                
-            rows = int((len(self.displayedlist) + columns - 1) / columns)
-            if reverse:
-                current_row = (len(self.displayedlist)-self.index-1) // columns
-            else:
-                current_row = self.index // columns
-            first_visible_row = round(target_grid.yview()[0] * rows)  # Index of the first visible item
-            last_visible_row = round(target_grid.yview()[1] * rows)  # Index of the last visible item
-            if last_visible_row <= current_row: # Scroll down
-                target_scroll = (first_visible_row+1) / rows
-                target_grid.yview_moveto(target_scroll)
-        def highlight_right(reverse=None):
-            check_bound = self.index+1
-            if check_bound >= len(self.displayedlist):
-                return
-            self.index = check_bound
-            self.default(self.old) 
-            self.selected(self.displayedlist[self.index])
-            self.old = self.displayedlist[self.index]
-            if reverse: scroll_up(reverse=True)
-            else: scroll_down()
-            advance()
-        def highlight_left(reverse=None):
-            check_bound = self.index-1
-            if check_bound < 0:
-                return
-            self.index = check_bound
-            self.default(self.old)
-            self.selected(self.displayedlist[self.index])
-            self.old = self.displayedlist[self.index]
-            if reverse: scroll_down(reverse=True)
-            else: scroll_up()
-            advance()
-        def highlight_up(reverse=None):
-            if ((self.gui.second_window_viewer and hasattr(self.gui.second_window_viewer, "app2") and self.gui.second_window_viewer.app2.search_active) or (self.gui.Image_frame and hasattr(self.gui.Image_frame, "app2") and self.gui.Image_frame.app2.search_active)): return
-            if self.window_focused == "GRID":
-                columns = int(max(1, (self.gui.imagegrid.winfo_width()+2) / self.actual_gridsquare_width))
-            elif self.window_focused == "DEST":
-                columns = int(max(1, (self.gui.destination_viewer.destgrid.winfo_width()+1) / self.actual_gridsquare_width))
-
-            check_upper_bound = self.index-columns
-            if check_upper_bound < 0:
-                return
-            self.index = check_upper_bound
-            self.default(self.old)
-            self.selected(self.displayedlist[self.index])
-            self.old = self.displayedlist[self.index]
-            if reverse: scroll_down(reverse=True)
-            else: scroll_up()
-            advance()
-        def highlight_down(reverse=None):
-            if ((self.gui.second_window_viewer and hasattr(self.gui.second_window_viewer, "app2") and self.gui.second_window_viewer.app2.search_active) or (self.gui.Image_frame and hasattr(self.gui.Image_frame, "app2") and self.gui.Image_frame.app2.search_active)): return
-            if self.window_focused == "GRID":
-                columns = int(max(1, (self.gui.imagegrid.winfo_width()+2) / self.actual_gridsquare_width))
-            elif self.window_focused == "DEST":
-                columns = int(max(1, (self.gui.destination_viewer.destgrid.winfo_width()+1) / self.actual_gridsquare_width))
-
-            check_lower_bound = self.index+columns
-            if check_lower_bound > len(self.displayedlist)-1:
-                return
-            self.index = check_lower_bound
-            self.default(self.old)
-            self.selected(self.displayedlist[self.index])
-            self.old = self.displayedlist[self.index]
-            if reverse: scroll_up(reverse=True)
-            else: scroll_down()
-            advance()
         def space(reverse=None):
             if self.gui.second_window_viewer: 
                 self.gui.second_window_viewer.master.focus()
         def autosort():
-            if self.old:
-                """if self.old.obj != self.gui.displayed_obj:
-                    self.gui.displayimage(self.old.obj)"""
-                
-                if self.old.obj.predicted_path:
-                    print("Sent:", self.old.obj.name[:20], "to", self.old.obj.predicted_path)
+            if not self.gui.prediction.get(): return
+            imagegrid = self.imagegrid
+            s = imagegrid.current_selection
+            if s is not None and s < len(imagegrid.image_items):
+                a = imagegrid.image_items[s].file.predicted_path
+                if a:
+                    print("Sent:", imagegrid.image_items[s].file.name[:20], "to", a)
                     c =  "#FFFFFF" #self.gui.folder_explorer.color_cache[self.old.obj.predicted_path]
-                    dest = {"path": self.old.obj.predicted_path, "color": c}
+                    dest = {"path": a, "color": c}
                     self.fileManager.setDestination(dest, caller="autosort")
         def rename():
             if not self.old: return
@@ -356,10 +165,9 @@ class Navigator:
         if isinstance(event.widget, Entry):
             return
 
-        reverse = True if self.gui.current_view.get() == "Assigned" or self.window_focused == "DEST" else False
-        self.displayedlist = self.gui.destination_viewer.displayedlist if self.window_focused == "DEST" else self.gridmanager.displayedlist
+        reverse = True if self.gui.current_view.get() == "Assigned" else False
 
-        if event.state == 4 and event.keysym in ("z", "Z"):
+        if event.state in (4,6) and event.keysym.lower() == "z":
             undo()
         elif event.keysym == "Return":
             #if self.gui.current_view.get() == "Predictions":
@@ -368,46 +176,23 @@ class Navigator:
             rename()
         elif event.keysym == "Delete":
             trash()
-            """elif event.keysym == "Escape":
-                if self.gui.second_window_viewer:
-                    self.gui.displayed_obj = None
-                    self.gui.second_window_viewer.window_close()
-                if self.gui.Image_frame: self.gui.Image_frame.filename = None"""
+        elif event.keysym in ("Left", "Right", "Down", "Up"):
+            if ((self.gui.second_window_viewer and hasattr(self.gui.second_window_viewer, "app2") and self.gui.second_window_viewer.app2.search_active) or (self.gui.Image_frame and hasattr(self.gui.Image_frame, "app2") and self.gui.Image_frame.app2.search_active)):
+                pass
+            else:
+                if event.state != 262147 and self.gui.folder_explorer.scroll_enabled and event.keysym in ("Up", "Down"):
+                    self.gui.folder_explorer.nav(event.keysym)
+                else:
+                    if "toplevel" in event.widget._w:
+                        self.gui.folder_explorer.destw.navigate(event.keysym)
+                    else:
+                        self.gui.imagegrid.navigate(event.keysym)
+                    if self.gui.show_next.get():
+                        if "toplevel" in event.widget._w:
+                            self.gui.displayimage(self.gui.folder_explorer.destw.image_items[self.gui.folder_explorer.destw.current_selection].file)
+                        else:
+                            self.gui.displayimage(self.imagegrid.image_items[self.imagegrid.current_selection].file)
         else:
-            action = {"Left": highlight_right,
-                    "Right": highlight_left,
-                    "Down": highlight_up,
-                    "Up": highlight_down,
-                    "space": space
-                } if reverse else {
-                    "Left": highlight_left,
-                    "Right": highlight_right,
-                    "Down": highlight_down,
-                    "Up": highlight_up,
-                    "space": space
-                }
-            old = self.old
+            action = {"space": space}
             action[event.keysym](reverse)
             self.gui.imagegrid.update()
-    def default(self, frame):
-        "Reverts colour back to default"
-        if not frame:
-            return
-        
-        f_color = frame.obj.dest_color if frame.obj.dest != "" else self.gui.square_default
-        f_color = frame.obj.color if self.gui.prediction.get() else f_color
-        try:
-            frame.configure(highlightcolor = f_color,  highlightbackground = f_color) # Trying to access destroyed destsquare? # If dest is closed, remove self.old if any frame was there.
-            frame.canvas.configure(bg=f_color, highlightcolor=f_color, highlightbackground = f_color)
-            frame.c.configure(style="Theme_square1.TCheckbutton")
-            frame.cf.configure(bg=self.gui.square_text_box_colour)
-        except:
-            pass
-    def selected(self, frame):
-        if not frame:
-            return
-
-        frame.configure(highlightbackground = self.gui.square_selected, highlightcolor = self.gui.square_selected)
-        frame.canvas.configure(bg=self.gui.square_selected, highlightbackground = self.gui.square_selected, highlightcolor = self.gui.square_selected)
-        frame.c.configure(style="Theme_square2.TCheckbutton")
-        frame.cf.configure(bg=self.gui.square_text_box_selection_colour)
