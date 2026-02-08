@@ -552,10 +552,11 @@ class ImageGrid(tk.Frame):
     
     def make_selection(self, entry):
         if self.current_selection is not None:
-            c_entry = self.image_items[self.current_selection]
-            if c_entry:
-                self.canvas.itemconfig(c_entry.ids["rect"], 
-                                       outline=self.theme.get("square_default"), fill=self.theme.get("square_default"))
+            if len(self.image_items) > self.current_selection:
+                c_entry = self.image_items[self.current_selection] # old
+                if c_entry:
+                    self.canvas.itemconfig(c_entry.ids["rect"], 
+                                        outline=self.theme.get("square_default"), fill=self.theme.get("square_default"))
         self.canvas.itemconfig(entry.ids["rect"], outline=self.theme.get("square_selected"), fill=self.theme.get("square_selected"))
         self.current_selection = self.image_items.index(entry)
         self.fileManager.navigator.window_focused = "DEST" if self.dest else "GRID"
