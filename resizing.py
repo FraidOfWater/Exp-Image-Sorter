@@ -5,7 +5,7 @@ from collections import OrderedDict
 from threading import Thread, Lock, Event
 from tkinter import ttk
 Image.MAX_IMAGE_PIXELS = 346724322
-vipsbin = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vips-dev-8.17", "bin")
+vipsbin = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vips-dev-8.18", "bin")
 os.environ['PATH'] = os.pathsep.join((vipsbin, os.environ['PATH']))
 os.add_dll_directory(vipsbin)
 import pyvips
