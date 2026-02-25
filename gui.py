@@ -1,12 +1,7 @@
 import os, tkinter as tk, tkinter.font as tkfont
-
 from tkinter import ttk
 from tkinter.ttk import Panedwindow
-
-from folders import FolderExplorer
-from imagegrid import ImageGrid
-from resizing import Application
-
+# antialiasing should be put on the statusbar, and statusbar should be able to be toggled from the hover menu.
 class GUIManager(tk.Tk):
     "Initialization"
     Image_frame = None
@@ -14,15 +9,16 @@ class GUIManager(tk.Tk):
     focused_on_secondwindow = False
     last_model = None
     displayed_obj = None
-    def __init__(self, fileManager, jprefs) -> None:
+    def __init__(self, jprefs, jthemes) -> None:
         super().__init__()
-        self.fileManager = fileManager
+        self.fileManager = None
         self.train_thread = None
         self.train_status_var = tk.StringVar(value="")
         self.model_path = None
         self.selected_btn = None
         "INITIALIZE USING PREFS: THEME"
-        self.themes = fileManager.jthemes
+        self.jprefs = jprefs
+        self.themes = jthemes
         default = self.themes.get("Midnight", {})
         self.d_theme = default
             
@@ -62,8 +58,8 @@ class GUIManager(tk.Tk):
         gui = jprefs.get("qui", {}) # should be spelled gui XD
         self.squares_per_page_intvar = tk.IntVar(value=int(gui.get("squares_per_page", 17)))
         a = gui.get("display_order")
-        if a not in ("Filename", "Date", "Type", "Size", "Dimensions"):
-            a = "Filename"
+        if a not in ("Smart", "Filename", "Date", "Type", "Size", "Dimensions"):
+            a = "Smart"
         self.display_order = tk.StringVar(value=a)
 
         self.show_next = tk.BooleanVar(value=bool(gui.get("show_next", True)))
@@ -87,6 +83,7 @@ class GUIManager(tk.Tk):
         self.viewer_prefs["colors"] = self.viewer_prefs.get("colors", None) or {
                 "canvas": self.d_theme["viewer_bg"],
                 "statusbar": self.d_theme["main_colour"],
+                "statusbar_divider": self.d_theme.get("main_accent", self.d_theme["main_colour"]),
                 "button": self.d_theme["button_colour"],
                 "active_button": self.d_theme["button_colour_when_pressed"],
                 "text": self.d_theme["field_text_colour"]
@@ -124,9 +121,10 @@ class GUIManager(tk.Tk):
         entry.xview_moveto(1.0)
         if type == "dst" and hasattr(self, "folder_explorer") and self.folder_explorer:
             self.folder_explorer.set_view(path)
+            self.fileManager.validate("button")
         elif type == "src":
             self.fileManager.validate("button")
-
+    
     def initialize(self):
         self.smallfont = tkfont.Font(family='Helvetica', size=10)
         style = ttk.Style()
@@ -182,11 +180,11 @@ class GUIManager(tk.Tk):
         category_menu = tk.Menu(menu_bar, tearoff=tk.OFF)
         theme_menu = tk.Menu(menu_bar, tearoff=tk.OFF)
 
-        menu_bar.add_cascade(label="File", menu=file_menu)
-        menu_bar.add_cascade(label="View", menu=view_menu)
+        #menu_bar.add_cascade(label="File", menu=file_menu)
+        #menu_bar.add_cascade(label="View", menu=view_menu)
         menu_bar.add_cascade(label="Order", menu=order_menu)
-        menu_bar.add_cascade(label="Training", menu=category_menu)
         menu_bar.add_cascade(label="Themes", menu=theme_menu)
+        menu_bar.add_cascade(label="Training", menu=category_menu)
 
         # File
         file_menu.add_command(label="Source Folder", command=lambda: self.filedialog(self.source_entry_field, type="src"), accelerator="Ctrl+S")
@@ -203,6 +201,7 @@ class GUIManager(tk.Tk):
         # View
         self.prediction = tk.BooleanVar(value=False)
         
+        order_menu.add_radiobutton(label="Filename++", value="Smart", variable=self.display_order, command=self.fileManager.sort_imagelist)
         order_menu.add_radiobutton(label="Filename",value="Filename", variable=self.display_order, command=self.fileManager.sort_imagelist)
         order_menu.add_radiobutton(label="Date", value="Date", variable=self.display_order, command=self.fileManager.sort_imagelist)
         order_menu.add_radiobutton(label="Type",value="Type", variable=self.display_order, command=self.fileManager.sort_imagelist)
@@ -210,6 +209,7 @@ class GUIManager(tk.Tk):
         order_menu.add_radiobutton(label="Dimensions", value="Dimensions", variable=self.display_order, command=self.fileManager.sort_imagelist)
         order_menu.add_radiobutton(label="Nearest", value="Nearest", variable=self.display_order, command=self.fileManager.sort_imagelist)
         order_menu.add_radiobutton(label="Confidence", value="Confidence", variable=self.display_order, command=self.fileManager.sort_imagelist)
+
         order_menu.entryconfig("Nearest", state="disabled")
         self.order_menu = order_menu
         order_menu.entryconfig("Confidence", state="disabled")
@@ -327,10 +327,7 @@ Group by Prediction (Order):
 
         # 3. Use relative positioning to center it
         middle_label.place(relx=0.5, rely=0.5, anchor="center")
-        self.middle_label = middle_label
-
-        imagegrid = ImageGrid(toppane, parent=self.fileManager, thumb_size=self.thumbnailsize, center=False, 
-                                    theme=self.d_theme)
+        
         self.destgrid = None
         leftui.grid_propagate(False)
         self.leftui = leftui
@@ -342,12 +339,16 @@ Group by Prediction (Order):
         toppane.add(middlepane_frame, weight=0)
         self.first_page_buttons()
 
+        from imagegrid import ImageGrid
+        imagegrid = ImageGrid(toppane, parent=self.fileManager, thumb_size=self.thumbnailsize, center=False, bg=self.d_theme["grid_background_colour"], 
+                                    theme=self.d_theme)
         imagegrid.grid(row=0, column=0, padx = max(0, self.d_theme["gridsquare_padx"]-1), pady=max(0, self.d_theme["gridsquare_pady"]-1), sticky="NSEW")
         imagegrid.rowconfigure(1, weight=0)
         imagegrid.rowconfigure(0, weight=1)
         imagegrid.columnconfigure(1, weight=0)
         imagegrid.columnconfigure(0, weight=1)
         toppane.add(imagegrid, weight=0)
+        self.imagegrid = imagegrid
 
         toppane.grid(row=0, column=0, sticky="NSEW")
         toppane.configure(style='Theme_dividers.TPanedwindow')
@@ -355,7 +356,7 @@ Group by Prediction (Order):
         self.toppane = toppane
         
         self.middlepane_frame = middlepane_frame
-        self.imagegrid = imagegrid
+        
 
         self.change_theme(self.theme.get())
         
@@ -405,7 +406,6 @@ Group by Prediction (Order):
         for x, t in [(self.source_entry_field, "src"), (self.destination_entry_field, "dst"), (self.session_entry_field, "session")]:
             x.bind("<Button-3>", lambda e, x=x, t=t: self.filedialog(x, type=t))
 
-    
     def guisetup(self):
         self.order_menu.entryconfig("Nearest", state="normal")
         filemanager = self.fileManager
@@ -437,7 +437,8 @@ Group by Prediction (Order):
 
         view_menu = tk.OptionMenu(frame, self.current_view, *view_options)
         view_menu.config(highlightthickness=0)
-                 
+
+        from folders import FolderExplorer
         self.folder_explorer = FolderExplorer(self.leftui, self.hotkeys)
         self.new_session_b.destroy()
         
@@ -494,15 +495,22 @@ Group by Prediction (Order):
                 self.second_window_viewer = None # Clear reference
                 
             # Refresh image on the internal canvas
-            index = self.imagegrid.current_selection
-            self.displayimage(self.imagegrid.image_items[index].file)
+            if self.imagegrid.current_selection_entry:
+                self.Image_frame.canvas.update()
+                self.fileManager.navigator.search_widget.new_canvas(self.Image_frame.canvas)
+                self.displayimage(self.imagegrid.current_selection_entry.file)
             
             # Link search widget to dock canvas
             if self.Image_frame:
                 self.fileManager.navigator.search_widget.new_canvas(self.Image_frame.canvas)
+            
+            self.bind("<Control-s>", lambda e: self.Image_frame.statusbar.set(not self.Image_frame.statusbar.get()))
+            self.bind("<Control-S>", lambda e: self.Image_frame.statusbar.set(not self.Image_frame.statusbar.get()))
 
         # 3. SECOND WINDOW LOGIC
         else:
+            original = self.title().split(" -", 1)[0]
+            self.title(original)
             try:
                 # We already 'forgot' m_frame in step 1, so we just handle the viewer switch
                 if self.Image_frame:
@@ -513,13 +521,19 @@ Group by Prediction (Order):
                 toppane.add(imagegrid)
                 
                 # Refresh image (this will trigger secondary window creation)
-                index = self.imagegrid.current_selection
-                self.displayimage(self.imagegrid.image_items[index].file)
+                if self.imagegrid.current_selection_entry:
+                    self.displayimage(self.imagegrid.current_selection_entry.file)
                 
                 # Link search widget to external window canvas
                 if self.second_window_viewer:
                     self.fileManager.navigator.search_widget.new_canvas(self.second_window_viewer.canvas)
-                    
+
+                def safe_call(event=None):
+                    if self.second_window_viewer and hasattr(self.second_window_viewer, "statusbar"):
+                        self.second_window_viewer.statusbar.set(not self.second_window_viewer.statusbar.get())
+                self.bind("<Control-s>", safe_call)
+                self.bind("<Control-S>", safe_call)
+
             except Exception as e:
                 print(f"Error in change_viewer (Window Mode): {e}")
 
@@ -587,11 +601,8 @@ Group by Prediction (Order):
         self.imagegrid.clear_canvas(unload=True)
         self.imagegrid.theme = self.d_theme
         self.imagegrid.add(list_to_display)
-        
+    
     def change_theme(self, theme_name):
-        self.theme.set(theme_name)
-        
-        
         def set_vals(theme):
             def recursive(children, all_children={}):
                 def add_to_dict(key):
@@ -660,14 +671,6 @@ Group by Prediction (Order):
         theme = self.themes[theme_name]
         self.d_theme = theme
 
-        self.viewer_prefs["colors"] = {
-                "canvas": self.d_theme["viewer_bg"],
-                "statusbar": self.d_theme["main_colour"],
-                "button": self.d_theme["button_colour"],
-                "active_button": self.d_theme["button_colour_when_pressed"],
-                "text": self.d_theme["field_text_colour"]
-                }
-
         self.config(bg=theme["main_colour"])
         self.style.configure('Theme_dividers.TPanedwindow', background=theme["pane_divider_colour"])
 
@@ -678,10 +681,8 @@ Group by Prediction (Order):
             self.Image_frame.style.configure("bg.TFrame", background=theme["viewer_bg"])
             self.Image_frame.canvas.config(bg=theme["viewer_bg"])
 
-        self.imagegrid.configure(bg=self.d_theme["grid_background_colour"])
-        self.imagegrid.canvas.configure(bg=theme["grid_background_colour"])
+        self.imagegrid.configure(bg=theme["grid_background_colour"])
         self.imagegrid.change_theme(theme=self.d_theme)
-        self.middle_label.config(bg=theme["viewer_bg"])
 
         if hasattr(self, "folder_explorer") and hasattr(self.folder_explorer, "destw") and self.folder_explorer.destw != None and self.folder_explorer.destw.winfo_exists():
             self.folder_explorer.destw.configure(bg=theme["grid_background_colour"])
@@ -703,7 +704,6 @@ Group by Prediction (Order):
             self.second_window_viewer.canvas.config(bg=theme["viewer_bg"])
         set_vals(theme)
         
-        #navigator.selected(navigator.old)
         self.update()
 
     "Viewer"
@@ -711,7 +711,7 @@ Group by Prediction (Order):
         "Display image in viewer"
         self.displayed_obj = obj
         self.focused_on_secondwindow = True
-
+        from resizing import Application
         if self.dock_view.get(): # Dock
             flag = False
             if not self.Image_frame:
