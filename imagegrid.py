@@ -1,15 +1,12 @@
 import tkinter as tk
-from PIL import Image, ImageTk
 import os
 from time import perf_counter
-import psutil
-process = psutil.Process(os.getpid())
 
 # Img processing here?
-# Virtual?
 
 class dummy:
-    def __init__(self, file, ids, tag, row, col, center_x, center_y, canvas):
+    theme = {}
+    def __init__(self, file, ids, tag, row, col, center_x, center_y, canvas, image_items, make_selection):
         self.file = file
         self.ids = ids
         self.img_id = ids["img"]
@@ -19,9 +16,21 @@ class dummy:
         self.center_x = center_x
         self.center_y = center_y
         self.canvas = canvas
+        self.image_items = image_items
+        self.make_selection = make_selection
     
-    def change_image(self, image):
+    def change_image(self, image, change_color=False):
         self.canvas.itemconfig(self.img_id, image=image)
+        #if self.file.dest == "":
+         #   c = 
+        if not change_color: return
+        c = self.file.color or self.theme.get("grid_background_colour", None)
+        txt_box_c = self.theme.get("grid_background_colour", None)
+        # it needs to compare itself to the last item of image_items. if it is there, it should cahnge color.
+        if self.canvas.master.current_selection_entry != None and self.canvas.master.current_selection_entry.file == self.file: 
+            self.make_selection(self)
+        else: self.canvas.itemconfig(self.ids["rect"], outline=c, fill=c)
+        self.canvas.itemconfig(self.ids["txt_rect"], outline=txt_box_c, fill=txt_box_c)
 
 class imgfile:
     def __init__(self, imgtk, filename):
@@ -29,6 +38,7 @@ class imgfile:
         self.truncated_filename = filename
         self.frame = None
         self.color = None
+        self.dest = ""
 
 class ImageGrid(tk.Frame):
     def __init__(self, master, parent=None, thumb_size=256, center=False, 
@@ -36,7 +46,7 @@ class ImageGrid(tk.Frame):
                  theme={"square_default": "white",
                         "square_selected": "white",
                         "grid_background_colour": "white",
-                        "textbox_size": 25, 
+                        "checkbox_height": 25, 
                         "square_padx": 4, 
                         "square_pady": 4, 
                         "square_outline": "white",
@@ -44,15 +54,15 @@ class ImageGrid(tk.Frame):
                         "square_text": "white"
                         }):
         super().__init__(master)
-        self.config(bg=theme["grid_background_colour"])
+        self.config(bg=bg)
         self.dest = dest
         self.fileManager = parent
         self.destination = destination
         # thumb size MUST be set in PREFS. This only loads the generated thumbs from cache, never resizes or creates them.
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        assets_dir = os.path.join(script_dir, "assets")
-        
-        self.btn_thumbs = {"default": ImageTk.PhotoImage(Image.open(os.path.join(assets_dir, "button.png"))), "pressed": ImageTk.PhotoImage(Image.open(os.path.join(assets_dir, "button_pressed.png")))}
+        self.script_dir = os.path.dirname(os.path.abspath(__file__))
+        self.assets_dir = os.path.join(self.script_dir, "assets")
+
+        self.btn_thumbs = {}
 
         self.configure(borderwidth=0, border=0, bd=0, padx=0, pady=0)
         self.thumb_size = (thumb_size, thumb_size)
@@ -74,15 +84,15 @@ class ImageGrid(tk.Frame):
         self.cols = 0
         self.rows = 0
 
+        self.bg = bg
+
         self.id_index = 0
 
         self.image_items = []
         self.item_to_entry = {}  # Mapping from canvas item ID to entry
         self.selected = []
         self.current_selection = None
-
-        self.canvas = tk.Canvas(self, highlightthickness=0, bg="blue", highlightbackground="blue",highlightcolor="blue")
-
+        self.current_selection_entry = None
         from tkinter import ttk
         # --- NEW: BETTER SCROLLBAR STYLE ---
         self.style = ttk.Style(self)
@@ -98,8 +108,7 @@ class ImageGrid(tk.Frame):
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
-        self.canvas = tk.Canvas(self, highlightthickness=0, bg=theme["grid_background_colour"])
-        
+        self.canvas = tk.Canvas(self, highlightthickness=0, bg=bg)
         # Apply the TTK Scrollbar with the custom style
         self.v_scroll = ttk.Scrollbar(self, orient="vertical", 
                                       style="Custom.Vertical.TScrollbar",
@@ -111,55 +120,65 @@ class ImageGrid(tk.Frame):
         self.canvas.grid(row=0, column=0, sticky="nsew")
         self.v_scroll.grid(row=0, column=1, sticky="ns")
 
+        self.canvas.configure(bg=self.bg)  # Force recolor, otherwise managed automatically by tb.Window
+
         self.canvas.bind("<MouseWheel>",    self._on_mousewheel)
-        self.canvas.bind("<Button-1>",      self._on_canvas_click)
+        self.canvas.bind("<Button-1>",      lambda e: (self._on_canvas_click(e), self.focus()))
         self.canvas.bind("<Button-3>",      self._on_canvas_click)
         self.canvas.bind("<Button-2>",      self._on_canvas_middle_mouse)
     
         self.pack(fill="both", expand=True)
 
-        self.canvas.update()
-        self.canvas.bind("<Configure>", self._on_resize)
-        
+        #self.canvas.update()
+        def helper():
+            self.canvas.bind("<Configure>", self._on_resize)
+        self.after(1, helper)
         def ram():
+            import psutil
+            process = psutil.Process(os.getpid())
             mem = process.memory_info().rss / 1024 / 1024  # RSS = Resident Set Size in bytes
             print(f"Memory used: {mem:.2f} MB", end="\r", flush=True)
             self.after(100, ram)
-        #ram()
+        #self.after(500, ram)
 
     def load_more(self, filelist) -> None:
         "Load the given images into the grid."
         if not filelist: return
         self.add(filelist)
     
-    def clear_canvas(self, unload=False):
+    def clear_canvas(self, unload=False, new_list=None):
         "Remove all items from canvas, but dont unload thumbnails or animations from memory."
-        grid_objects = [entry.file for entry in self.image_items]
-        self.selected.clear()
+        items = set(entry.file for entry in self.image_items)
         self.current_selection = None
-
-        for obj in grid_objects:
-            entry = obj.frame
-            
-            self.item_to_entry.clear()
-            
-            if not self.dest:
-                obj.frame = None
-                if not obj.destframe and unload:
-                    self.fileManager.animate.stop(obj.id)
-                    obj.thumb = None
-                    obj.clear_frames()
-            else:
-                obj.destframe = None
-                if not obj.frame and unload:
-                    self.fileManager.animate.stop(obj.id)
-                    obj.thumb = None
-                    obj.clear_frames()
-        
+        self.current_selection_entry = None
+        self.selected.clear()
+        self.item_to_entry.clear()
         self.image_items.clear()
         self.canvas.delete("all")
 
-    def insert_first(self, new_images, pos=None):
+        if new_list: # list of images that will be unloaded, others are untouched
+            dont_unload_set = items.copy()
+            dont_unload_set = dont_unload_set.intersection(new_list)
+            items.difference_update(dont_unload_set) # unload
+            for obj in dont_unload_set:
+                if not self.dest:
+                    obj.frame = None
+                else:
+                    obj.destframe = None
+
+        for obj in items:
+            if not self.dest:
+                obj.frame = None
+                x = obj.destframe
+            else:
+                obj.destframe = None
+                x = obj.frame
+            if not x and unload:
+                self.fileManager.animate.stop(obj.id)
+                obj.thumb = None
+                obj.clear_frames()
+
+    def insert_first(self, new_images, pos=0):
         """
         Insert new image squares at the top of the grid.
         """
@@ -180,11 +199,13 @@ class ImageGrid(tk.Frame):
         center_offset = 0 if not self.center else max((canvas_w - cols * sqr_w) // 2, 0)
 
         w = self.theme.get("square_border_size")
-        default_bg = self.theme.get("square_default")
         text_c = self.theme.get("square_text_colour")
-        grid_background_colour = self.theme.get("grid_background_colour")
 
-        btn_img = self.btn_thumbs["default"]
+        btn_img = self.btn_thumbs.get("default", None)
+        if btn_img == None:
+            from PIL import Image, ImageTk
+            self.btn_thumbs = {"default": ImageTk.PhotoImage(Image.open(os.path.join(self.assets_dir, "button.png"))), "pressed": ImageTk.PhotoImage(Image.open(os.path.join(self.assets_dir, "button_pressed.png")))}
+            btn_img = self.btn_thumbs["default"]
         btn_offset_x = w
         btn_offset_y = w * 2
         text_offset_x = btn_offset_x + btn_img.width() + 2
@@ -200,7 +221,18 @@ class ImageGrid(tk.Frame):
 
         # --- Step 2: Create new entries at the top positions ---
         new_entries = []
+
         for i, file in enumerate(new_images):
+            if file.thumb == None:
+                default_bg = "purple"
+                grid_background_color = "purple"
+            elif file.dest != "":
+                default_bg = file.color
+                grid_background_color = self.theme.get("grid_background_colour")
+            else:
+                default_bg = self.theme.get("square_default")
+                grid_background_color = self.theme.get("grid_background_colour")
+
             row = i // cols
             col = i % cols
 
@@ -213,12 +245,10 @@ class ImageGrid(tk.Frame):
             tag = f"img_{self.id_index}"
             self.id_index += 1
 
-            file.color = file.color or default_bg
-
             rect = self.canvas.create_rectangle(
                 current_col, current_row,
                 current_col + sqr_w, current_row + sqr_h,
-                width=w, outline=file.color, fill=file.color,
+                width=w, outline=default_bg, fill=default_bg,
                 tags=tag
             )
 
@@ -231,7 +261,7 @@ class ImageGrid(tk.Frame):
             txt_rect = self.canvas.create_rectangle(
                 current_col, current_row + sqr_w,
                 current_col + sqr_w, current_row + sqr_h + btn_size,
-                width=w, outline=grid_background_colour, fill=grid_background_colour,
+                width=w, outline=grid_background_color, fill=grid_background_color,
                 tags=tag
             )
 
@@ -255,7 +285,7 @@ class ImageGrid(tk.Frame):
                 "rect": rect, "img": img, "label": label,
                 "but": but, "txt_rect": txt_rect
             }
-            entry = dummy(file, item_ids, tag, row, col, x_center, y_center, self.canvas)
+            entry = dummy(file, item_ids, tag, row, col, x_center, y_center, self.canvas, self.image_items, self.make_selection)
             if not self.dest:
                 file.frame = entry
             else:
@@ -268,17 +298,14 @@ class ImageGrid(tk.Frame):
 
         # --- Step 3: Prepend the new entries to the list ---
 
-        if pos:
-            self.image_items.insert(pos, entry)
-        else:
-            self.image_items = new_entries + self.image_items
+        self.image_items.insert(pos, entry)
 
         # --- Step 4: Reflow everything to recompute correct rows/cols ---
-        if objs_w_no_thumbs: self.fileManager.thumbs.generate(objs_w_no_thumbs)
-        if pos:
-            self.reflow_from_index(pos)
-        else:
-            self.reflow_from_index(0)
+        if objs_w_no_thumbs: 
+            self.fileManager.thumbs.generate(objs_w_no_thumbs)
+
+        self.reflow_from_index(0)
+        self.make_selection(self.image_items[pos])
 
     def insert(self, pos, obj):
         self.image_items.insert(pos, obj)
@@ -300,15 +327,28 @@ class ImageGrid(tk.Frame):
         objs_w_no_thumbs = [obj for obj in new_images if not obj.thumb]
         
         w = self.theme.get("square_border_size")
-        btn_img = self.btn_thumbs["default"]
+        btn_img = self.btn_thumbs.get("default", None)
+        if btn_img == None:
+            from PIL import Image, ImageTk
+            self.btn_thumbs = {"default": ImageTk.PhotoImage(Image.open(os.path.join(self.assets_dir, "button.png"))), "pressed": ImageTk.PhotoImage(Image.open(os.path.join(self.assets_dir, "button_pressed.png")))}
+            btn_img = self.btn_thumbs["default"]
         btn_offset_x = w
         btn_offset_y = w*2 # btn_img.height()
         text_offset_x = btn_offset_x+btn_img.width()+2
         text_offset_y = btn_offset_y+1
-        default_bg = self.theme.get("square_default")
-        grid_background_colour = self.theme.get("grid_background_colour")
         text_c = self.theme.get("square_text_colour")
+        
         for i, file in enumerate(new_images, temp): # starting index is self.image_items length.
+            if file.thumb == None:
+                default_bg = "purple"
+                grid_background_color = "purple"
+            elif file.dest != "":
+                default_bg = file.color
+                grid_background_color = self.theme.get("grid_background_colour")
+            else:
+                default_bg = self.theme.get("square_default")
+                grid_background_color = self.theme.get("grid_background_colour")
+
             row = i // cols
             col = i % cols
             
@@ -320,9 +360,6 @@ class ImageGrid(tk.Frame):
             y_center = current_row + thumb_h // 2 + (w + 1) // 2
 
             tag = f"img_{self.id_index}"
-            
-            if file.dest == "":
-                file.color = default_bg
 
             rect = self.canvas.create_rectangle(
                 current_col,
@@ -330,8 +367,8 @@ class ImageGrid(tk.Frame):
                 current_col + sqr_w,
                 current_row + sqr_h,
                 width=w,
-                outline=file.color,
-                fill=file.color,
+                outline=default_bg,
+                fill=default_bg,
                 tags=tag)
             
             img = self.canvas.create_image(
@@ -347,8 +384,8 @@ class ImageGrid(tk.Frame):
                 current_col + sqr_w,
                 current_row + sqr_h + btn_size,
                 width=w,
-                outline=grid_background_colour,
-                fill=grid_background_colour,
+                outline=grid_background_color,
+                fill=grid_background_color,
                 tags=tag)
             
             but_offset = current_row + thumb_h
@@ -368,13 +405,14 @@ class ImageGrid(tk.Frame):
                 tags=tag)
 
             item_ids = {"rect":rect, "img":img, "label":label, "but":but, "txt_rect":txt_rect}
-            entry = dummy(file, item_ids, tag, row, col, x_center, y_center, self.canvas)
+            dummy.theme = self.theme
+            entry = dummy(file, item_ids, tag, row, col, x_center, y_center, self.canvas, self.image_items, self.make_selection)
             if not self.dest:
                 file.frame = entry
             else:
                 file.destframe = entry
 
-            if self.fileManager.gui.prediction.get():
+            if self.fileManager != None and self.fileManager.gui.prediction.get():
                 if file.conf:
                     if file.conf < 0.5: r, g, b = (255, int(510 * file.conf), 0)
                     else: r, g, b = (int(255 * (1 - file.conf)), 255, 0)
@@ -393,7 +431,7 @@ class ImageGrid(tk.Frame):
                     overlay_pad_y = 4
                     overlay_font = ("Arial", 12, "bold")
                     overlay_fg = "white"
-                    overlay_bg = self.theme["main_colour"]
+                    overlay_bg = self.fileManager.gui.d_theme["main_colour"]
 
                     # Create group for overlays
                     # Confidence (bottom-right corner)
@@ -430,15 +468,16 @@ class ImageGrid(tk.Frame):
                     )
                     self.canvas.tag_lower(rect_id2, text_id2)
 
-                if color is None: 
-                    self.fileManager.gui.folder_explorer.executor.submit(self.fileManager.gui.folder_explorer.get_set_color, path, square=text_id2)
+                #if color is None: 
+                #    self.fileManager.gui.folder_explorer.executor.submit(self.fileManager.gui.folder_explorer.get_set_color, path, square=text_id2)
                 
             self.image_items.append(entry)
             self.item_to_entry[rect] = entry
             self.item_to_entry[txt_rect] = entry
 
             self.id_index += 1
-        if objs_w_no_thumbs: self.fileManager.thumbs.generate(objs_w_no_thumbs)
+        if objs_w_no_thumbs: 
+            self.fileManager.thumbs.generate(objs_w_no_thumbs)
         self._update_scrollregion()
     
     def remove(self, sublist, unload=True): # removes squares
@@ -472,7 +511,6 @@ class ImageGrid(tk.Frame):
                     obj.clear_frames()
                     
         if min_reflow_i != len(self.image_items): self.reflow_from_index(min_reflow_i)
-        print(min_reflow_i)
     
     def change_theme(self, theme):
         self.theme = theme
@@ -483,8 +521,9 @@ class ImageGrid(tk.Frame):
             default_bg = theme.get("square_default")
             grid_background_colour = theme.get("grid_background_colour")
             text_c = theme.get("square_text_colour")
+            self.bg = theme.get("grid_background_colour")
 
-            self.canvas.configure(bg=self.theme["grid_background_colour"])
+            self.canvas.configure(bg=self.bg)
             if item.file.dest == "":
                 item.file.color = default_bg
 
@@ -505,6 +544,7 @@ class ImageGrid(tk.Frame):
                 fill=grid_background_colour)
             
     def reflow_from_index(self, start_idx=0):
+        if not self.image_items: return
         start = perf_counter()
         thumb_w, thumb_h = self.thumb_size
         sqr_w, sqr_h = self.sqr_size
@@ -543,17 +583,14 @@ class ImageGrid(tk.Frame):
             #self.update()
 
         self._update_scrollregion()
-        print(perf_counter()-start)
     
     def make_selection(self, entry):
-        if self.current_selection is not None:
-            if len(self.image_items) > self.current_selection:
-                c_entry = self.image_items[self.current_selection] # old
-                if c_entry:
-                    self.canvas.itemconfig(c_entry.ids["rect"], 
-                                        outline=self.theme.get("square_default"), fill=self.theme.get("square_default"))
+        if self.current_selection_entry is not None:
+            self.canvas.itemconfig(self.current_selection_entry.ids["rect"], 
+                                outline=self.theme.get("square_default"), fill=self.theme.get("square_default"))
         self.canvas.itemconfig(entry.ids["rect"], outline=self.theme.get("square_selected"), fill=self.theme.get("square_selected"))
         self.current_selection = self.image_items.index(entry)
+        self.current_selection_entry = entry
         self.fileManager.navigator.window_focused = "DEST" if self.dest else "GRID"
 
     def canvas_clicked(self, event):
@@ -773,6 +810,7 @@ if __name__ == "__main__":
     
     def load_images(paths, thumb_size):
         imgs = []
+        from PIL import Image, ImageTk
         for path in paths:
             try:
                 filename = os.path.basename(path)
@@ -788,12 +826,12 @@ if __name__ == "__main__":
 
     root.title("Image Viewer: Canvas")
     root.geometry("1200x1200")
-
+    
     folder = r"C:\Users\4f736\Documents\Programs\Portable\Own programs\Exp-Img-Sorter\using resizing\data"
     thumb_size = 256
     center = False
 
     images = load_images(load_images_from_folder(folder), thumb_size)
     app = ImageGrid(root, thumb_size=thumb_size)
-    app.load_images(images, False)
+    app.add(images)
     root.mainloop()
