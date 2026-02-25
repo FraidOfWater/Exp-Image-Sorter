@@ -361,7 +361,9 @@ class Dataset_gen:
         train = {}
         val = {}
         testing = {}
-        dirs = [os.path.join(self.train_dir, item) for item in os.listdir(self.train_dir) if os.path.isdir(os.path.join(self.train_dir, item)) and len(os.listdir(os.path.join(self.train_dir, item))) != 0]
+        # and here make sure to only use cached dirs that are listed in dataset_gens data
+        self.labels
+        dirs = [os.path.join(self.train_dir, x) for x in self.labels.keys() if os.path.isdir(os.path.join(self.train_dir, x)) and len(os.listdir(os.path.join(self.train_dir, x))) > 10]
         for d in dirs:
             dir_name = os.path.basename(d)
             files = os.listdir(d)
