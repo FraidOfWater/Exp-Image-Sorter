@@ -62,6 +62,7 @@
         },
         "Midnight": {
             "main_colour":                      "#202041",
+			"main_accent":						"#545685",
             "viewer_bg":                        "#141433",
             "grid_background_colour":           "#303276",
             "pane_divider_colour":              "grey",
