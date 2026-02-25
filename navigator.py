@@ -59,7 +59,6 @@ class Navigator:
         "Also handles special events, such as changing views and select next"
         self.gui = fileManager.gui
         gui = self.gui
-        self.imagegrid = gui.imagegrid
         self.fileManager = fileManager
         style = ttk.Style()
         self.style = style
@@ -113,31 +112,37 @@ class Navigator:
             # move last from assigned to unassigned if any.
             if self.fileManager.assigned and self.gui.current_view.get() in ("Unassigned",) :
                 last = self.fileManager.assigned.pop()
+                self.gui.imagegrid.insert_first(last, last.pos)
                 last.color = None
                 last.dest = ""
-                self.imagegrid.insert_first(last, last.pos)
                 self.gui.displayimage(last)
         #updownleftright = 38,40,37,39
         def space(reverse=None):
             if self.gui.second_window_viewer: 
                 self.gui.second_window_viewer.master.focus()
         def autosort():
-            if not self.gui.prediction.get(): return
-            imagegrid = self.imagegrid
-            s = imagegrid.current_selection
-            if s is not None and s < len(imagegrid.image_items):
-                a = imagegrid.image_items[s].file.predicted_path
+            imagegrid = self.gui.imagegrid
+            s = imagegrid.current_selection_entry
+            if s is not None:
+                a = s.file.predicted_path
                 if a:
-                    print("Sent:", imagegrid.image_items[s].file.name[:20], "to", a)
+                    print("Sent:", s.file.name[:20], "to", a)
                     c =  "#FFFFFF" #self.gui.folder_explorer.color_cache[self.old.obj.predicted_path]
                     dest = {"path": a, "color": c}
-                    self.fileManager.setDestination(dest, caller="autosort")
+                    self.fileManager.setDestination(dest, caller="autosort") # setdest pulls the image in viewer by default if nothing is marked.
+                    self.gui.folder_explorer.set_current(dest["path"])
+        def send_to_selected_button():           
+            fe = self.gui.folder_explorer 
+            destinat = fe.buttons[fe.selected_index][1]
+            coloring = self.gui.folder_explorer.color_cache[destinat]
+            self.fileManager.setDestination({"path": destinat, "color": coloring}, caller="autosort") # this copies logic from above, enter will be disabled if search is open.
         def rename():
-            if not self.old: return
+            if not self.gui.imagegrid.current_selection_entry: return
+            obj = self.gui.imagegrid.current_selection_entry.file
             title = "Rename Image"
             label = ""
-            path = self.old.obj.path
-            old_name = os.path.basename(path)
+            path = obj.path
+            old_name = obj.name
 
             while True:
                 new_name = self.ask_prefilled_text(
@@ -146,10 +151,10 @@ class Navigator:
                     new_path = os.path.join(os.path.dirname(path), new_name)
                     try:
                         os.rename(path, new_path)
-                        self.old.obj.path = new_path
-                        self.old.obj.name = os.path.basename(new_path)
-                        self.fileManager.thumbs.gen_name(self.old.obj)
-                        self.gui.displayimage(self.old.obj) # link with gui.
+                        obj.path = new_path
+                        obj.name = os.path.basename(new_path)
+                        self.fileManager.thumbs.gen_name(obj, overwrite=True)
+                        self.gui.displayimage(obj) # link with gui.
                         break
                     except Exception as e:
                         print("Rename errors:", e)
@@ -170,8 +175,11 @@ class Navigator:
         if event.state in (4,6) and event.keysym.lower() == "z":
             undo()
         elif event.keysym == "Return":
-            #if self.gui.current_view.get() == "Predictions":
-            autosort()
+            caps_lock = (event.state & 0x0002) != 0
+            if caps_lock:
+                send_to_selected_button()
+            elif self.gui.prediction.get() and not self.fileManager.navigator.search_widget.search_active:
+                autosort()
         elif event.keysym == "F2":
             rename()
         elif event.keysym == "Delete":
@@ -189,9 +197,9 @@ class Navigator:
                         self.gui.imagegrid.navigate(event.keysym)
                     if self.gui.show_next.get():
                         if "toplevel" in event.widget._w and not (hasattr(self.gui.second_window_viewer, "master") and event.widget == self.gui.second_window_viewer.master):
-                            self.gui.displayimage(self.gui.folder_explorer.destw.image_items[self.gui.folder_explorer.destw.current_selection].file)
+                            self.gui.displayimage(self.gui.folder_explorer.destw.current_selection_entry.file)
                         else:
-                            self.gui.displayimage(self.imagegrid.image_items[self.imagegrid.current_selection].file)
+                            self.gui.displayimage(self.gui.imagegrid.current_selection_entry.file)
         else:
             action = {"space": space}
             action[event.keysym](reverse)
