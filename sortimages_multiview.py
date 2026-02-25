@@ -8,7 +8,7 @@ from hashlib import md5
 import threading, multiprocessing as mp # 5 ms
 from concurrent.futures import ThreadPoolExecutor # 4 ms
 
-vipsbin = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vips-dev-8.17", "bin")
+vipsbin = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vips-dev-8.18", "bin")
 os.environ['PATH'] = os.pathsep.join((vipsbin, os.environ['PATH']))
 os.add_dll_directory(vipsbin)
 import sys
