@@ -1,43 +1,35 @@
-def main(data=None, epochs=10, name="latest_model", model="yolo11s-cls.pt", output_dir="models"):
-    """Train YOLO model. Can be called directly or via command line."""
-    import os, json, argparse, shutil, torch
-    from ultralytics import YOLO
-    
-    # If called from command line, parse args
-    if data is None:
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--data", required=True)
-        parser.add_argument("--epochs", type=int, default=10)
-        parser.add_argument("--name", default="latest_model")
-        parser.add_argument("--model", default="yolo11s-cls.pt")
-        parser.add_argument("--output_dir", default="models")
-        args = parser.parse_args()
-        data = args.data
-        epochs = args.epochs
-        name = args.name
-        model = args.model
-        output_dir = args.output_dir
+import os, json, argparse, shutil, torch
+from ultralytics import YOLO
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data", required=True)
+    parser.add_argument("--epochs", type=int, default=10)
+    parser.add_argument("--name", default="latest_model")
+    parser.add_argument("--model", default="yolo11s-cls.pt")
+    parser.add_argument("--output_dir", default="models")
+    args = parser.parse_args()
     
     run_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "classify")
     if os.path.exists(run_dir):
         shutil.rmtree(run_dir)
         
-    os.makedirs(output_dir, exist_ok=True)
-    model_path = os.path.join(output_dir, model)
-    model_obj = YOLO(model_path)
+    os.makedirs(args.output_dir, exist_ok=True)
+    model_path = os.path.join(args.output_dir, args.model)
+    model = YOLO(model_path)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model_obj.to(device)
-    model_obj.model.to(device)
+    model.to(device)
+    model.model.to(device)
 
     print("Training on", device)
-    print("Dataset:", data)
+    print("Dataset:", args.data)
     from ultralytics.utils import SETTINGS
-    SETTINGS['runs_dir'] = output_dir
+    SETTINGS['runs_dir'] = args.output_dir
 
-    model_obj.train(
-        data=data,
-        epochs=epochs,
+    model.train(
+        data=args.data,
+        epochs=args.epochs,
         imgsz=224,
         batch=56,
         workers=8,  # ✅ multiprocessing OK here
@@ -52,17 +44,15 @@ def main(data=None, epochs=10, name="latest_model", model="yolo11s-cls.pt", outp
     )
 
     # Save model and classes
-    save_path = os.path.join(output_dir, f"{name}.pt")
-    model_obj.save(save_path)
-    with open(os.path.join(output_dir, f"{name}.json"), "w") as f:
+    save_path = os.path.join(args.output_dir, f"{args.name}.pt")
+    model.save(save_path)
+    with open(os.path.join(args.output_dir, f"{args.name}.json"), "w") as f:
         json_dict = {}
-        json_dict["id_2_name"] = model_obj.names
+        json_dict["id_2_name"] = model.names
         json.dump(json_dict, f, indent=4)
 
     print("Training complete ✅")
     print("Saved model to:", save_path)
 
 if __name__ == "__main__":
-    import multiprocessing  as mp
-    mp.freeze_support()
     main()
