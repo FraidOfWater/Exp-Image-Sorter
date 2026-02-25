@@ -47,23 +47,20 @@ class ImageViewer:
     # Basic display
     # ----------------------------
     def new_canvas(self, canvas):
-        print("new canvas binding")
         "make new canvas according to what navigator says is current viewer"
         self.canvas = canvas
         # bindings
+        root = self.root.gui
         if "middlepane" in canvas._w:
-            root = canvas.master.master.master
-        else:
-            root = canvas.master.master
+            pass
+        else: # bind also to the new separate tkinter window
             canvas.master.bind("<Control-a>", self.clear_search)
             canvas.master.bind("<Control-i>", self.show_hotkeys)
 
             canvas.master.bind("<Key>", self.on_key_press)
-            canvas.master.bind("<Key>", self.on_key_press)
         root.bind("<Control-a>", self.clear_search)
         root.bind("<Control-i>", self.show_hotkeys)
 
-        root.bind("<Key>", self.on_key_press)
         root.bind("<Key>", self.on_key_press)
         
         self.search_active = False
@@ -210,7 +207,7 @@ class ImageViewer:
                     continue
                 rel = os.path.relpath(p, self.include_folder)
                 self.cached_dirs.append((d, rel))
-                print(d, rel)
+                #print(d, rel)
         pass
 
     # ----------------------------
@@ -221,11 +218,11 @@ class ImageViewer:
             name, rel = self.search_results[self.locked_search_index]
             partial = rel
             full_path = os.path.join(self.include_folder, partial)
-            print(f"Selected folder: {full_path}")
-            print("1", name, rel, full_path)
+            #print(f"Selected folder: {full_path}")
+            #print("1", name, rel, full_path)
             self.root.fileManager.setDestination({"path": full_path, "color": "#FFFFFF"}, caller="sorter")
             self.root.gui.folder_explorer.set_current(full_path)
-            print(name, rel, full_path)
+            #print(name, rel, full_path)
             
 
         # space: open search / update search
@@ -247,7 +244,8 @@ class ImageViewer:
             self.start_search(e.char)
         elif self.hotkey_active and not self.search_active: # only hotkeybox open.
             if e.keysym == "Delete": # send to trash
-                print("Trash")
+                #print("Trash")
+                pass
             elif e.keysym == "Return": # Autosort
                 print("Autosort")
             else:
@@ -280,7 +278,7 @@ class ImageViewer:
                     self.update_search()
             else:
                 if e.keysym == "Return":
-                    if self.search_results[self.selected_index] in self.recent_searches:
+                    if self.search_results and self.search_results[self.selected_index] in self.recent_searches:
                         self.recent_searches.remove(self.search_results[self.selected_index])
                     self.recent_searches.append(self.search_results[self.selected_index])
                     if len(self.recent_searches) > 100:
