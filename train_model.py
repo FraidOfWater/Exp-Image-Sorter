@@ -1,21 +1,13 @@
-import os, json, argparse, shutil, torch
+import os, json, shutil, torch
 from ultralytics import YOLO
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--data", required=True)
-    parser.add_argument("--epochs", type=int, default=10)
-    parser.add_argument("--name", default="latest_model")
-    parser.add_argument("--model", default="yolo11s-cls.pt")
-    parser.add_argument("--output_dir", default="models")
-    args = parser.parse_args()
-    
+def start_training(training_dir, model_dir, epochs, name, model="yolo11s-cls.pt", output_dir="models"):
     run_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "classify")
     if os.path.exists(run_dir):
         shutil.rmtree(run_dir)
         
-    os.makedirs(args.output_dir, exist_ok=True)
-    model_path = os.path.join(args.output_dir, args.model)
+    os.makedirs(model_dir, exist_ok=True)
+    model_path = os.path.join(model_dir, model)
     model = YOLO(model_path)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -23,13 +15,13 @@ def main():
     model.model.to(device)
 
     print("Training on", device)
-    print("Dataset:", args.data)
+    print("Dataset:", training_dir)
     from ultralytics.utils import SETTINGS
-    SETTINGS['runs_dir'] = args.output_dir
+    SETTINGS['runs_dir'] = model_dir
 
     model.train(
-        data=args.data,
-        epochs=args.epochs,
+        data=training_dir,
+        epochs=epochs,
         imgsz=224,
         batch=56,
         workers=8,  # ✅ multiprocessing OK here
@@ -44,15 +36,12 @@ def main():
     )
 
     # Save model and classes
-    save_path = os.path.join(args.output_dir, f"{args.name}.pt")
+    save_path = os.path.join(model_dir, f"{name}.pt")
     model.save(save_path)
-    with open(os.path.join(args.output_dir, f"{args.name}.json"), "w") as f:
+    with open(os.path.join(model_dir, f"{name}.json"), "w") as f:
         json_dict = {}
         json_dict["id_2_name"] = model.names
         json.dump(json_dict, f, indent=4)
 
     print("Training complete ✅")
     print("Saved model to:", save_path)
-
-if __name__ == "__main__":
-    main()
