@@ -1,44 +1,28 @@
-#pip freeze > requirements.txt && pip uninstall -r requirements.txt -y && del requirements.txt
-# Needed at the start or 0 load time
+#pip freeze > requirements.txt; pip uninstall -r requirements.txt -y; del requirements.txt
 from time import perf_counter
 import os, json, queue, shutil, tkinter as tk, ctypes
 from hashlib import md5
 
-# could be improved
-import threading, multiprocessing as mp # 5 ms
-from concurrent.futures import ThreadPoolExecutor # 4 ms
+import threading, multiprocessing as mp
+from concurrent.futures import ThreadPoolExecutor
 
 vipsbin = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vips-dev-8.18", "bin")
 os.environ['PATH'] = os.pathsep.join((vipsbin, os.environ['PATH']))
 os.add_dll_directory(vipsbin)
-import sys
-# For Python 3.8+, DLLs must be added via add_dll_directory
-if sys.platform == 'win32' and os.path.isdir(vipsbin):
+if os.path.isdir(vipsbin):
     os.add_dll_directory(vipsbin)
 
 from gui import GUIManager
 from navigator import Navigator
 
 # undo wont add to destw, and undo cant act on destw changes?
-# autosave?
 
-# option to disable gridviewer
-# menubar stuff into the gui
 # # compare new and old vlc implementation # aesthetic tweaks
 # purple theme
-
-# overlay in folders which draws over middlepane viewer (resizing), should probably be moved to sorter.py (other overlay code)
-# consolidate bindings to one bindhandler?
-# end of list behaviour?
-# anim debug colors?
-# scroll for grid?
-
+# anim debug colors
 # font change to folder buttons
 # old random colors back option button
-# tooltips
-# loading icon for long operations like sorting or training?
 
-#statusbar removal, into title
 # load_images_amount?
 # settings button to dump the rest into so I can get rid of menubar?
 
@@ -687,6 +671,7 @@ class SortImages:
             gui.imagegrid.clear_canvas(unload=True, new_list=load)
             if self.gui.current_view.get() == "Unassigned":
                 self.load_more()
+            self.gui.train_status_var.set("")
         if self.gui.current_view.get() != "Unassigned": return
         MODE = gui.display_order.get().lower()
         grid_objects = [entry.file for entry in gui.imagegrid.image_items]
@@ -809,6 +794,8 @@ class SortImages:
                                         
                         c.sort(key=attrgetter("dimensions"), reverse=False if self.last_sort[1] == False else True)
 
+                    elif MODE.lower() == "histogram": # threaded gen
+                        self.reorder_as_nearest1(c, reverse=self.last_sort[1])        
                     elif MODE.lower() == "nearest":
                         self.reorder_as_nearest(c, reverse=self.last_sort[1])
                     elif MODE.lower() == "confidence":
@@ -921,6 +908,16 @@ class SortImages:
                             obj.dimensions = (orientation, ratio)
 
             self.imagelist.sort(key=attrgetter("dimensions"), reverse=True if self.last_sort[1] == False else False)
+
+        elif MODE == "histogram": # threaded gen
+            def helper1():
+                self.reorder_as_nearest1(self.imagelist, reverse=self.last_sort[1])
+                gui.after(1, after_tasks)
+            a = threading.Thread(target=helper1, daemon=True) # dont freeze the program do it threaded
+            a.start()
+            print("Started thread to sort by Histogram. Please wait.")
+            return
+        
         elif MODE == "nearest": # threaded gen
             def helper1():
                 self.reorder_as_nearest(self.imagelist, reverse=self.last_sort[1])
@@ -931,7 +928,101 @@ class SortImages:
             return
 
         after_tasks()
+
+
+    def reorder_as_nearest1(self, imagefiles, reverse=False):
+        import cv2
+        import concurrent.futures
+        import os
+        from time import perf_counter
+
+        start = perf_counter()
         
+        # 1. ALIGN STARTING ORDER (The "Seed")
+        # Matches: sorted(image_paths, key=lambda x: os.path.basename(x).rsplit(".",1)[0])
+        # We sort by the file name without extension to ensure the same starting point.
+        test = sorted(imagefiles, key=lambda x: os.path.basename(x.path).rsplit(".", 1)[0])
+        
+        def extract_logic_exact(obj):
+            """Replicates extract_hist_features logic exactly using cv2.imread."""
+            try:
+                # We use obj.path to get the raw file path, bypassing gen_thumb/PyVips
+                cv_img = cv2.imread(obj.path)
+                if cv_img is None: 
+                    return None, None
+                
+                # 1. BGR to HSV (OpenCV imread default)
+                cv_img = cv2.cvtColor(cv_img, cv2.COLOR_BGR2HSV)
+                
+                # 2. 3D Histogram with exact ranges: H(0-180), S(0-256), V(0-256)
+                #hist = cv2.calcHist([cv_img], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256])
+                hist = cv2.calcHist([cv_img], [0, 1, 2], None, [8, 8, 8], [0, 180, 0, 256, 0, 256])
+                
+                # 3. Normalize and Flatten
+                cv2.normalize(hist, hist)
+                return hist.flatten(), obj
+                
+            except Exception as e:
+                print(f"Skipping {os.path.basename(obj.path)} due to error: {e}")
+                return None, None
+
+        # 2. FEATURE EXTRACTION
+        features_list = []
+        objs_to_encode = []
+        
+        # Using ThreadPool to maintain speed while using cv2.imread
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.threads) as executor:
+            results = list(executor.map(extract_logic_exact, test))
+            
+        for feat, obj in results:
+            if feat is not None:
+                features_list.append(feat)
+                objs_to_encode.append(obj)
+
+        if not objs_to_encode:
+            return
+
+        # 3. GREEDY CHAIN (EXACT REPLICATION)
+        # unvisited = set(valid_paths)
+        unvisited_indices = list(range(len(features_list)))
+        
+        # current = valid_paths[0]
+        current_idx = unvisited_indices.pop(0) 
+        order = [current_idx]
+
+        while unvisited_indices:
+            best_match_local_idx = -1
+            min_dist = float('inf')
+            
+            current_feat = features_list[current_idx]
+            
+            for i, cand_idx in enumerate(unvisited_indices):
+                # BHATTACHARYYA distance: 0 is perfect match
+                dist = cv2.compareHist(current_feat, features_list[cand_idx], cv2.HISTCMP_BHATTACHARYYA)
+                
+                if dist < min_dist:
+                    min_dist = dist
+                    best_match_local_idx = i
+            
+            # current = best_match
+            current_idx = unvisited_indices.pop(best_match_local_idx)
+            order.append(current_idx)
+
+        # 4. FINAL LIST UPDATE
+        ordered_objs = [objs_to_encode[idx] for idx in order]
+        
+        # Collect any files that failed to load (to prevent losing data)
+        loaded_paths = {o.path for o in objs_to_encode}
+        remaining = [o for o in imagefiles if o.path not in loaded_paths]
+        
+        # Update the original list reference in-place
+        imagefiles[:] = ordered_objs + remaining
+        
+        if not reverse:
+            imagefiles.reverse()
+
+        print(f"✅ Exact Color Sort complete: {len(ordered_objs)} images in {perf_counter()-start:.4f}s")
+    
     def reorder_as_nearest(self, imagefiles, optimization=False, reverse=False):
         from PIL import Image
         import numpy as np
@@ -1144,7 +1235,6 @@ class SortImages:
 
         if optimization: 
             print("Reorder nearest time (Optimization):", perf_counter()-start)
-            
             return
         objs_with_both = [
             obj for obj in test
@@ -1897,23 +1987,18 @@ class Predictions:
             Data = Dataset_gen(self.fileManager.train_dir, label_path_dict, self.gui.prediction_thumbsize, self.fileManager)       
             path_hash_lookup = Data.gen_thumbs()
             Data.split(0.9)
-            import sys
-            self.gui.train_status_var.set("Starting model...")
-            script = os.path.join(os.path.dirname(__file__), "train_model.py")
-            python_exe = sys.executable
+            self.gui.train_status_var.set("Starting...")
             
             names_2_path = {os.path.basename(x): x for x in self.gui.categories}
-            cmd = [
-                python_exe, script,
-                "--data", self.fileManager.train_dir,
-                "--epochs", str(100),
-                "--name", name
-            ]
-            import subprocess
+            from train_model import start_training
+            self.gui.train_status_var.set("Training...")
+            start_training(self.fileManager.train_dir, self.fileManager.model_dir, 100, name)
+            
+
             path_to_results_csv = os.path.join(self.fileManager.model_dir, "classify", "latest_run", "results.csv")
 
-            subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_CONSOLE)
             self.gui.model_path = os.path.join(self.fileManager.model_dir, f"{name}.pt")
+            self.gui.train_status_var.set("Finished.")
             
         if self.train_thread and self.train_thread.is_alive():
             print("Already running.")
@@ -1934,31 +2019,22 @@ class Predictions:
             path_hash_lookup = Data.gen_thumbs()
             Data.split(0.9)
             
-            self.gui.train_status_var.set("Starting model...")
-            import sys
-            script = os.path.join(os.path.dirname(__file__), "train_model.py")
-            python_exe = sys.executable
-            names_2_path = {os.path.basename(x[1]): x[1] for x in self.gui.buttons}
+            self.gui.train_status_var.set("Starting...")
+            names_2_path = {os.path.basename(x[1]): x[1] for x in self.gui.buttons if os.path.basename(self.gui.buttons[0][1]) != "Trash"}
 
             with open(os.path.join(self.fileManager.model_dir, "latest_model_paths.json"), "w") as f:
                 json_dict = {}
                 json_dict["names_2_path"] = names_2_path
                 json.dump(json_dict, f, indent=4)
 
-            cmd = [
-                python_exe, script,
-                "--data", self.fileManager.train_dir,
-                "--epochs", str(100),
-                "--name", "latest_model"
-            ]
-
-            import subprocess
+            from train_model import start_training
+            self.gui.train_status_var.set("Training...")
+            start_training(self.fileManager.train_dir, self.fileManager.model_dir, 10, "latest_model")
+            
             path_to_results_csv = os.path.join(self.fileManager.model_dir, "classify", "latest_run", "results.csv")
 
-            subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_CONSOLE)
-
             self.model_path = os.path.join(self.fileManager.model_dir, f"latest_model.pt")
-            self.gui.train_status_var.set("Model Ready.")
+            self.gui.train_status_var.set("Finished.")
         
         if self.train_thread and self.train_thread.is_alive():
             print("Already running.")
