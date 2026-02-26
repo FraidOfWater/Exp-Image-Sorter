@@ -2029,7 +2029,7 @@ class Predictions:
 
             from train_model import start_training
             self.gui.train_status_var.set("Training...")
-            start_training(self.fileManager.train_dir, self.fileManager.model_dir, 10, "latest_model")
+            start_training(self.fileManager.train_dir, self.fileManager.model_dir, 100, "latest_model")
             
             path_to_results_csv = os.path.join(self.fileManager.model_dir, "classify", "latest_run", "results.csv")
 
