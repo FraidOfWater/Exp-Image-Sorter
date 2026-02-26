@@ -56,9 +56,9 @@ class GUIManager(tk.Tk):
         #autosave               # Exlusively for fileManager
 
         gui = jprefs.get("qui", {}) # should be spelled gui XD
-        self.squares_per_page_intvar = tk.IntVar(value=int(gui.get("squares_per_page", 17)))
+        self.squares_per_page_intvar = tk.IntVar(value=int(gui.get("squares_per_page", 3000)))
         a = gui.get("display_order")
-        if a not in ("Smart", "Filename", "Date", "Type", "Size", "Dimensions"):
+        if a not in ("Smart", "Filename", "Date", "Type", "Size", "Dimensions", "Nearest", "Histogram"):
             a = "Smart"
         self.display_order = tk.StringVar(value=a)
 
@@ -75,7 +75,7 @@ class GUIManager(tk.Tk):
         self.destpane_geometry = w.get("destpane_geometry", f"{int(self.winfo_screenwidth()*0.5)}x{int(self.winfo_screenheight()-120)}+{-8+365}+60") 
         self.leftpane_width = int(w.get("leftpane_width", 363))
         self.middlepane_width = int(w.get("middlepane_width", 363))
-        self.images_sorted = tk.IntVar(value=int(w.get("images_sorted", 363)))
+        self.images_sorted = tk.IntVar(value=int(w.get("images_sorted", 0)))
         self.images_sorted_strvar = tk.StringVar(value=f"Sorted: {self.images_sorted.get()}") # Sorted: 1953
         self.winfo_toplevel().title(f"EXP: {self.images_sorted_strvar.get()}")
 
@@ -207,6 +207,7 @@ class GUIManager(tk.Tk):
         order_menu.add_radiobutton(label="Type",value="Type", variable=self.display_order, command=self.fileManager.sort_imagelist)
         order_menu.add_radiobutton(label="Size", value="Size", variable=self.display_order, command=self.fileManager.sort_imagelist)
         order_menu.add_radiobutton(label="Dimensions", value="Dimensions", variable=self.display_order, command=self.fileManager.sort_imagelist)
+        order_menu.add_radiobutton(label="Histogram", value="Histogram", variable=self.display_order, command=self.fileManager.sort_imagelist)
         order_menu.add_radiobutton(label="Nearest", value="Nearest", variable=self.display_order, command=self.fileManager.sort_imagelist)
         order_menu.add_radiobutton(label="Confidence", value="Confidence", variable=self.display_order, command=self.fileManager.sort_imagelist)
 
