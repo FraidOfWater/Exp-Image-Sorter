@@ -1,8 +1,47 @@
-import tkinter as tk
-import os
-from time import perf_counter
+import os,  tkinter as tk
+from tkinter import simpledialog
 
-# Img processing here?
+class PrefilledInputDialog(simpledialog.Dialog):
+    def __init__(self, parent, title, message, default_text=""):
+        self.message = message
+        self.default_text = default_text
+        self.result = None
+        super().__init__(parent, title)
+
+    def body(self, master):
+        # Extract filename and extension safely
+        base_name = os.path.basename(self.default_text)
+        if base_name.startswith(".") and "." not in base_name[1:]:
+            name_part, ext_part = base_name, ""
+        elif "." in base_name:
+            name_part, ext_part = base_name.rsplit(".", 1)
+            ext_part = "." + ext_part
+        else:
+            name_part, ext_part = base_name, ""
+
+        tk.Label(master, text=self.message, justify="left", wraplength=300).pack(padx=10, pady=(10, 5))
+
+        # Frame to hold entry + extension label
+        frame = tk.Frame(master)
+        frame.pack(padx=10, pady=(0, 10))
+
+        # Entry for the name
+        self.entry = tk.Entry(frame, width=30)
+        self.entry.insert(0, name_part)
+        self.entry.pack(side="left")
+
+        # Label for the extension
+        tk.Label(frame, text=ext_part, width=len(ext_part) + 1, anchor="w").pack(side="left")
+
+        self.ext_part = ext_part
+        return self.entry  # initial focus
+
+    def apply(self):
+        name = self.entry.get().strip()
+        if not name:
+            self.result = None
+        else:
+            self.result = name + self.ext_part
 
 class dummy:
     theme = {}
@@ -19,18 +58,19 @@ class dummy:
         self.image_items = image_items
         self.make_selection = make_selection
     
-    def change_image(self, image, change_color=False):
-        self.canvas.itemconfig(self.img_id, image=image)
-        #if self.file.dest == "":
-         #   c = 
-        if not change_color: return
-        c = self.file.color or self.theme.get("grid_background_colour", None)
+    def change_color(self, color=None):
+        if color:
+            self.file.color = color
+        c = self.file.color if color else self.theme.get("grid_background_colour", None)
         txt_box_c = self.theme.get("grid_background_colour", None)
         # it needs to compare itself to the last item of image_items. if it is there, it should cahnge color.
         if self.canvas.master.current_selection_entry != None and self.canvas.master.current_selection_entry.file == self.file: 
             self.make_selection(self)
         else: self.canvas.itemconfig(self.ids["rect"], outline=c, fill=c)
         self.canvas.itemconfig(self.ids["txt_rect"], outline=txt_box_c, fill=txt_box_c)
+
+    def change_image(self, image):
+        self.canvas.itemconfig(self.img_id, image=image)
 
 class imgfile:
     def __init__(self, imgtk, filename):
@@ -126,6 +166,7 @@ class ImageGrid(tk.Frame):
         self.canvas.bind("<Button-1>",      lambda e: (self._on_canvas_click(e), self.focus()))
         self.canvas.bind("<Button-3>",      self._on_canvas_click)
         self.canvas.bind("<Button-2>",      self._on_canvas_middle_mouse)
+        self.winfo_toplevel().bind("<F2>",  self.rename)
     
         self.pack(fill="both", expand=True)
 
@@ -140,12 +181,36 @@ class ImageGrid(tk.Frame):
             print(f"Memory used: {mem:.2f} MB", end="\r", flush=True)
             self.after(100, ram)
         #self.after(500, ram)
-
-    def load_more(self, filelist) -> None:
-        "Load the given images into the grid."
-        if not filelist: return
-        self.add(filelist)
     
+    def rename(self, event=None):
+        gui = self.fileManager.gui
+        if not self.current_selection_entry: return
+        obj = self.current_selection_entry.file
+        title = "Rename Image"
+        label = ""
+        path = obj.path
+        old_name = obj.name
+
+        while True:
+            dialog = PrefilledInputDialog(gui, title, label, default_text=old_name)
+            new_name = dialog.result
+            if new_name:
+                new_path = os.path.join(os.path.dirname(path), new_name)
+                try:
+                    os.rename(path, new_path)
+                    obj.path = new_path
+                    obj.name = os.path.basename(new_path)
+                    self.fileManager.thumbs.gen_name(obj, overwrite=True)
+                    gui.displayimage(obj)
+                    break
+                except Exception as e:
+                    print("Rename errors:", e)
+                    label = f"{new_name} already exists in {os.path.basename(os.path.dirname(path))}"
+                    old_name = new_name
+            else:
+                break
+
+        pass # update square name (obj.gridsquare, obj.destsquare...), update obj.filename, truncated name...
     def clear_canvas(self, unload=False, new_list=None):
         "Remove all items from canvas, but dont unload thumbnails or animations from memory."
         items = set(entry.file for entry in self.image_items)
@@ -183,9 +248,10 @@ class ImageGrid(tk.Frame):
         Insert new image squares at the top of the grid.
         """
         if not new_images: return
-        if not type(new_images) == list: new_images = [new_images]
+        if type(new_images) == list: new_images = new_images[0]
+        obj = new_images
         
-        objs_w_no_thumbs = [obj for obj in new_images if not obj.thumb]
+        objs_w_no_thumbs = [obj] if not obj.thumb else []
 
         thumb_w, thumb_h = self.thumb_size
         sqr_w, sqr_h = self.sqr_size
@@ -196,7 +262,6 @@ class ImageGrid(tk.Frame):
         canvas_w = self.canvas.winfo_width()
         cols = max(1, canvas_w // sqr_w)
         self.cols = cols
-        center_offset = 0 if not self.center else max((canvas_w - cols * sqr_w) // 2, 0)
 
         w = self.theme.get("square_border_size")
         text_c = self.theme.get("square_text_colour")
@@ -206,111 +271,90 @@ class ImageGrid(tk.Frame):
             from PIL import Image, ImageTk
             self.btn_thumbs = {"default": ImageTk.PhotoImage(Image.open(os.path.join(self.assets_dir, "button.png"))), "pressed": ImageTk.PhotoImage(Image.open(os.path.join(self.assets_dir, "button_pressed.png")))}
             btn_img = self.btn_thumbs["default"]
+
         btn_offset_x = w
         btn_offset_y = w * 2
         text_offset_x = btn_offset_x + btn_img.width() + 2
         text_offset_y = btn_offset_y + 1
 
-        # --- Step 1: shift all existing items down (by number of rows inserted) ---
-        rows_to_insert = (len(new_images) + cols - 1) // cols
-        shift_y = rows_to_insert * (sqr_h + sqr_pady + btn_size)
+        if obj.thumb == None:
+            default_bg = "purple"
+            grid_background_color = "purple"
+        elif obj.dest != "":
+            default_bg = obj.color
+            grid_background_color = self.theme.get("grid_background_colour")
+        else:
+            default_bg = self.theme.get("square_default")
+            grid_background_color = self.theme.get("grid_background_colour")
 
-        for item in self.image_items:
-            self.canvas.move(item.tag, 0, shift_y)
-            item.center_y += shift_y  # update logical center
+        row = pos // cols
+        col = pos % cols
 
-        # --- Step 2: Create new entries at the top positions ---
-        new_entries = []
+        current_col = (0 // cols) * (sqr_w + sqr_padx) + grid_padx
+        current_row = (0 % cols) * (sqr_h + sqr_pady + btn_size) + grid_pady
 
-        for i, file in enumerate(new_images):
-            if file.thumb == None:
-                default_bg = "purple"
-                grid_background_color = "purple"
-            elif file.dest != "":
-                default_bg = file.color
-                grid_background_color = self.theme.get("grid_background_colour")
-            else:
-                default_bg = self.theme.get("square_default")
-                grid_background_color = self.theme.get("grid_background_colour")
+        x_center = current_col + thumb_w // 2 + (w + 1) // 2
+        y_center = current_row + thumb_h // 2 + (w + 1) // 2
 
-            row = i // cols
-            col = i % cols
+        tag = f"img_{self.id_index}"
+        self.id_index += 1
 
-            current_col = center_offset + col * (sqr_w + sqr_padx) + grid_padx
-            current_row = row * (sqr_h + sqr_pady + btn_size) + grid_pady
+        rect = self.canvas.create_rectangle(
+            current_col, current_row,
+            current_col + sqr_w, current_row + sqr_h,
+            width=w, outline=default_bg, fill=default_bg,
+            tags=tag
+        )
 
-            x_center = current_col + thumb_w // 2 + (w + 1) // 2
-            y_center = current_row + thumb_h // 2 + (w + 1) // 2
+        img = self.canvas.create_image(
+            x_center, y_center,
+            image=obj.thumb, anchor="center",
+            tags=tag
+        )
 
-            tag = f"img_{self.id_index}"
-            self.id_index += 1
+        txt_rect = self.canvas.create_rectangle(
+            current_col, current_row + sqr_w,
+            current_col + sqr_w, current_row + sqr_h + btn_size,
+            width=w, outline=grid_background_color, fill=grid_background_color,
+            tags=tag
+        )
 
-            rect = self.canvas.create_rectangle(
-                current_col, current_row,
-                current_col + sqr_w, current_row + sqr_h,
-                width=w, outline=default_bg, fill=default_bg,
-                tags=tag
-            )
+        but = self.canvas.create_image(
+            current_col + btn_offset_x,
+            current_row + thumb_h + btn_offset_y,
+            image=btn_img, anchor="nw",
+            tags=tag
+        )
 
-            img = self.canvas.create_image(
-                x_center, y_center,
-                image=file.thumb, anchor="center",
-                tags=tag
-            )
+        label = self.canvas.create_text(
+            current_col + text_offset_x,
+            current_row + thumb_h + text_offset_y,
+            text=obj.truncated_filename,
+            anchor="nw",
+            fill=text_c,
+            tags=tag
+        )
 
-            txt_rect = self.canvas.create_rectangle(
-                current_col, current_row + sqr_w,
-                current_col + sqr_w, current_row + sqr_h + btn_size,
-                width=w, outline=grid_background_color, fill=grid_background_color,
-                tags=tag
-            )
+        item_ids = {
+            "rect": rect, "img": img, "label": label,
+            "but": but, "txt_rect": txt_rect
+        }
+        entry = dummy(obj, item_ids, tag, row, col, x_center, y_center, self.canvas, self.image_items, self.make_selection)
+        if not self.dest:
+            obj.frame = entry
+        else:
+            obj.destframe = entry
 
-            but = self.canvas.create_image(
-                current_col + btn_offset_x,
-                current_row + thumb_h + btn_offset_y,
-                image=btn_img, anchor="nw",
-                tags=tag
-            )
-
-            label = self.canvas.create_text(
-                current_col + text_offset_x,
-                current_row + thumb_h + text_offset_y,
-                text=file.truncated_filename,
-                anchor="nw",
-                fill=text_c,
-                tags=tag
-            )
-
-            item_ids = {
-                "rect": rect, "img": img, "label": label,
-                "but": but, "txt_rect": txt_rect
-            }
-            entry = dummy(file, item_ids, tag, row, col, x_center, y_center, self.canvas, self.image_items, self.make_selection)
-            if not self.dest:
-                file.frame = entry
-            else:
-                file.destframe = entry
-
-            new_entries.append(entry)
-
-            self.item_to_entry[rect] = entry
-            self.item_to_entry[txt_rect] = entry
-
-        # --- Step 3: Prepend the new entries to the list ---
+        self.item_to_entry[rect] = entry
+        self.item_to_entry[txt_rect] = entry
 
         self.image_items.insert(pos, entry)
-
-        # --- Step 4: Reflow everything to recompute correct rows/cols ---
+                    
         if objs_w_no_thumbs: 
             self.fileManager.thumbs.generate(objs_w_no_thumbs)
 
-        self.reflow_from_index(0)
+        self.reflow_from_index(pos)
         self.make_selection(self.image_items[pos])
-
-    def insert(self, pos, obj):
-        self.image_items.insert(pos, obj)
-        min_index = pos
-        if min_index != len(self.image_items): self.reflow_from_index(pos)
         
     def add(self, new_images): # adds squares
         "Add images to the end of the self.image_items list."
@@ -492,6 +536,16 @@ class ImageGrid(tk.Frame):
             min_reflow_i = min(min_reflow_i, index)
             obj.pos = index
             self.image_items.pop(index)
+        if self.image_items:
+            if self.current_selection is not None:
+                i = -1 if self.current_selection >= len(self.image_items) else self.current_selection
+                selected_entry = self.image_items[i]
+                self.make_selection(selected_entry)
+                if self.fileManager.gui.show_next.get():
+                    self.fileManager.gui.displayimage(selected_entry.file)
+
+        for obj in sublist:
+            entry = obj.destframe if self.dest else obj.frame
 
             self.canvas.delete(entry.tag)
             del self.item_to_entry[entry.ids["rect"]]
@@ -510,7 +564,7 @@ class ImageGrid(tk.Frame):
                     obj.thumb = None
                     obj.clear_frames()
                     
-        if min_reflow_i != len(self.image_items): self.reflow_from_index(min_reflow_i)
+        self.reflow_from_index(min_reflow_i)
     
     def change_theme(self, theme):
         self.theme = theme
@@ -542,10 +596,9 @@ class ImageGrid(tk.Frame):
                 width=w,
                 outline=grid_background_colour,
                 fill=grid_background_colour)
-            
+    
     def reflow_from_index(self, start_idx=0):
         if not self.image_items: return
-        start = perf_counter()
         thumb_w, thumb_h = self.thumb_size
         sqr_w, sqr_h = self.sqr_size
         sqr_padx, sqr_pady = self.sqr_padding
@@ -557,6 +610,10 @@ class ImageGrid(tk.Frame):
 
         w = self.theme.get("square_border_size")
         
+        rows = int((len(self.image_items) + cols - 1) / cols)
+        first_visible_row = round(self.canvas.yview()[0] * rows)
+        last_visible_row = round(self.canvas.yview()[1] * rows)
+        rows = last_visible_row-first_visible_row
         for i in range(start_idx, len(self.image_items)):
             item = self.image_items[i]
 
@@ -572,16 +629,9 @@ class ImageGrid(tk.Frame):
             dx = x_center - item.center_x
             dy = y_center - item.center_y
 
-            item.row = new_row
-            item.col = new_col
-            item.center_x = x_center
-            item.center_y = y_center
-
-            #self.canvas.move(item.tag, dx, dy)
+            item.row, item.col = new_row, new_col
+            item.center_x, item.center_y = x_center, y_center
             self.canvas.move(item.tag, dx, dy)
-            #self.after_idle(self.canvas.move, item.tag, dx, dy)
-            #self.update()
-
         self._update_scrollregion()
     
     def make_selection(self, entry):
@@ -591,7 +641,7 @@ class ImageGrid(tk.Frame):
         self.canvas.itemconfig(entry.ids["rect"], outline=self.theme.get("square_selected"), fill=self.theme.get("square_selected"))
         self.current_selection = self.image_items.index(entry)
         self.current_selection_entry = entry
-        self.fileManager.navigator.window_focused = "DEST" if self.dest else "GRID"
+        self.fileManager.bindhandler.window_focused = "DEST" if self.dest else "GRID"
 
     def canvas_clicked(self, event):
         x = self.canvas.canvasx(event.x)
@@ -795,8 +845,7 @@ class ImageGrid(tk.Frame):
         # Add the height of the canvas window as extra padding
         # This allows the last row to be scrolled to the very top
         view_h = self.canvas.winfo_height()
-        total_height = content_height + view_h - (view_h//(sqr_h + sqr_pady + self.btn_size))*(sqr_h + sqr_pady + self.btn_size)
-        
+        total_height = content_height + view_h - (view_h//(sqr_h + sqr_pady + self.btn_size))*(sqr_h + sqr_pady + self.btn_size)-2 # 2 is a magic number to fix alignment issues.
         self.canvas.config(scrollregion=(0, 0, total_width, total_height))
 
 if __name__ == "__main__":
