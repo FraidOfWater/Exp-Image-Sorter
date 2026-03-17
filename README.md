@@ -9,6 +9,8 @@ This is a fork of Simple-Image-Sorter by Legendsmith https://github.com/Legendsm
 
 # Changes: #
 
+Too many to count! Animation/video support, lazy loading, sorting options, custom themes, QOL updates, custom imagegrid (for smooth scrolling), many optimizations.
+
 # Warnings & Other info #
 
     Use tools like ANTIDUPL to remove duplicates.
