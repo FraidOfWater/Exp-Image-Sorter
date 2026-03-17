@@ -5,7 +5,6 @@ send2trash
 ultralytics
 torch
 torchvision
-scikit-image
 numpy
 imageio
 pymediainfo
