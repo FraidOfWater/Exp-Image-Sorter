@@ -1,6 +1,6 @@
-import os, json, concurrent.futures
-import torch
 from time import perf_counter
+import os, json, shutil, threading, concurrent.futures, torch
+
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 from torchvision.transforms import ToPILImage
@@ -286,7 +286,6 @@ class ImagePathDataset(Dataset):
         
         return thumb, path, id
 
-import os, shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from sortimages_multiview import Imagefile
 
@@ -551,3 +550,205 @@ class Model_inferer:
         self.fm.gui.display_order.set("Confidence")
         self.fm.reorder_as_nearest(images, optimization=(thumbs, objs))
         self.fm.gui.after_idle(self.fm.sort_imagelist)
+
+def start_training(training_dir, model_dir, epochs, name, model="yolo11m-cls.pt", output_dir="models"):
+    run_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "classify")
+    if os.path.exists(run_dir):
+        shutil.rmtree(run_dir)
+        
+    os.makedirs(model_dir, exist_ok=True)
+    model_path = os.path.join(training_dir, model)
+    model = YOLO(model_path)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+    model.model.to(device)
+
+    print("Training on", device)
+    print("Dataset:", training_dir)
+    from ultralytics.utils import SETTINGS
+    SETTINGS['runs_dir'] = model_dir
+
+    model.train(
+        data=training_dir,
+        epochs=epochs,
+        imgsz=224,
+        batch=56,
+        workers=8,  # ✅ multiprocessing OK here
+        name="latest_run",
+        fliplr=0.5,
+        flipud=0.01,
+        hsv_h=0.015,
+        hsv_s=0.7,
+        hsv_v=0.4,
+        erasing=0.4,
+        auto_augment="autoaugment"
+    )
+
+    # Save model and classes
+    save_path = os.path.join(model_dir, f"{name}.pt")
+    model.save(save_path)
+    with open(os.path.join(model_dir, f"{name}.json"), "w") as f:
+        json_dict = {}
+        json_dict["id_2_name"] = model.names
+        json.dump(json_dict, f, indent=4)
+
+    print("Training complete ✅")
+    print("Saved model to:", save_path)
+
+class Predictions:
+    def __init__(self, gui):
+        self.fileManager = gui.fileManager
+        self.gui = gui
+        self.train_thread = None
+
+    def open_category_manager(self):
+        def on_close():
+            self.gui.categories = [path for path, state in self.app.folder_states.items() if state == "category"]
+            self.gui.excludes = [path for path, state in self.app.folder_states.items() if state == "exclude"]
+            self.app.destroy()
+        dest_root = self.gui.destination_entry_field.get()
+        self.app = FolderTreeApp(dest_root, self.gui.categories, self.gui.excludes, self.manual_training)
+        self.app.protocol("WM_DELETE_WINDOW", on_close)
+
+    def get_folder_contents_with_labels(self, destinations, excludes=[]):
+        categories = [os.path.abspath(c) for c in destinations]
+        excludes = set(os.path.abspath(e) for e in excludes)
+        data = {}
+        for category_path in categories:
+            label = os.path.basename(category_path)
+            label_list = data.get(label, [])
+            data[label] = label_list
+            print(f"[Category] {category_path}")
+
+            for root, dirs, files in os.walk(category_path):
+                abs_root = os.path.abspath(root)
+
+                # Prune dirs list to exclude excluded or category folders, so os.walk won't go into them
+                pruned_dirs = []
+                for d in dirs:
+                    d_abs = os.path.abspath(os.path.join(root, d))
+
+                    if any(d_abs == ex or d_abs.startswith(ex + os.sep) for ex in excludes):
+                        pass
+                    elif any(d_abs == cat for cat in categories):
+                        pass
+                    else:
+                        pruned_dirs.append(d)
+                dirs[:] = pruned_dirs
+
+                print(f"  Subfolder: {abs_root}")
+
+                for file in files:
+                    if file.lower().endswith(("png", "gif", "jpg", "jpeg", "bmp", "pcx", "tiff", "webp", "psd", "jfif", "mp4", "mkv", "m4v", "mov", "webm")):
+                        data[label].append((os.path.join(root, file)))
+        return data
+
+    def manual_training(self, name="latest_model"):
+        def train():
+            self.gui.categories = [path for path, state in self.app.folder_states.items() if state == "category"]
+            self.gui.excludes = [path for path, state in self.app.folder_states.items() if state == "exclude"]
+            names_2_path = {os.path.basename(x): x for x in self.gui.categories}
+            with open(os.path.join(self.fileManager.model_dir, f"{name}_paths.json"), "w") as f:
+                json_dict = {}
+                json_dict["names_2_path"] = names_2_path
+                json.dump(json_dict, f, indent=4)
+
+            print("Category folders:")
+            for path in self.gui.categories:
+                print("  ", path)
+
+            print("Excluded folders:")
+            for path in self.gui.excludes:
+                print("  ", path)
+
+            label_path_dict = self.get_folder_contents_with_labels(self.gui.categories, self.gui.excludes)
+
+            self.gui.train_status_var.set("Building dataset...")
+            from Advanced_sorting import Dataset_gen
+            Data = Dataset_gen(self.fileManager.train_dir, label_path_dict, self.gui.prediction_thumbsize, self.fileManager)
+            path_hash_lookup = Data.gen_thumbs()
+            Data.split(0.9)
+            self.gui.train_status_var.set("Starting...")
+
+            names_2_path = {os.path.basename(x): x for x in self.gui.categories}
+            from Advanced_sorting import start_training
+            self.gui.train_status_var.set("Training...")
+            start_training(self.fileManager.train_dir, self.fileManager.model_dir, 100, name)
+
+            path_to_results_csv = os.path.join(self.fileManager.model_dir, "classify", "latest_run", "results.csv")
+
+            self.gui.model_path = os.path.join(self.fileManager.model_dir, f"{name}.pt")
+            self.gui.train_status_var.set("Finished.")
+
+
+        if self.train_thread and self.train_thread.is_alive():
+            print("Already running.")
+            return
+        self.train_thread = threading.Thread(target=train, name="Manual-training", daemon=True)
+        self.train_thread.start()
+
+    def automatic_training(self):
+        "Generate all files from destinations. Assign as categories. Need self.labels... Inferring size and pred_dir location."
+        def train():
+            if self.fileManager.wait_animation_after_id: self.gui.after_cancel(self.fileManager.wait_animation_after_id)
+            self.gui.after(0, self.gui.train_status_var.set, "")
+
+            self.gui.after(0, self.fileManager.wait_indicator_animation_start, "Labelling")
+
+            label_path_dict = self.get_folder_contents_with_labels([folder_path for _, folder_path, _, _, _ in self.gui.buttons])
+            if self.fileManager.wait_animation_after_id: self.gui.after_cancel(self.fileManager.wait_animation_after_id)
+            self.gui.after(0, self.gui.train_status_var.set, "")
+
+            self.gui.after(0, self.fileManager.wait_indicator_animation_start, "Caching")
+            Data = Dataset_gen(self.fileManager.train_dir, label_path_dict, self.gui.prediction_thumbsize, self.fileManager)
+            path_hash_lookup = Data.gen_thumbs()
+            Data.split(0.9)
+
+            if self.fileManager.wait_animation_after_id: self.gui.after_cancel(self.fileManager.wait_animation_after_id)
+            self.gui.after(0, self.gui.train_status_var.set, "")
+
+            self.gui.after(0, self.fileManager.wait_indicator_animation_start, "Starting")
+            names_2_path = {os.path.basename(x[1]): x[1] for x in self.gui.buttons if os.path.basename(self.gui.buttons[0][1]) != "Trash"}
+
+            with open(os.path.join(self.fileManager.model_dir, "latest_model_paths.json"), "w") as f:
+                json_dict = {}
+                json_dict["names_2_path"] = names_2_path
+                json.dump(json_dict, f, indent=4)
+
+            if self.fileManager.wait_animation_after_id: self.gui.after_cancel(self.fileManager.wait_animation_after_id)
+            self.gui.after(0, self.gui.train_status_var.set, "")
+
+            self.gui.after(0, self.fileManager.wait_indicator_animation_start, "Training")
+            start_training(self.fileManager.train_dir, self.fileManager.model_dir, 4, "latest_model")
+
+            path_to_results_csv = os.path.join(self.fileManager.model_dir, "classify", "latest_run", "results.csv")
+
+            self.model_path = os.path.join(self.fileManager.model_dir, f"latest_model.pt")
+            if self.fileManager.wait_animation_after_id: self.gui.after_cancel(self.fileManager.wait_animation_after_id)
+            self.gui.after(0, self.gui.train_status_var.set, "Finished.")
+
+        if self.train_thread and self.train_thread.is_alive():
+            print("Already running.")
+            return
+        if self.gui.imagegrid.image_items:
+            self.train_thread = threading.Thread(target=train, name="Auto-training", daemon=True)
+            self.train_thread.start()
+        else:
+            print("You must start a new session before auto-training to generate the destinations.")
+
+    def model_infer(self, model=None, imagefiles=[]):
+        if not imagefiles:
+            return
+        self.gui.train_status_var.set("Loading model...")
+        model_inferer = Model_inferer(self.fileManager, model, self.gui.prediction_thumbsize)
+        for x in imagefiles:
+            if x.id == None:
+                x.gen_id()
+        lookup = {x.id: x for x in imagefiles}
+        self.gui.train_status_var.set("Sorting...")
+
+        thread = threading.Thread(target=model_inferer.infer, args=(imagefiles, lookup), daemon=True)
+        thread.start()
+
+        self.last_model = model
