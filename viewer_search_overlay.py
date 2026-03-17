@@ -1,14 +1,10 @@
-import os
-import tkinter as tk
+import os, tkinter as tk
 
 class ImageViewer:
     def __init__(self, root):
         self.root = root
         self.canvas = None
 
-        self.queue = None
-        self.image = None
-        self.tk_img = None
         self.include_folder = None
         self.exclude_folder = set()
         self.cached_dirs = []
@@ -47,7 +43,7 @@ class ImageViewer:
     # Basic display
     # ----------------------------
     def new_canvas(self, canvas):
-        "make new canvas according to what navigator says is current viewer"
+        "make new canvas according to what bindhandler says is current viewer"
         self.canvas = canvas
         # bindings
         root = self.root.gui
@@ -81,22 +77,12 @@ class ImageViewer:
         self.canvas.create_text(
             self.canvas.winfo_width()//2,
             self.canvas.winfo_height()//2,
-            text=msg, tags="sorter", fill="white", font=("Arial", 14), justify="center"
+            text=msg, tags=("sorter", "msg"), fill="white", font=("Arial", 14), justify="center"
         )
 
     def close(self):
         if ".!toplevel" in self.root._w:
             self.canvas.destroy()
-    
-    def show_image(self):
-        w, h = self.root.winfo_width(), self.root.winfo_height()
-        self.canvas.delete("sorter")
-        self.canvas.create_image(w//2, h//2, image=self.tk_img, tags="sorter", anchor="center")
-        self.search_ui = {}
-        if self.search_active:
-            self.draw_search_box()
-        if self.hotkey_active:
-            self.create_hotkey_box()
 
     def show_hotkeys(self, event=None):
         if self.hotkey_active:
@@ -240,8 +226,12 @@ class ImageViewer:
         
         # activate search by space or tab, otherwise all keypresses activate hotkeys
         if (not self.search_active and e.keysym in ("space", "Tab")): # or (not self.search_active and not self.hotkey_active and len(e.char) == 1 and e.char.isprintable()):
+            gui = self.root.gui
+            if gui.second_window_viewer: gui.second_window_viewer.master.focus()
+
             e.char = e.char if e.keysym not in ("space", "Tab") else ""
             self.start_search(e.char)
+
         elif self.hotkey_active and not self.search_active: # only hotkeybox open.
             if e.keysym == "Delete": # send to trash
                 #print("Trash")
@@ -558,7 +548,6 @@ class ImageViewer:
             self.search_box_size[0] = max(200, e.x + ox - x1)
             self.update_search_box()
 
-# --- run
 if __name__ == "__main__":
     root = tk.Tk()
     root.geometry("800x600")
