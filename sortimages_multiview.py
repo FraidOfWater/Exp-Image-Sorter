@@ -1,10 +1,10 @@
 #pip freeze > requirements.txt; pip uninstall -r requirements.txt -y; del requirements.txt
 from time import perf_counter
-import os, json, queue, shutil, tkinter as tk, ctypes
-from hashlib import md5
-
+import os, json, queue, shutil, tkinter as tk, ctypes, argparse
 import threading, multiprocessing as mp
-from concurrent.futures import ThreadPoolExecutor
+
+from gui import GUIManager
+from gui import Bindhandler
 
 vipsbin = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vips-dev-8.18", "bin")
 os.environ['PATH'] = os.pathsep.join((vipsbin, os.environ['PATH']))
@@ -12,21 +12,10 @@ os.add_dll_directory(vipsbin)
 if os.path.isdir(vipsbin):
     os.add_dll_directory(vipsbin)
 
-from gui import GUIManager
-from navigator import Navigator
-
-# undo wont add to destw, and undo cant act on destw changes?
-
-# # compare new and old vlc implementation # aesthetic tweaks
-# purple theme
-# anim debug colors
-# font change to folder buttons
-# old random colors back option button
-
-# load_images_amount?
-# settings button to dump the rest into so I can get rid of menubar?
-
+# OLD RANDOM COLORS, get rid of menu bar, VLC style, PURPLE theme, Anim debug colors, font change to dest buttons, UNDO IN DESTW
+# Refactor thumbmanager and anim to imagegrid.
 class Imagefile:
+    from hashlib import md5
     ANIMATION = "ANIMATION"
     IMAGE = "IMAGE"
     VIDEO = "VIDEO"
@@ -60,7 +49,6 @@ class Imagefile:
         self.destframe = None       # Reference to destframe
         self.gridsquare = None
         self.destsquare = None
-        self.change_color_flag = False
 
         "Prediction"
         self.conf = None
@@ -72,7 +60,7 @@ class Imagefile:
         self.file_size = file_stats.st_size
         self.mod_time = file_stats.st_mtime
         id = f"{file_name} {file_stats.st_size} {file_stats.st_mtime}"
-        self.id = md5(id.encode('utf-8')).hexdigest()
+        self.id = Imagefile.md5(id.encode('utf-8')).hexdigest()
     
     def clear_frames(self):
         self.frames.clear()
@@ -130,12 +118,13 @@ class SortImages:
     model_classes = None
     names_2_path = None
 
-    prefs_path = os.path.join(script_dir, "prefs.json")
-    themes_path = os.path.join(script_dir, "themes.json")
+    prefs_path = os.path.join(script_dir, "_prefs.json")
+    themes_path = os.path.join(script_dir, "_themes.json")
 
     imagelist = [] # Store all Imagefiles
     exclude = []
     assigned = []
+    moved = []
 
     last_sort = (None, False)
 
@@ -154,8 +143,6 @@ class SortImages:
         self.jthemes = gui.themes
         
         self.first_run = True
-        "Timekeeping and throttling"
-        self.timer = Timer()        # Time since creation.
 
         "Start modules"
         prefs = gui.jprefs
@@ -163,10 +150,9 @@ class SortImages:
         
         self.gui = gui
         gui.fileManager = self
-        self.predictions = Predictions(self)
         
         self.gui.initialize()       # Let GUI initialize fully now with loaded values.
-        self.navigator = Navigator(self) # Navigator highlights the current selection, main use is to be able to navigate using arrow or wasd keys ### (wasd not implemented)
+        self.bindhandler = Bindhandler(self)
         self.animate = Animate(self) # Animate module is dedicated for making things animated.
         self.thumbs = ThumbManager(self) # Thumbmanager generates thumbs, frames, truncated names and imagefile attributes, and reloads and unloads resources when needed.
 
@@ -174,15 +160,19 @@ class SortImages:
 
         self.last_assigned_list_for_autosave = []
 
+        self.wait_animation_after_id = None
+
         def load_modules():
             # load expensive modules we need only after gui has appeared
+            from hashlib import md5
+            from concurrent.futures import ThreadPoolExecutor, as_completed
             import numpy
             import PIL
             import pyvips
             import av
             import pymediainfo
-            from folders import FolderExplorer
-            from resizing import Application
+            from destinations import FolderExplorer
+            from viewer import Application
             from imagegrid import ImageGrid
             self.update_info()
             self.val_thumb_cache(self.data_dir)
@@ -257,12 +247,8 @@ class SortImages:
                 "thumbnailsize": gui.thumbnailsize,
                 "prediction_thumbsize": gui.prediction_thumbsize,
                 "hotkeys": gui.hotkeys,
-                "force_scrollbar": gui.force_scrollbar,
                 "auto_load": gui.auto_load,
-                "do_anim_loading_colors": gui.do_anim_loading_colors,
-                "show_statusbar": gui.show_statusbar.get(),
-                "show_ram": gui.show_ram.get(),
-                "show_advanced": gui.show_advanced.get(),
+                "do_debug": gui.do_debug.get()
             },
             "technical": {
                 "quick_preview_filter": gui.filter_mode,
@@ -319,7 +305,7 @@ class SortImages:
             savelocation=tkFileDialog.asksaveasfilename(confirmoverwrite=True,defaultextension=filet,filetypes=filet,
                                                         initialdir=os.getcwd(),initialfile=custom_session_name)
         else:
-            savelocation = "last_session.json"
+            savelocation = "_last_session.json"
 
         if not savelocation: return
         seen = {}
@@ -327,7 +313,7 @@ class SortImages:
         for x in self.assigned:
             seen[x.dest] = x.color
             assigned.append((x.path, x.dest))
-        self.moved = []
+        
         save = {"destination": self.ddp, "source": self.sdp, "colors": seen, "assigned": assigned, "moved": self.moved}
 
         with open(os.path.join(self.script_dir, savelocation), "w+") as json_file:
@@ -337,7 +323,7 @@ class SortImages:
     def loadsession(self):
         gui = self.gui
         "If there is no last session, early exit"
-        last_session = os.path.join(self.script_dir, "last_session.json")
+        last_session = os.path.join(self.script_dir, "_last_session.json")
         if not os.path.exists(last_session):
             print("No Last Session!")
             return
@@ -386,10 +372,8 @@ class SortImages:
 
         self.validate()
     
-    def moveall(self):
-        self.timer.start()
+    def moveall(self): # the bindhandler could do this as it is activated by a button.
         gui = self.gui
-        imagegrid = gui.imagegrid
         temp = self.assigned.copy()
 
         successfull = []
@@ -397,21 +381,17 @@ class SortImages:
             success = obj.move()
             if success: # If move was successfull
                 self.assigned.remove(obj)
+                self.moved.append(obj)
                 #imagegrid.moved.append(x)
                 gui.images_left_stats_strvar.set(
-                    f"{len(self.assigned)}/{len(self.imagelist)}/{len(self.all_objs)}")
+                    f"{len(self.assigned)}/{len(self.all_objs)-len(self.assigned)-len(self.moved)}/{len(self.all_objs)}")
                 gui.images_sorted.set(gui.images_sorted.get()+1)
                 gui.images_sorted_strvar.set(f"Sorted: {gui.images_sorted.get()}")
                 gui.winfo_toplevel().title(f"EXP: {gui.images_sorted_strvar.get()} Left: {gui.images_left_stats_strvar.get()}")
 
                 successfull.append(obj)
-        
-        """if self.gui.current_view.get() == "Assigned":
-            imagegrid.remove_squares(successfull, unload=True)"""
 
-        print(self.timer.stop())
-
-    def setDestination(self, dest, caller=None):
+    def setDestination(self, dest, caller=None): # could move to imagegrid, where the assigned list originates from.
         if caller:
             f = self.gui.focus_get()
             if hasattr(f, "widgetName") and f.widgetName == "entry": return
@@ -448,7 +428,7 @@ class SortImages:
         
         selection = None
         current_view = gui.current_view.get()
-        if imagegrid.current_selection_entry is not None and self.navigator.window_focused == "GRID":
+        if imagegrid.current_selection_entry is not None and self.bindhandler.window_focused == "GRID":
             selection = imagegrid.current_selection_entry
 
         igrid_marked = gui.imagegrid.selected.copy()
@@ -457,7 +437,7 @@ class SortImages:
         d_selection = None
 
         if hasattr(self.gui.folder_explorer, "destw") and self.gui.folder_explorer.destw != None and self.gui.folder_explorer.destw.winfo_exists():
-            if gui.folder_explorer.destw.current_selection_entry is not None and self.navigator.window_focused == "DEST":
+            if gui.folder_explorer.destw.current_selection_entry is not None and self.bindhandler.window_focused == "DEST":
                 d_selection = gui.folder_explorer.destw.current_selection_entry
             dgrid_marked = gui.folder_explorer.destw.selected.copy()
             gui.folder_explorer.destw.selected.clear()
@@ -543,24 +523,9 @@ class SortImages:
         # Load more
         if gui.auto_load and (current_view == "Unassigned"): self.load_more()
 
-        if imagegrid.image_items:
-            if caller and hasattr(caller, "widget") and "toplevel" in caller.widget._w:
-                if self.gui.folder_explorer.destw.current_selection is not None and self.gui.folder_explorer.destw.current_selection < len(self.gui.folder_explorer.destw.image_items):
-                    selected_entry = self.gui.folder_explorer.destw.image_items[self.gui.folder_explorer.destw.current_selection]
-                    self.gui.folder_explorer.destw.make_selection(selected_entry)
-                    if self.gui.show_next.get():
-                        self.gui.displayimage(selected_entry.file)
-            else:
-                if imagegrid.current_selection is not None:
-                    i = -1 if imagegrid.current_selection >= len(imagegrid.image_items) else imagegrid.current_selection
-                    selected_entry = imagegrid.image_items[i]
-                    imagegrid.make_selection(selected_entry)
-                    if self.gui.show_next.get():
-                        self.gui.displayimage(selected_entry.file)
-
         # Update stats
         gui.images_left_stats_strvar.set(
-            f"{len(self.assigned)}/{len(self.imagelist)}/{len(self.all_objs)}")
+            f"{len(self.assigned)}/{len(self.all_objs)-len(self.assigned)-len(self.moved)}/{len(self.all_objs)}")
         gui.winfo_toplevel().title(f"EXP: {gui.images_sorted_strvar.get()} Left: {gui.images_left_stats_strvar.get()}")
     
     def validate(self, btn=None): # new session
@@ -569,9 +534,8 @@ class SortImages:
         else:
             self.first_run = False
         gui = self.gui
-        timer = self.timer; timer.start()
-        self.sdp = gui.source_entry_field.get()
-        self.ddp = gui.destination_entry_field.get()
+        self.sdp = os.path.normpath(gui.source_entry_field.get())
+        self.ddp = os.path.normpath(gui.destination_entry_field.get())
         samepath = (self.sdp == self.ddp)
 
         if os.path.isdir(self.sdp):
@@ -610,13 +574,10 @@ class SortImages:
             gui.winfo_toplevel().title(f"EXP: {gui.images_sorted_strvar.get()} Left: {gui.images_left_stats_strvar.get()}")
             self.gui.imagegrid.clear_canvas(unload=True)
             self.sort_imagelist()
-            timer.start()
 
         self.gui.update_idletasks()
-        #self.navigator.first()
 
-    def load_more(self):
-        
+    def load_more(self): # should be deprecated with virtual grid
         count_in_grid = len(self.gui.imagegrid.image_items)
         amount = self.gui.squares_per_page_intvar.get()
         to_load = amount - count_in_grid
@@ -632,7 +593,7 @@ class SortImages:
         if self.gui.prediction.get():
             self.gui.squares_per_page_intvar.set(self.squares_per_page_old)
 
-    def walk(self, src, samepath):
+    def walk(self, src, samepath): # IMAGEGRID should do this.
         imagelist = []
         for root, dirs, files in os.walk(src, topdown=True):
             dirs[:] = [d for d in dirs if d not in self.exclude]
@@ -652,7 +613,12 @@ class SortImages:
         self.last_sort = (self.last_sort[0], not self.last_sort[1])
         return imagelist
 
-    def sort_imagelist(self):
+    def wait_indicator_animation_start(self, msg, suffix="...", start_index=0):
+        self.gui.train_status_var.set(f"{msg} {' '*(len(suffix)-(start_index+1))}{suffix[:start_index]}") # stylistic
+        #self.gui.train_status_var.set(f"{msg}{suffix[:start_index]}{' '*(len(suffix)-(start_index+1))}") # add 1 extra char to suffix
+        self.wait_animation_after_id = self.gui.after(100, self.wait_indicator_animation_start, msg, suffix, (start_index + 1) % (len(suffix)))
+    
+    def sort_imagelist(self): # imagegrid should do this
         # remove from imagelist, but add back from image_items
         from operator import attrgetter
         from natsort import natsorted
@@ -671,7 +637,9 @@ class SortImages:
             gui.imagegrid.clear_canvas(unload=True, new_list=load)
             if self.gui.current_view.get() == "Unassigned":
                 self.load_more()
+            if self.wait_animation_after_id: self.gui.after_cancel(self.wait_animation_after_id)
             self.gui.train_status_var.set("")
+            
         if self.gui.current_view.get() != "Unassigned": return
         MODE = gui.display_order.get().lower()
         grid_objects = [entry.file for entry in gui.imagegrid.image_items]
@@ -680,7 +648,7 @@ class SortImages:
             self.last_sort = (self.last_sort[0], not self.last_sort[1])
         else:
             self.last_sort = (MODE.lower(), False)
-
+        self.wait_indicator_animation_start("Sorting")
         if gui.prediction.get():
             def run():
                 # reorder by confidence.
@@ -706,100 +674,105 @@ class SortImages:
                     if len(c) < 2:
                         continue
                     
-                    if MODE.lower() == "filename":
-                        classes[key] = natsorted(c, key=attrgetter("name"), reverse=True if self.last_sort[1] == False else False)
-                    elif MODE.lower() == "type":
-                        classes[key] = natsorted(c, key=attrgetter("name"), reverse=True if self.last_sort[1] == False else False)
-                        c1 = classes[key]
-                        c1.sort(key=lambda x: (x.ext.lower() not in ("gif", "webm", "mp4", "webp"), x.ext.lower()), reverse=True if self.last_sort[1] == False else False)
-                    elif MODE.lower() == "date":
-                        for obj in c:
-                            obj.mod_time = os.path.getmtime(obj.path)
-                        c.sort(key=attrgetter("mod_time"), reverse=False if self.last_sort[1] == False else True)
-                    elif MODE == "size":
-                        for obj in c:
-                            file_stats = os.stat(obj.path)
-                            obj.file_size = file_stats.st_size
-                        c.sort(key=attrgetter("file_size"), reverse=False if self.last_sort[1] == False else True)
-                    elif MODE == "smart":
-                        # Groups by filename, Normal, numeric and hashed.
-                        # Each group is sorted by natsort, or in case of hashed, modification date.
-                        import re
-                        def get_file_metadata(name):
-                            stem = os.path.splitext(name)[0]
-                            # Split by any of these: _ - . ( ) [ ] or whitespace
-                            segments = [s.strip() for s in re.split(r'[_.\-\(\)\[\]\s]', stem) if s.strip()]
-                            
-                            # Atoms: Strictly letters (no numbers allowed)
-                            atoms = [s.lower() for s in segments if s.isalpha() and len(s) > 1]
-                            
-                            # Identify the "Kind"
-                            clean_total = "".join(segments)
-                            if clean_total.isdigit():
-                                kind = "numeric"
-                            elif not atoms:
-                                kind = "hashed" # Has segments, but none are pure words
-                            else:
-                                kind = "alpha"
+                    match MODE.lower():
+                        case "filename":
+                            classes[key] = natsorted(c, key=attrgetter("name"), reverse=True if self.last_sort[1] == False else False)
+                        case "type":
+                            classes[key] = natsorted(c, key=attrgetter("name"), reverse=True if self.last_sort[1] == False else False)
+                            c1 = classes[key]
+                            c1.sort(key=lambda x: (x.ext.lower() not in ("gif", "webm", "mp4", "webp"), x.ext.lower()), reverse=True if self.last_sort[1] == False else False)
+                        case "date":
+                            for obj in c:
+                                obj.mod_time = os.path.getmtime(obj.path)
+                            c.sort(key=attrgetter("mod_time"), reverse=False if self.last_sort[1] == False else True)
+                        case "size":
+                            for obj in c:
+                                file_stats = os.stat(obj.path)
+                                obj.file_size = file_stats.st_size
+                            c.sort(key=attrgetter("file_size"), reverse=False if self.last_sort[1] == False else True)
+                        case "smart":
+                            # Groups by filename, Normal, numeric and hashed.
+                            # Each group is sorted by natsort, or in case of hashed, modification date.
+                            import re
+                            def get_file_metadata(name):
+                                stem = os.path.splitext(name)[0]
+                                # Split by any of these: _ - . ( ) [ ] or whitespace
+                                segments = [s.strip() for s in re.split(r'[_.\-\(\)\[\]\s]', stem) if s.strip()]
                                 
-                            return set(atoms), len(segments), kind
-
-                        alpha = []
-                        numeric = []
-                        hashed = []
-                        for x in c:
-                            atoms, length, kind = get_file_metadata(x.name)
-                            if kind == "alpha": alpha.append(x)
-                            elif kind == "hashed": hashed.append(x)
-                            else: numeric.append(x)
-                        
-                        alpha = natsorted(alpha, key=attrgetter("name"), reverse=False if self.last_sort[1] == False else True)
-                        numeric = natsorted(numeric, key=attrgetter("name"), reverse=False if self.last_sort[1] == False else True)
-
-                        for obj in hashed:
-                            obj.mod_time = os.path.getmtime(obj.path)
-                        hashed.sort(key=attrgetter("mod_time"), reverse=False if self.last_sort[1] == False else True)
-
-                        combined = alpha+hashed+numeric
-                        combined.reverse()
-                        c[:] = combined
-                    elif MODE == "dimensions":
-                        from PIL import Image
-                        from imageio import get_reader # 130 ms
-                        for obj in c:
-                            if obj.dimensions == (-2, 0.0):
-                                if obj.ext in ("mp4", "webm"):
-                                    try:
-                                        reader = None
-                                        reader = get_reader(obj.path)
-                                        pil_img = Image.fromarray(reader.get_data(0))
-                                        w, h = pil_img.size
-                                        ratio = w/h # ratio 
-                                        if w == h: orientation = 0.0
-                                        elif w < h: orientation = -1.0
-                                        else: orientation = 1.0
-                                        obj.dimensions = (orientation, ratio)
-                                    except Exception as e:
-                                        print(f"Couldn't read: {obj.name} : Error: {e}")
-                                    finally: 
-                                        if reader: reader.close()
+                                # Atoms: Strictly letters (no numbers allowed)
+                                atoms = [s.lower() for s in segments if s.isalpha() and len(s) > 1]
+                                
+                                # Identify the "Kind"
+                                clean_total = "".join(segments)
+                                if clean_total.isdigit():
+                                    kind = "numeric"
+                                elif not atoms:
+                                    kind = "hashed" # Has segments, but none are pure words
                                 else:
-                                    with Image.open(obj.path) as pil_img:
-                                        w, h = pil_img.size
-                                        ratio = w/h # ratio
-                                        if w == h: orientation = 0.0
-                                        elif w < h: orientation = -1.0
-                                        else: orientation = 1.0
-                                        obj.dimensions = (orientation, ratio)
-                                        
-                        c.sort(key=attrgetter("dimensions"), reverse=False if self.last_sort[1] == False else True)
+                                    kind = "alpha"
+                                    
+                                return set(atoms), len(segments), kind
 
-                    elif MODE.lower() == "histogram": # threaded gen
-                        self.reorder_as_nearest1(c, reverse=self.last_sort[1])        
-                    elif MODE.lower() == "nearest":
-                        self.reorder_as_nearest(c, reverse=self.last_sort[1])
-                    elif MODE.lower() == "confidence":
-                        c.sort(key=lambda x: x.conf, reverse=False if self.last_sort[1] == False else True) 
+                            alpha = []
+                            numeric = []
+                            hashed = []
+                            for x in c:
+                                atoms, length, kind = get_file_metadata(x.name)
+                                if kind == "alpha": alpha.append(x)
+                                elif kind == "hashed": hashed.append(x)
+                                else: numeric.append(x)
+                            
+                            alpha = natsorted(alpha, key=attrgetter("name"), reverse=False if self.last_sort[1] == False else True)
+                            numeric = natsorted(numeric, key=attrgetter("name"), reverse=False if self.last_sort[1] == False else True)
+
+                            for obj in hashed:
+                                obj.mod_time = os.path.getmtime(obj.path)
+                            hashed.sort(key=attrgetter("mod_time"), reverse=False if self.last_sort[1] == False else True)
+
+                            combined = alpha+hashed+numeric
+                            combined.reverse()
+                            c[:] = combined
+                        case "dimensions":
+                            from PIL import Image
+                            from imageio import get_reader # 130 ms
+                            for obj in c:
+                                if obj.dimensions == (-2, 0.0):
+                                    if obj.ext in ("mp4", "webm"):
+                                        try:
+                                            reader = None
+                                            reader = get_reader(obj.path)
+                                            pil_img = Image.fromarray(reader.get_data(0))
+                                            w, h = pil_img.size
+                                            ratio = w/h # ratio 
+                                            if w == h: orientation = 0.0
+                                            elif w < h: orientation = -1.0
+                                            else: orientation = 1.0
+                                            obj.dimensions = (orientation, ratio)
+                                        except Exception as e:
+                                            print(f"Couldn't read: {obj.name} : Error: {e}")
+                                        finally: 
+                                            if reader: reader.close()
+                                    else:
+                                        try:
+                                            with Image.open(obj.path) as pil_img:
+                                                w, h = pil_img.size
+                                                ratio = w/h # ratio
+                                                if w == h: orientation = 0.0
+                                                elif w < h: orientation = -1.0
+                                                else: orientation = 1.0
+                                                obj.dimensions = (orientation, ratio)
+                                        except Exception as e:
+                                            print("sorting error when fetching dimensiosns", obj.path, e)
+                                            
+                            c.sort(key=attrgetter("dimensions"), reverse=False if self.last_sort[1] == False else True)
+
+                        case "histogram": # threaded gen
+                            self.gui.train_status_var.set("Sorting...")
+                            self.reorder_as_nearest1(c, reverse=self.last_sort[1])   
+                        case "nearest":
+                            self.reorder_as_nearest(c, reverse=self.last_sort[1])
+                        case "confidence":
+                            c.sort(key=lambda x: x.conf, reverse=False if self.last_sort[1] == False else True)
                 classes = sorted(list(classes.values()), key=lambda x: len(x), reverse=False if self.last_sort[1] == False else True) # sorted by class and conf
 
                 predictable = []
@@ -820,119 +793,121 @@ class SortImages:
                 a = threading.Thread(target=run, daemon=True)
             a.start()
             return        
-        elif MODE == "filename":
-            self.imagelist = natsorted(self.imagelist, key=attrgetter("name"), reverse=True if self.last_sort[1] == False else False)
-        elif MODE == "type":
-            self.imagelist = natsorted(self.imagelist, key=attrgetter("name"), reverse=True if self.last_sort[1] == False else False)
-            self.imagelist.sort(key=lambda x: (x.ext.lower() not in ("gif", "webm", "mp4", "webp"), x.ext.lower()), reverse=True if self.last_sort[1] == False else False)
-        elif MODE == "date":
-            for obj in self.imagelist:
-                obj.mod_time = os.path.getmtime(obj.path)
-            self.imagelist.sort(key=attrgetter("mod_time"), reverse=False if self.last_sort[1] == False else True)
-        elif MODE == "size":
-            for obj in self.imagelist:
-                file_stats = os.stat(obj.path)
-                obj.file_size = file_stats.st_size
-            self.imagelist.sort(key=attrgetter("file_size"), reverse=False if self.last_sort[1] == False else True)
-        elif MODE == "smart":
-            # sort out HASHED files that fuck up everything
-            # sORT Out purely number based.
-            import re
-            def get_file_metadata(name):
-                stem = os.path.splitext(name)[0]
-                # Split by any of these: _ - . ( ) [ ] or whitespace
-                segments = [s.strip() for s in re.split(r'[_.\-\(\)\[\]\s]', stem) if s.strip()]
-                
-                # Atoms: Strictly letters (no numbers allowed)
-                atoms = [s.lower() for s in segments if s.isalpha() and len(s) > 1]
-                
-                # Identify the "Kind"
-                clean_total = "".join(segments)
-                if clean_total.isdigit():
-                    kind = "numeric"
-                elif not atoms:
-                    kind = "hashed" # Has segments, but none are pure words
-                else:
-                    kind = "alpha"
+        else:
+            match MODE.lower():
+                case "filename":
+                    self.imagelist = natsorted(self.imagelist, key=attrgetter("name"), reverse=True if self.last_sort[1] == False else False)
+                case "type":
+                    self.imagelist = natsorted(self.imagelist, key=attrgetter("name"), reverse=True if self.last_sort[1] == False else False)
+                    self.imagelist.sort(key=lambda x: (x.ext.lower() not in ("gif", "webm", "mp4", "webp"), x.ext.lower()), reverse=True if self.last_sort[1] == False else False)
+                case "date":
+                    for obj in self.imagelist:
+                        obj.mod_time = os.path.getmtime(obj.path)
+                    self.imagelist.sort(key=attrgetter("mod_time"), reverse=False if self.last_sort[1] == False else True)
+                case "size":
+                    for obj in self.imagelist:
+                        file_stats = os.stat(obj.path)
+                        obj.file_size = file_stats.st_size
+                    self.imagelist.sort(key=attrgetter("file_size"), reverse=False if self.last_sort[1] == False else True)
+                case "smart":
+                    # sort out HASHED files that fuck up everything
+                    # sORT Out purely number based.
+                    import re
+                    def get_file_metadata(name):
+                        stem = os.path.splitext(name)[0]
+                        # Split by any of these: _ - . ( ) [ ] or whitespace
+                        segments = [s.strip() for s in re.split(r'[_.\-\(\)\[\]\s]', stem) if s.strip()]
+                        
+                        # Atoms: Strictly letters (no numbers allowed)
+                        atoms = [s.lower() for s in segments if s.isalpha() and len(s) > 1]
+                        
+                        # Identify the "Kind"
+                        clean_total = "".join(segments)
+                        if clean_total.isdigit():
+                            kind = "numeric"
+                        elif not atoms:
+                            kind = "hashed" # Has segments, but none are pure words
+                        else:
+                            kind = "alpha"
+                            
+                        return set(atoms), len(segments), kind
+
+                    alpha = []
+                    numeric = []
+                    hashed = []
+                    for x in self.imagelist:
+                        atoms, length, kind = get_file_metadata(x.name)
+                        if kind == "alpha": alpha.append(x)
+                        elif kind == "hashed": hashed.append(x)
+                        else: numeric.append(x)
                     
-                return set(atoms), len(segments), kind
+                    alpha = natsorted(alpha, key=attrgetter("name"), reverse=False if self.last_sort[1] == False else True)
+                    numeric = natsorted(numeric, key=attrgetter("name"), reverse=False if self.last_sort[1] == False else True)
 
-            alpha = []
-            numeric = []
-            hashed = []
-            for x in self.imagelist:
-                atoms, length, kind = get_file_metadata(x.name)
-                if kind == "alpha": alpha.append(x)
-                elif kind == "hashed": hashed.append(x)
-                else: numeric.append(x)
-            
-            alpha = natsorted(alpha, key=attrgetter("name"), reverse=False if self.last_sort[1] == False else True)
-            numeric = natsorted(numeric, key=attrgetter("name"), reverse=False if self.last_sort[1] == False else True)
+                    for obj in hashed:
+                        obj.mod_time = os.path.getmtime(obj.path)
+                    hashed.sort(key=attrgetter("mod_time"), reverse=False if self.last_sort[1] == False else True)
 
-            for obj in hashed:
-                obj.mod_time = os.path.getmtime(obj.path)
-            hashed.sort(key=attrgetter("mod_time"), reverse=False if self.last_sort[1] == False else True)
+                    
+                    combined = alpha+hashed+numeric
+                    combined.reverse()
+                    # Replace the original list
+                    self.imagelist[:] = combined
+                case "dimensions":
+                    for obj in self.imagelist:
+                        if obj.dimensions == (-2, 0.0):
+                            from PIL import Image
+                            from imageio import get_reader # 130 ms
+                            if obj.ext in ("mp4", "webm", "mkv", "m4v", "mov"):
+                                try:
+                                    reader = None
+                                    reader = get_reader(obj.path)
+                                    pil_img = Image.fromarray(reader.get_data(0))
+                                    w, h = pil_img.size
+                                    ratio = w/h # ratio 
+                                    if w == h: orientation = 0.0
+                                    elif w < h: orientation = -1.0
+                                    else: orientation = 1.0
+                                    obj.dimensions = (orientation, ratio)
+                                except Exception as e:
+                                    print(f"Couldn't read: {obj.name} : Error: {e}")
+                                finally: 
+                                    if reader: reader.close()
+                            else:
+                                try:
+                                    with Image.open(obj.path) as pil_img:
+                                        w, h = pil_img.size
+                                        ratio = w/h # ratio
+                                        if w == h: orientation = 0.0
+                                        elif w < h: orientation = -1.0
+                                        else: orientation = 1.0
+                                        obj.dimensions = (orientation, ratio)
+                                except Exception as e:
+                                    print("sorting error when fetching dimensiosns", obj.path, e)
 
-            
-            combined = alpha+hashed+numeric
-            combined.reverse()
-            # Replace the original list
-            self.imagelist[:] = combined
-        elif MODE == "dimensions":
-            for obj in self.imagelist:
-                if obj.dimensions == (-2, 0.0):
-                    from PIL import Image
-                    from imageio import get_reader # 130 ms
-                    if obj.ext in ("mp4", "webm", "mkv", "m4v", "mov"):
-                        try:
-                            reader = None
-                            reader = get_reader(obj.path)
-                            pil_img = Image.fromarray(reader.get_data(0))
-                            w, h = pil_img.size
-                            ratio = w/h # ratio 
-                            if w == h: orientation = 0.0
-                            elif w < h: orientation = -1.0
-                            else: orientation = 1.0
-                            obj.dimensions = (orientation, ratio)
-                        except Exception as e:
-                            print(f"Couldn't read: {obj.name} : Error: {e}")
-                        finally: 
-                            if reader: reader.close()
-                    else:
-                        with Image.open(obj.path) as pil_img:
-                            w, h = pil_img.size
-                            ratio = w/h # ratio
-                            if w == h: orientation = 0.0
-                            elif w < h: orientation = -1.0
-                            else: orientation = 1.0
-                            obj.dimensions = (orientation, ratio)
-
-            self.imagelist.sort(key=attrgetter("dimensions"), reverse=True if self.last_sort[1] == False else False)
-
-        elif MODE == "histogram": # threaded gen
-            def helper1():
-                self.reorder_as_nearest1(self.imagelist, reverse=self.last_sort[1])
-                gui.after(1, after_tasks)
-            a = threading.Thread(target=helper1, daemon=True) # dont freeze the program do it threaded
-            a.start()
-            print("Started thread to sort by Histogram. Please wait.")
-            return
-        
-        elif MODE == "nearest": # threaded gen
-            def helper1():
-                self.reorder_as_nearest(self.imagelist, reverse=self.last_sort[1])
-                gui.after(1, after_tasks)
-            a = threading.Thread(target=helper1, daemon=True) # dont freeze the program do it threaded
-            a.start()
-            print("Started thread to sort by Nearest Neighbour. Please wait.")
-            return
+                    self.imagelist.sort(key=attrgetter("dimensions"), reverse=True if self.last_sort[1] == False else False)
+                case "histogram": # threaded gen
+                    def helper1():
+                        self.reorder_as_nearest1(self.imagelist, reverse=self.last_sort[1])
+                        gui.after(1, after_tasks)
+                    a = threading.Thread(target=helper1, daemon=True) # dont freeze the program do it threaded
+                    a.start()
+                    print("Started thread to sort by Histogram. Please wait.")
+                    return     
+                case "nearest": # threaded gen
+                    def helper1():
+                        self.reorder_as_nearest(self.imagelist, reverse=self.last_sort[1])
+                        gui.after(1, after_tasks)
+                    a = threading.Thread(target=helper1, daemon=True) # dont freeze the program do it threaded
+                    a.start()
+                    print("Started thread to sort by Nearest Neighbour. Please wait.")
+                    return
 
         after_tasks()
 
-
-    def reorder_as_nearest1(self, imagefiles, reverse=False):
+    def reorder_as_nearest1(self, imagefiles, reverse=False): # imagegrid should do this
         import cv2
-        import concurrent.futures
+        from concurrent.futures import ThreadPoolExecutor, as_completed
         import os
         from time import perf_counter
 
@@ -971,7 +946,7 @@ class SortImages:
         objs_to_encode = []
         
         # Using ThreadPool to maintain speed while using cv2.imread
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.threads) as executor:
+        with ThreadPoolExecutor(max_workers=max(1, self.threads - 1)) as executor:
             results = list(executor.map(extract_logic_exact, test))
             
         for feat, obj in results:
@@ -1023,10 +998,10 @@ class SortImages:
 
         print(f"✅ Exact Color Sort complete: {len(ordered_objs)} images in {perf_counter()-start:.4f}s")
     
-    def reorder_as_nearest(self, imagefiles, optimization=False, reverse=False):
+    def reorder_as_nearest(self, imagefiles, optimization=False, reverse=False): # imagegrid should do this
         from PIL import Image
         import numpy as np
-        import concurrent.futures
+        from concurrent.futures import ThreadPoolExecutor, as_completed
         TARGET_SIZE = (224, 224)
         BATCH_SIZE = 64
         #SAVE_PATH = r"C:\Users\4f736\Downloads\sort\results"
@@ -1040,13 +1015,13 @@ class SortImages:
             images = [None] * len(imagefiles)
             objs = [None] * len(imagefiles)
 
-            with concurrent.futures.ThreadPoolExecutor(
+            with ThreadPoolExecutor(
                 max_workers=max(1, self.threads - 1), thread_name_prefix="mobilenet_thumbs"
             ) as executor:
                 futures = {executor.submit(self.thumbs.gen_thumb, obj, size=TARGET_SIZE, cache_dir=None, user="mobilenet", mode="letterbox"): i
                         for i, obj in enumerate(imagefiles)}
 
-                for f in concurrent.futures.as_completed(futures):
+                for f in as_completed(futures):
                     i = futures[f]
                     result = f.result()
                     if isinstance(result, tuple):
@@ -1073,11 +1048,11 @@ class SortImages:
         def threaded_letterboxing(images):
             thumbs = [None] * len(images)
 
-            with concurrent.futures.ThreadPoolExecutor(
+            with ThreadPoolExecutor(
                 max_workers=max(1, self.threads - 1), thread_name_prefix="mobilenet_thumbs"
             ) as executor:
                 futures = {executor.submit(letterbox, img, size=TARGET_SIZE): i for i, img in enumerate(images)}
-                for f in concurrent.futures.as_completed(futures):
+                for f in as_completed(futures):
                     i = futures[f]
                     thumbs[i] = f.result()
 
@@ -1213,12 +1188,12 @@ class SortImages:
         
         alpha = 0.7 if PRESET == 1 else 0.4
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, self.threads - 1), thread_name_prefix="mobilenet-colors") as executor:
+        with ThreadPoolExecutor(max_workers=max(1, self.threads - 1), thread_name_prefix="mobilenet-colors") as executor:
             func = get_dominant_center_color if PRESET == 1 else get_median_center_color
             futures = {executor.submit(func, img): i for i, img in enumerate(images)}
             dominant_colors = [None] * len(images)
 
-            for f in concurrent.futures.as_completed(futures):
+            for f in as_completed(futures):
                 i = futures[f]
                 dominant_colors[i] = f.result()
 
@@ -1265,7 +1240,7 @@ class SortImages:
 
         print("Reorder nearest time:", perf_counter()-start)
 
-    def update_info(self, old=None):
+    def update_info(self, old=None): # debug so will stay here
         import psutil
         def get_memory_usage():
             # Get the current process
@@ -1277,13 +1252,13 @@ class SortImages:
             # Return the RSS (Resident Set Size) in bytes
             return (memory_info.rss)
         
-        if self.gui.show_ram.get():
+        if self.gui.do_debug.get():
             self.gui.current_ram_strvar.set(f"RAM: {get_memory_usage() / (1024 ** 2):.2f} MB")
 
         "Anim: displayedlist with frames/displayedlist with framecount/(queue)"
         if self.gui.imagegrid:
             temp = [x for x in self.gui.imagegrid.image_items if x.file.frames]
-            self.gui.animation_stats_var.set(f"Anim: {len(self.animate.running)}/{len(temp)}")
+            self.gui.animation_stats_var.set(f"Objs In animate/With references: {len(self.animate.running)}/{len(temp)}")
 
             "Frames: frames + frames_dest / max"
             temp = [x.file.frames for x in self.gui.imagegrid.image_items if x.file.frames]
@@ -1298,7 +1273,8 @@ class SortImages:
 
         self.gui.after(333, self.update_info)
 
-class ThumbManager:
+class ThumbManager: # imagegrid should do this, but only one instance that is shared by all grids
+    from concurrent.futures import ThreadPoolExecutor
     class CachedTruncator:
         def __init__(self, thumbmanager):
             self.thumbs = thumbmanager
@@ -1415,8 +1391,8 @@ class ThumbManager:
         self.truncator = ThumbManager.CachedTruncator(self)
 
         # Thread pool sizes
-        self.thumb_workers = min(5, fileManager.threads)  # parallel thumbs
-        self.frame_workers = min(3, fileManager.threads)  # parallel frames
+        self.thumb_workers = min(8, fileManager.threads)  # parallel thumbs
+        self.frame_workers = min(4, fileManager.threads)  # parallel frames
 
     def start_background_worker(self):
         if self.stop_event.is_set():
@@ -1476,13 +1452,9 @@ class ThumbManager:
         self._thumb_worker_running = False
         #self.thumb_after_id = self.gui.after(100, self._thumb_worker)
         
-    def _process_thumb(self, item):
-        def update_left():
-            self.left -= 1
-            gui.frame_gen_queue_var.set(f"Thumbs left: {self.left}")
+    def _process_thumb(self, obj):
         fm = self.fileManager
         gui = self.fileManager.gui
-        obj = item
         try:
             if self.stop_event.is_set():
                 return
@@ -1491,7 +1463,11 @@ class ThumbManager:
             print("Error encountered in Thumbmanager:", e)
         finally:
             self.thumb_queue.task_done()
-            gui.after(0, update_left)
+        with self._left_lock:
+            self.left = max(0, self.left - 1)
+            thumbs_left = self.left
+            frames_left = self.left_f
+            gui.after(0, lambda imgs=thumbs_left, frames=frames_left: gui.frame_gen_queue_var.set(f"Ingen: {imgs}/{frames}"))
         
         #print(perf_counter()-self.start)
         if not self.frame_queue.empty() and self.thumb_queue.unfinished_tasks == 0:
@@ -1512,14 +1488,10 @@ class ThumbManager:
                 break
         self._frame_worker_running = False
 
-    def _process_frame(self, item):
-        def update_left(left_value):
-            self.left_f -= 1
-            gui.frame_gen_queue_var.set(f"Frames left: {self.left_f}")
+    def _process_frame(self, obj):
         fm = self.fileManager
         gui = self.gui
 
-        obj = item
         if self.stop_event.is_set():
             try:
                 self.frame_queue.task_done()
@@ -1539,23 +1511,30 @@ class ThumbManager:
                 except Exception:
                     pass
                 return
-
+        
+        color = "red"
         try:
             self.gen_frames(obj)
         except Exception as e:
             print("Frame generation error:", e)
-        finally:
-            try:
-                self.frame_queue.task_done()
-            except Exception:
-                pass
-
-            with self._left_lock:
-                self.left_f = max(0, self.left_f - 1)
-                left_value = self.left_f
-           
-            gui.after(0, lambda v=left_value: gui.frame_gen_queue_var.set(f"Frames left: {v}"))
-
+        try:
+            self.frame_queue.task_done()
+            color = None # defaults to grid bg
+        except Exception:
+            print("Frame generation error (queue):", e)
+        
+        def change_color(instances, color):
+            for f in instances:
+                f.change_color(color)
+        with self._left_lock:
+            self.left_f = max(0, self.left_f - 1)
+            thumbs_left = self.left
+            frames_left = self.left_f
+            gui.after(0, lambda imgs=thumbs_left, frames=frames_left: gui.frame_gen_queue_var.set(f"Ingen: {imgs}/{frames}"))
+            instances = [f for f in (obj.frame, obj.destframe) if f]
+            if instances:
+                gui.after(0, lambda instances=instances, color=color: change_color(instances, color))
+        
     def flush_all(self):
         self.stop_event.set()
 
@@ -1575,16 +1554,17 @@ class ThumbManager:
         self.stop_event.clear()
         for x in imgfiles:
             if not x.thumb:
-                self.left += 1
                 self.thumb_queue.put(x)
-            else:
-                pass
-
+        self.left = self.thumb_queue.qsize()
+        
         for x in imgfiles:
             if x.ext in self.anim_ext and not x.frames:
                 self.left_f += 1
                 self.frame_queue.put(x)
-                #gui.imagegrid.change_square_color(x, "purple")
+                instances = [f for f in (x.frame, x.destframe) if f]
+                for f in instances:
+                    f.change_color("purple")
+        self.left_f = self.frame_queue.qsize()
         self.start_background_worker()
 
     def gen_name(self, obj, overwrite=False):
@@ -1606,9 +1586,11 @@ class ThumbManager:
                 if self.stop_event.is_set(): return
                 self.gen_name(obj)
                 instances = [f for f in (obj.frame, obj.destframe) if f]
-                if instances: obj.thumb = thumb
-                for f in instances:
-                    f.change_image(obj.thumb, change_color=True)
+                if instances: 
+                    obj.thumb = thumb
+                    for f in instances:
+                        f.change_color() # defaults to grid bg
+                        f.change_image(thumb)
                 #print(perf_counter()-self.start)
 
             gui.after_idle(run, thumb)
@@ -1632,10 +1614,11 @@ class ThumbManager:
         if cache_dir and os.path.exists(thumbnail_path): # default and train will have cache_dir
             try:
                 if user != "default": return
-                with Image.open(thumbnail_path) as pil_img:
+                thumb = None
+                with Image.open(thumbnail_path) as pil_img: # pil is faster here.
                     obj.thumbnail = thumbnail_path
                     thumb = ImageTk.PhotoImage(pil_img)
-                    load_thumb(thumb)
+                load_thumb(thumb)
                 return
             except Exception as e:
                 print(f"Pillows couldn't load thumbnail from cache: {obj.name} : Error: {e}.")
@@ -1657,15 +1640,19 @@ class ThumbManager:
             if mode == "as_is":
                 try:
                     import pyvips
+                    pyvips.Image.new_from_file(obj.path)
+
                     vips_img = pyvips.Image.thumbnail(obj.path, size)
                     buffer = vips_img.write_to_memory()
                     pformat = str(vips_img.interpretation).lower()
-                    if pformat == "srgb":
-                        if vips_img.bands == 3: pformat = "RGB"
-                        elif vips_img.bands == 4: pformat = "RGBA"
-                    elif pformat == "b-w": pformat = "L"
-                    elif pformat == "rgb16": pformat = "I;16"
-                    elif pformat == "grey16": pformat = "I;16"
+
+                    match pformat:
+                        case "srgb":
+                            if vips_img.bands == 3: pformat = "RGB"
+                            elif vips_img.bands == 4: pformat = "RGBA"
+                        case "b-w": pformat = "L"
+                        case "rgb16": pformat = "I;16"
+                        case "grey16": pformat = "I;16"
                     pil_img = Image.frombytes(pformat, (vips_img.width, vips_img.height), buffer, "raw")
                     vips_used = True
                 except Exception as e: # Pillow fallback
@@ -1674,7 +1661,7 @@ class ThumbManager:
             if not vips_used:
                 try:
                     with Image.open(obj.path) as pil_img:
-                        pil_img = pil_img.copy()
+                        pil_img = pil_img.copy() # -rep
                 except Exception as e:
                     print(f"Pillows couldn't create thumbnail, either: {obj.name} : Error: {e}")
                     failed = True
@@ -1690,8 +1677,9 @@ class ThumbManager:
         if user == "default":
             if pil_img.mode not in ("RGBA", "RGB"): # Train, infer and mobilenet want rgb
                 pil_img = pil_img.convert("RGBA")
-        if pil_img.mode != ("RGB"):
-            pil_img = pil_img.convert("RGB")
+        else:
+            if pil_img.mode != ("RGB"):
+                pil_img = pil_img.convert("RGB")
 
         # resize according to mode
         if mode == "as_is" and not vips_used: 
@@ -1717,10 +1705,11 @@ class ThumbManager:
         # save it to cache if we can
         if cache_dir and pil_img: # default and train
             pil_img.save(thumbnail_path, format=THUMB_FORMAT[1:], quality=100)
+            thumb = None
             if user == "default": # for default, save path to imgfile and gen imgtk for it.
                 obj.thumbnail = thumbnail_path
                 thumb = ImageTk.PhotoImage(pil_img)
-                load_thumb(thumb)
+            load_thumb(thumb)
 
         if user == "classify":
             return pil_img, obj # for classify
@@ -1869,9 +1858,8 @@ class ThumbManager:
         if len(obj.frames) <= 1:
             gui.after_idle(obj.clear_frames)
             #self.gui.imagegrid.change_square_color(obj, obj.color)
-        obj.change_color_flag = True
 
-class Animate: # this can stay here. it must touch both gridviewers so..
+class Animate: # imagegrid should do this, but only one instance that is shared by all grids
     def __init__(self, fileManager):
         self.gui = fileManager.gui
         self.running = {}  # obj -> after_id (for cancellation)
@@ -1879,6 +1867,10 @@ class Animate: # this can stay here. it must touch both gridviewers so..
     def add_animation(self, obj):
         """Start per-object animation respecting frame delays."""
         if obj in self.running: return
+        instances = [f for f in (obj.frame, obj.destframe) if f]
+        if instances: 
+            for f in instances:
+                f.change_color("orange")
 
         obj.index = 0
         self._step(obj)
@@ -1909,169 +1901,6 @@ class Animate: # this can stay here. it must touch both gridviewers so..
         after_id = self.running.pop(id1, None)
         if after_id: self.gui.after_cancel(after_id)
 
-class Predictions:
-    def __init__(self, fileManager):
-        self.fileManager = fileManager
-        self.gui = fileManager.gui
-        self.train_thread = None
-
-    def select_model(self):
-        from tkinter import filedialog as tkFileDialog
-        self.gui.model_path = tkFileDialog.askopenfilename(defaultextension=".pt", filetypes=(("Model File", "*.pt"),),initialdir=self.fileManager.model_dir, title="Select a model to use.")
-
-    def open_category_manager(self):
-        def on_close():
-            self.gui.categories = [path for path, state in self.app.folder_states.items() if state == "category"]
-            self.gui.excludes = [path for path, state in self.app.folder_states.items() if state == "exclude"]
-            self.app.destroy()
-        from Advanced_sorting import FolderTreeApp
-        dest_root = self.gui.destination_entry_field.get()
-        self.app = FolderTreeApp(dest_root, self.gui.categories, self.gui.excludes, self.manual_training) 
-        self.app.protocol("WM_DELETE_WINDOW", on_close)
-                 
-    def get_folder_contents_with_labels(self, destinations, excludes=[]):
-        categories = [os.path.abspath(c) for c in destinations]
-        excludes = set(os.path.abspath(e) for e in excludes)
-        data = {}
-        for category_path in categories:
-            label = os.path.basename(category_path)
-            label_list = data.get(label, [])
-            data[label] = label_list
-            print(f"[Category] {category_path}")
-
-            for root, dirs, files in os.walk(category_path):
-                abs_root = os.path.abspath(root)
-
-                # Prune dirs list to exclude excluded or category folders, so os.walk won't go into them
-                pruned_dirs = []
-                for d in dirs:
-                    d_abs = os.path.abspath(os.path.join(root, d))
-
-                    if any(d_abs == ex or d_abs.startswith(ex + os.sep) for ex in excludes):
-                        pass
-                    elif any(d_abs == cat for cat in categories):
-                        pass
-                    else:
-                        pruned_dirs.append(d)
-                dirs[:] = pruned_dirs
-                
-                print(f"  Subfolder: {abs_root}")
-
-                for file in files:
-                    if file.lower().endswith(("png", "gif", "jpg", "jpeg", "bmp", "pcx", "tiff", "webp", "psd", "jfif", "mp4", "mkv", "m4v", "mov", "webm")):
-                        data[label].append((os.path.join(root, file)))
-        return data
-         
-    def manual_training(self, name="latest_model"):
-        def train():   
-            self.gui.categories = [path for path, state in self.app.folder_states.items() if state == "category"]
-            self.gui.excludes = [path for path, state in self.app.folder_states.items() if state == "exclude"]
-            names_2_path = {os.path.basename(x): x for x in self.gui.categories}
-            with open(os.path.join(self.fileManager.model_dir, f"{name}_paths.json"), "w") as f:
-                json_dict = {}
-                json_dict["names_2_path"] = names_2_path
-                json.dump(json_dict, f, indent=4)
-
-            print("Category folders:")
-            for path in self.gui.categories:
-                print("  ", path)
-
-            print("Excluded folders:")
-            for path in self.gui.excludes:
-                print("  ", path)
-
-            label_path_dict = self.get_folder_contents_with_labels(self.gui.categories, self.gui.excludes)
-
-            self.gui.train_status_var.set("Building dataset...")
-            from Advanced_sorting import Dataset_gen
-            Data = Dataset_gen(self.fileManager.train_dir, label_path_dict, self.gui.prediction_thumbsize, self.fileManager)       
-            path_hash_lookup = Data.gen_thumbs()
-            Data.split(0.9)
-            self.gui.train_status_var.set("Starting...")
-            
-            names_2_path = {os.path.basename(x): x for x in self.gui.categories}
-            from train_model import start_training
-            self.gui.train_status_var.set("Training...")
-            start_training(self.fileManager.train_dir, self.fileManager.model_dir, 100, name)
-            
-
-            path_to_results_csv = os.path.join(self.fileManager.model_dir, "classify", "latest_run", "results.csv")
-
-            self.gui.model_path = os.path.join(self.fileManager.model_dir, f"{name}.pt")
-            self.gui.train_status_var.set("Finished.")
-            
-        if self.train_thread and self.train_thread.is_alive():
-            print("Already running.")
-            return
-        self.train_thread = threading.Thread(target=train, name="Manual-training", daemon=True)
-        self.train_thread.start()
-    
-    def automatic_training(self):
-        "Generate all files from destinations. Assign as categories. Need self.labels... Inferring size and pred_dir location."
-        def train():
-            self.gui.train_status_var.set("Labelling dataset...")
-
-            label_path_dict = self.get_folder_contents_with_labels([folder_path for _, folder_path, _, _, _ in self.gui.buttons])
-            
-            self.gui.train_status_var.set("Building dataset...")
-            from Advanced_sorting import Dataset_gen
-            Data = Dataset_gen(self.fileManager.train_dir, label_path_dict, self.gui.prediction_thumbsize, self.fileManager)       
-            path_hash_lookup = Data.gen_thumbs()
-            Data.split(0.9)
-            
-            self.gui.train_status_var.set("Starting...")
-            names_2_path = {os.path.basename(x[1]): x[1] for x in self.gui.buttons if os.path.basename(self.gui.buttons[0][1]) != "Trash"}
-
-            with open(os.path.join(self.fileManager.model_dir, "latest_model_paths.json"), "w") as f:
-                json_dict = {}
-                json_dict["names_2_path"] = names_2_path
-                json.dump(json_dict, f, indent=4)
-
-            from train_model import start_training
-            self.gui.train_status_var.set("Training...")
-            start_training(self.fileManager.train_dir, self.fileManager.model_dir, 100, "latest_model")
-            
-            path_to_results_csv = os.path.join(self.fileManager.model_dir, "classify", "latest_run", "results.csv")
-
-            self.model_path = os.path.join(self.fileManager.model_dir, f"latest_model.pt")
-            self.gui.train_status_var.set("Finished.")
-        
-        if self.train_thread and self.train_thread.is_alive():
-            print("Already running.")
-            return
-        if self.gui.imagegrid.image_items:
-            self.train_thread = threading.Thread(target=train, name="Auto-training", daemon=True)
-            self.train_thread.start()
-        else:
-            print("You must start a new session before auto-training to generate the destinations.")
-    
-    def model_infer(self, model=None, imagefiles=[]):
-        if not imagefiles:
-            return
-        self.gui.train_status_var.set("Loading model...")
-        from Advanced_sorting import Model_inferer
-        model_inferer = Model_inferer(self.fileManager, model, self.gui.prediction_thumbsize)
-        for x in imagefiles:
-            if x.id == None:
-                x.gen_id()
-        lookup = {x.id: x for x in imagefiles}
-        self.gui.train_status_var.set("Sorting...")
-
-        thread = threading.Thread(target=model_inferer.infer, args=(imagefiles, lookup), daemon=True)
-        thread.start()
-
-        self.last_model = model
-        
-class Timer:
-    def __init__(self):
-        self.creation_time = 0
-    def start(self):
-        self.creation_time = perf_counter()
-    def stop(self):
-        current_time = perf_counter()
-        elapsed_time = current_time - self.creation_time
-        return f"{elapsed_time:.3f} s"
-
 if __name__ == '__main__':
     ctypes.windll.shcore.SetProcessDpiAwareness(1)
 
@@ -2084,8 +1913,8 @@ if __name__ == '__main__':
 
     # 3. Only start the app here
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    prefs_path = os.path.join(script_dir, "prefs.json")
-    themes_path = os.path.join(script_dir, "themes.json")
+    prefs_path = os.path.join(script_dir, "_prefs.json")
+    themes_path = os.path.join(script_dir, "_themes.json")
 
     def loadprefs():
         "Loads prefs.json. Needs self.gui to be created. This edits self.gui attributes."
@@ -2119,5 +1948,22 @@ if __name__ == '__main__':
     gui = GUIManager(prefs, jthemes)
     mainclass = SortImages(gui)
     gui.fileManager = mainclass
+
+    parser = argparse.ArgumentParser(description="Image sorting and processing script.")
+    parser.add_argument('-quick', action='store_true', help='Enable quick sorting mode')
+    parser.add_argument('folder_path', type=str, nargs='?')
+    args = parser.parse_args()
+    
+    if args.quick: # start at the current directory.
+        if args.folder_path: 
+            path = args.folder_path
+        else: 
+            path = os.getcwd()
+        gui.source_entry_field.delete(0, tk.END)
+        gui.destination_entry_field.delete(0, tk.END)
+        gui.source_entry_field.insert(0, path)
+        gui.destination_entry_field.insert(0, path)
+        gui.after_idle(gui.fileManager.validate)
+
     gui.mainloop()
     
