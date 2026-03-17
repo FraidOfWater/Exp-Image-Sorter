@@ -2,8 +2,67 @@ import os, tkinter as tk, tkinter.font as tkfont
 from tkinter import ttk
 from tkinter.ttk import Panedwindow
 # antialiasing should be put on the statusbar, and statusbar should be able to be toggled from the hover menu.
+class Bindhandler:
+    def __init__(self, fileManager):
+        "Binds that touch multiple modules"
+        self.gui = fileManager.gui
+        self.fileManager = fileManager
+        self.window_focused = "GRID"
+        from viewer_search_overlay import ImageViewer
+        self.search_widget = ImageViewer(self)
+    
+    def arrow_key(self, event):
+        if isinstance(event.widget, tk.Entry): return
+        
+        if self.search_widget.search_active: return
+
+        if event.keysym in ("Up", "Down") and event.state != 262147 and self.gui.folder_explorer.scroll_enabled: # 262147 = capslock
+            self.gui.folder_explorer.nav(event.keysym)
+        else:
+            if "toplevel" in event.widget._w and not (hasattr(self.gui.second_window_viewer, "master") and event.widget == self.gui.second_window_viewer.master):
+                self.gui.folder_explorer.destw.navigate(event.keysym)
+            else:
+                self.gui.imagegrid.navigate(event.keysym)
+            
+            if self.gui.show_next.get():
+                if "toplevel" in event.widget._w and not (hasattr(self.gui.second_window_viewer, "master") and event.widget == self.gui.second_window_viewer.master):
+                    self.gui.displayimage(self.gui.folder_explorer.destw.current_selection_entry.file)
+                else:
+                    self.gui.displayimage(self.gui.imagegrid.current_selection_entry.file)
+
+    def undo(self, event):
+        if isinstance(event.widget, tk.Entry): return
+
+        if self.fileManager.assigned and self.gui.current_view.get() in ("Unassigned",) :
+            last = self.fileManager.assigned.pop()
+            self.gui.displayimage(last)
+            self.gui.imagegrid.insert_first(last, last.pos) # should add to ALL grids.
+            last.color = None
+            last.dest = ""
+
+    def enter(self, event):
+        if isinstance(event.widget, tk.Entry): return
+
+        caps_lock = (event.state & 0x0002) != 0
+        if caps_lock:
+            fe = self.gui.folder_explorer 
+            destinat = fe.buttons[fe.selected_index][1]
+            coloring = self.gui.folder_explorer.color_cache[destinat]
+            self.fileManager.setDestination({"path": destinat, "color": coloring}, caller="autosort")
+
+        elif self.gui.prediction.get() and not self.search_widget.search_active:
+            imagegrid = self.gui.imagegrid
+            s = imagegrid.current_selection_entry
+            if s is not None:
+                a = s.file.predicted_path
+                if a:
+                    print("Sent:", s.file.name[:20], "to", a)
+                    c =  "#FFFFFF" #self.gui.folder_explorer.color_cache[self.old.obj.predicted_path]
+                    dest = {"path": a, "color": c}
+                    self.fileManager.setDestination(dest, caller="autosort") # setdest pulls the image in viewer by default if nothing is marked.
+                    self.gui.folder_explorer.set_current(dest["path"])
+
 class GUIManager(tk.Tk):
-    "Initialization"
     Image_frame = None
     second_window_viewer = None
     focused_on_secondwindow = False
@@ -16,6 +75,7 @@ class GUIManager(tk.Tk):
         self.train_status_var = tk.StringVar(value="")
         self.model_path = None
         self.selected_btn = None
+        self.first_render = True
         "INITIALIZE USING PREFS: THEME"
         self.jprefs = jprefs
         self.themes = jthemes
@@ -42,12 +102,8 @@ class GUIManager(tk.Tk):
         self.thumbnailsize = int(user.get("thumbnailsize", 256))
         self.prediction_thumbsize = int(user.get("prediction_thumbsize", 224))
         self.hotkeys = user.get("hotkeys", "123456qwerty7890uiopasdfghjklzxcvbnm")
-        self.force_scrollbar = bool(user.get("force_scrollbar", True))
         self.auto_load = bool(user.get("auto_load", True))
-        self.do_anim_loading_colors = bool(user.get("do_anim_loading_colors", False))
-        self.show_statusbar = tk.BooleanVar(value=user.get("show_statusbar", True))
-        self.show_ram = tk.BooleanVar(value=user.get("show_ram", False))
-        self.show_advanced = tk.BooleanVar(value=user.get("show_advanced", False))
+        self.do_debug = tk.BooleanVar(value=user.get("do_debug", False))
         
         tech = jprefs.get("technical", {})
         self.filter_mode = tech.get("quick_preview_filter") if tech.get("quick_preview_filter") in ["NEAREST", "BILINEAR", "BICUBIC", "LANCZOS"] else "BILINEAR"
@@ -111,9 +167,9 @@ class GUIManager(tk.Tk):
             path = tkFileDialog.askopenfile(initialdir=os.getcwd(), 
                                         title="Select Session Data File", filetypes=(("JavaScript Object Notation", "*.json"),))
         elif type == "src":
-            path = tkFileDialog.askdirectory(title="Select Source folder")
+            path = tkFileDialog.askdirectory(initialdir=self.source_entry_field.get(), title="Select Source folder")
         elif type == "dst":
-            path = tkFileDialog.askdirectory(title="Select Destination folder")
+            path = tkFileDialog.askdirectory(initialdir=self.destination_entry_field.get(), title="Select Destination folder")
         if path == "" or path == None:
             return
         entry.delete(0, tk.END)
@@ -138,7 +194,7 @@ class GUIManager(tk.Tk):
 
         statusbar = tk.Frame(self, bd=1, relief=tk.SUNKEN, bg=statusbar_bg)
 
-        if self.show_statusbar.get():
+        if self.do_debug.get():
             statusbar.grid(row=1, column=0, sticky="ew")
         self.statusbar = statusbar
 
@@ -158,17 +214,17 @@ class GUIManager(tk.Tk):
                                               bg=statusbar_bg, fg=txt_color, anchor="e", padx=5)
         self.ram_label = tk.Label(statusbar, textvariable=self.current_ram_strvar, 
                                   bg=statusbar_bg, fg=txt_color, anchor="e", padx=5)
+        
         self.train_status = tk.Label(statusbar, textvariable=self.train_status_var, 
-                                     bg=statusbar_bg, fg=txt_color, anchor="w", padx=10)
+                                     bg=statusbar_bg , fg=txt_color, anchor="w", padx=10)
 
         self.sorted_label.pack(side="left", fill="y")
         self.images_left_label.pack(side="left", fill="y")
         self.train_status.pack(side="right", fill="y")
-        if self.show_advanced.get():
+        if self.do_debug.get():
             self.animation_stats_label.pack(side="left", fill="y")
             self.resource_limiter.pack(side="left", fill="y")
             self.frame_gen_queue_label.pack(side="left", fill="y")
-        if self.show_ram.get():
             self.ram_label.pack(side="left", fill="y")
         
         # Menus
@@ -182,8 +238,8 @@ class GUIManager(tk.Tk):
 
         #menu_bar.add_cascade(label="File", menu=file_menu)
         #menu_bar.add_cascade(label="View", menu=view_menu)
-        menu_bar.add_cascade(label="Order", menu=order_menu)
         menu_bar.add_cascade(label="Themes", menu=theme_menu)
+        menu_bar.add_cascade(label="Order", menu=order_menu)
         menu_bar.add_cascade(label="Training", menu=category_menu)
 
         # File
@@ -211,7 +267,6 @@ class GUIManager(tk.Tk):
         order_menu.add_radiobutton(label="Nearest", value="Nearest", variable=self.display_order, command=self.fileManager.sort_imagelist)
         order_menu.add_radiobutton(label="Confidence", value="Confidence", variable=self.display_order, command=self.fileManager.sort_imagelist)
 
-        order_menu.entryconfig("Nearest", state="disabled")
         self.order_menu = order_menu
         order_menu.entryconfig("Confidence", state="disabled")
         order_menu.add_separator()
@@ -221,7 +276,8 @@ class GUIManager(tk.Tk):
                 imagefiles = [x for x in self.fileManager.imagelist if x.pred == None or self.last_model != self.model_path]
                 imagefiles.extend([entry.file for entry in self.imagegrid.image_items if entry.file.pred == None or self.last_model != self.model_path])
                 if imagefiles:
-                    self.fileManager.predictions.model_infer(self.model_path, imagefiles)
+                    load_module()
+                    self.predictions.model_infer(self.model_path, imagefiles)
                     self.display_order.set("Confidence")
             else:
                 order_menu.entryconfig("Confidence", state="normal")
@@ -229,7 +285,7 @@ class GUIManager(tk.Tk):
         order_menu.add_checkbutton(label="Group by Prediction", variable=self.prediction, command=test)
 
         def toggle_statusbar():
-            if not self.show_statusbar.get():
+            if not self.do_debug.get():
                 self.statusbar.grid_forget()
                 if self.Image_frame:
                     #self.Image_frame.master.update()
@@ -241,34 +297,30 @@ class GUIManager(tk.Tk):
                     #self.Image_frame.master.update()
                     self.Image_frame.mouse_double_click_left()
 
-        view_menu.add_checkbutton(label="Statusbar", variable=self.show_statusbar, command=toggle_statusbar)
+        view_menu.add_checkbutton(label="Statusbar", variable=self.do_debug, command=toggle_statusbar)
 
         view_menu.add_separator()
-        
-        def toggle_ram_label():
-            if not self.show_ram.get():
-                self.ram_label.pack_forget()
-            else:
-                self.ram_label.pack(side=tk.LEFT, fill="y")
-
-        def toggle_advanced_label():
-            if not self.show_advanced.get():
-                self.animation_stats_label.pack_forget()
-                self.resource_limiter.pack_forget()
-                self.frame_gen_queue_label.pack_forget()
-            else:
-                self.animation_stats_label.pack(side="left", fill="y")
-                self.resource_limiter.pack(side="left", fill="y")
-                self.frame_gen_queue_label.pack(side="left", fill="y")
 
         view_menu.add_separator()
         view_menu.add_command(label="Settings")
                         
         # Category
-        category_menu.add_command(label="Select model", command=self.fileManager.predictions.select_model)
+        def load_module():
+            "This module is extremely heavy, adding 5-6 seconds of load time alone. We don't load it until we need it."
+            if not hasattr(self, "predictions"):
+                from Advanced_sorting import Predictions
+                self.predictions = Predictions(self)
+        def select_model():
+            from tkinter import filedialog as tkFileDialog
+            self.model_path = tkFileDialog.askopenfilename(defaultextension=".pt", filetypes=(("Model File", "*.pt"),),initialdir=self.fileManager.model_dir, title="Select a trained model to use.")
+            if hasattr(self.fileManager, "all_objs"):
+                self.prediction.set(True)
+                test()
+
+        category_menu.add_command(label="Select model", command=select_model)
         category_menu.add_separator()
-        category_menu.add_command(label="Automatic", command=self.fileManager.predictions.automatic_training)
-        category_menu.add_command(label="Manual", command=self.fileManager.predictions.open_category_manager)
+        category_menu.add_command(label="Automatic", command=lambda: (load_module(), self.predictions.automatic_training()))
+        category_menu.add_command(label="Manual", command=lambda: (load_module(), self.predictions.open_category_manager()))
     
         # Themes
         def hints():
@@ -323,11 +375,12 @@ Group by Prediction (Order):
         middlepane_frame = tk.Frame(toppane, name="middlepane", bg=self.d_theme["viewer_bg"], width = self.middlepane_width)
 
         middle_label = tk.Label(middlepane_frame, bg=self.d_theme["viewer_bg"], fg="white", font=("Arial", 14), justify="center",
-            text="Expand/Collapse folders using Right-click\nNavigate folders using Caps-lock + Scroll or Up/Down keys.\nNavigate images via Left/Right/Up/Down or via Caps-lock + Left/Right\n\nReassign hotkeys by pressing the mouse wheel.\nMove All to actually move files.\n\nDrag to pan, Scroll to zoom\nShift+Scroll to rotate\nRight-Click for options in viewer.\n\nLeft-Click to add to selection.\nRight-click to view.\nHotkeys in () to assign, or by Clicking the buttons.", 
+            text="Expand/Collapse folders using Right-click\nNavigate folders using Caps-lock + Scroll or Up/Down keys.\nNavigate images via Left/Right/Up/Down or via Caps-lock + Left/Right\n\nReassign hotkeys by pressing the mouse wheel.\nMove All to actually move files.\n\nDrag to pan, Scroll to zoom\nShift+Scroll to rotate\nRight-Click for options in viewer.\n\nLeft-Click to add to selection.\nRight-click to view.\nTo sort, press any hotkey or click on the folder buttons.", 
         )
 
         # 3. Use relative positioning to center it
         middle_label.place(relx=0.5, rely=0.5, anchor="center")
+        self.middle_label = middle_label
         
         self.destgrid = None
         leftui.grid_propagate(False)
@@ -379,9 +432,9 @@ Group by Prediction (Order):
         self.session_entry_field.insert(0, self.lastsession or "No last Session")
         self.session_entry_field.xview_moveto(1.0)
 
-        new_session_b = tk.Button(self.first_frame, text="New Session", command=self.fileManager.validate)
+        new_session_b = tk.Button(self.first_frame, text="New Session", command=lambda: self.after_idle(self.fileManager.validate))
         self.new_session_b = new_session_b
-        load_session_b = tk.Button(self.first_frame, text="Load Session", command=self.fileManager.loadsession)
+        load_session_b = tk.Button(self.first_frame, text="Load Session", command=lambda: self.after_idle(self.fileManager.loadsession))
 
         if self.squares_per_page_intvar.get() < 0: self.squares_per_page_intvar.set(1)
         
@@ -408,12 +461,12 @@ Group by Prediction (Order):
             x.bind("<Button-3>", lambda e, x=x, t=t: self.filedialog(x, type=t))
 
     def guisetup(self):
-        self.order_menu.entryconfig("Nearest", state="normal")
         filemanager = self.fileManager
-
-        arrowkeys = ["<Up>", "<Down>", "<Left>", "<Right>", "<Return>","<space>", "<F2>", "<Control-z>", "<Control-Z>"]
-        for arrowkey in arrowkeys:
-            self.bind_all(f"{arrowkey}", lambda e: filemanager.navigator.bindhandler(e))
+        x = filemanager.bindhandler
+        
+        action_map = {"<Up>": x.arrow_key, "<Down>": x.arrow_key, "<Left>": x.arrow_key, "<Right>": x.arrow_key, "<Return>": x.enter, "<Control-z>": x.undo, "<Control-Z>": x.undo}
+        for name, func in action_map.items():
+            self.bind_all(f"{name}", func)
 
         self.load_session_b.grid_forget()
         self.session_entry_field.grid_forget()
@@ -439,7 +492,7 @@ Group by Prediction (Order):
         view_menu = tk.OptionMenu(frame, self.current_view, *view_options)
         view_menu.config(highlightthickness=0)
 
-        from folders import FolderExplorer
+        from destinations import FolderExplorer
         self.folder_explorer = FolderExplorer(self.leftui, self.hotkeys)
         self.new_session_b.destroy()
         
@@ -498,12 +551,12 @@ Group by Prediction (Order):
             # Refresh image on the internal canvas
             if self.imagegrid.current_selection_entry:
                 self.Image_frame.canvas.update()
-                self.fileManager.navigator.search_widget.new_canvas(self.Image_frame.canvas)
+                self.fileManager.bindhandler.search_widget.new_canvas(self.Image_frame.canvas)
                 self.displayimage(self.imagegrid.current_selection_entry.file)
             
             # Link search widget to dock canvas
             if self.Image_frame:
-                self.fileManager.navigator.search_widget.new_canvas(self.Image_frame.canvas)
+                self.fileManager.bindhandler.search_widget.new_canvas(self.Image_frame.canvas)
             
             self.bind("<Control-s>", lambda e: self.Image_frame.statusbar.set(not self.Image_frame.statusbar.get()))
             self.bind("<Control-S>", lambda e: self.Image_frame.statusbar.set(not self.Image_frame.statusbar.get()))
@@ -527,7 +580,7 @@ Group by Prediction (Order):
                 
                 # Link search widget to external window canvas
                 if self.second_window_viewer:
-                    self.fileManager.navigator.search_widget.new_canvas(self.second_window_viewer.canvas)
+                    self.fileManager.bindhandler.search_widget.new_canvas(self.second_window_viewer.canvas)
 
                 def safe_call(event=None):
                     if self.second_window_viewer and hasattr(self.second_window_viewer, "statusbar"):
@@ -561,13 +614,12 @@ Group by Prediction (Order):
                 toppane.add(imagegrid, weight = 1)
                 toppane.add(m_frame, weight = 0)
     
-    #
     def current_view_changed(self):
         "When view is changed, send the wanted list to the gridmanager for rendering"
         fileManager = self.fileManager
 
         if fileManager.first_run: return
-        fileManager.thumbs.flush_all()
+        fileManager.thumbs.stop_background_worker()
         
         selected_option = self.current_view.get()
 
@@ -689,13 +741,6 @@ Group by Prediction (Order):
             self.folder_explorer.destw.configure(bg=theme["grid_background_colour"])
             self.folder_explorer.destw.change_theme(theme=self.d_theme)
         
-        if hasattr(self.fileManager, "navigator"):
-            navigator = self.fileManager.navigator
-            base = self.thumbnailsize + theme["square_border_size"] + theme["whole_box_size"]
-            navigator.actual_gridsquare_width = base + theme["gridsquare_padx"] + theme["whole_box_size"]
-            navigator.actual_gridsquare_height = base + theme["gridsquare_pady"] + theme["checkbox_height"]
-            navigator.style.configure("Theme_square1.TCheckbutton", background=theme["square_text_box_colour"], foreground=theme["square_text_colour"])
-            navigator.style.configure("Theme_square2.TCheckbutton", background=theme["square_text_box_selection_colour"], foreground=theme["square_text_colour"])
         if hasattr(self, "folder_explorer"):
             self.folder_explorer.style.configure("Theme_dividers.TFrame", background=theme["main_colour"])
             self.folder_explorer.canvas.configure(bg=theme["main_colour"])
@@ -710,21 +755,43 @@ Group by Prediction (Order):
     "Viewer"
     def displayimage(self, obj):
         "Display image in viewer"
+        if self.middle_label != None:
+            self.middle_label.destroy()
+            self.middle_label = None
         self.displayed_obj = obj
         self.focused_on_secondwindow = True
-        from resizing import Application
+        from viewer import Application
+        f = False
         if self.dock_view.get(): # Dock
             flag = False
             if not self.Image_frame:
+                self.first_render = True
                 flag = True
                 self.Image_frame = Application(self.middlepane_frame, savedata=self.viewer_prefs, gui=self)
-            self.Image_frame.set_image(None if obj == None else obj.path, obj=obj)
-            if flag: self.fileManager.navigator.search_widget.new_canvas(self.Image_frame.canvas)
+            else:
+                f = True
+            
+            adjacent = []
+            n = 3
+            for i in range(1, n+1):
+                if self.imagegrid.current_selection+i<len(self.imagegrid.image_items):
+                    adjacent.append(self.imagegrid.image_items[self.imagegrid.current_selection+i])
+                if self.imagegrid.current_selection-i>=0:
+                    adjacent.append(self.imagegrid.image_items[self.imagegrid.current_selection-i])
+
+            self.Image_frame.set_image(None if obj == None else obj.path, obj=obj, adjacent=adjacent)
+            if flag: self.fileManager.bindhandler.search_widget.new_canvas(self.Image_frame.canvas)
         else: # Window
             if not self.second_window_viewer:
+                self.first_render = True
                 self.second_window_viewer = Application(savedata=self.viewer_prefs, gui=self)
+            else:
+                f = True
             self.second_window_viewer.master.lift()
             self.second_window_viewer.set_image(None if obj == None else obj.path, obj=obj)
+        if self.first_render and f:
+            self.first_render = False
+            self.fileManager.bindhandler.search_widget.canvas.delete("msg")
 
     "Exit function"
     def closeprogram(self):
@@ -755,18 +822,23 @@ Group by Prediction (Order):
         from tkinter.messagebox import askokcancel
         if hasattr(self.fileManager, "all_objs") and [x for x in self.fileManager.all_objs if x.dest] and not askokcancel("Designated but Un-Moved files, really quit?", "You have destination designated, but unmoved files. (Simply cancel and Move All if you want)"):
             return
-    
+
         self.fileManager.thumbs.stop_background_worker()
 
         for id in self.fileManager.animate.running.copy():
             self.fileManager.animate.stop(id)
+
+        if hasattr(self.fileManager, "all_objs"):
+            image_references = [obj for obj in self.fileManager.all_objs if obj.thumb]
+            for obj in image_references:
+                obj.thumb = None
 
         # dest close
         if self.second_window_viewer: self.second_window_viewer.window_close()
         if self.Image_frame: self.Image_frame.save_json()
 
         self.fileManager.saveprefs(self)
+        self.destroy()
         purge_cache()
         move_temp_to_trash()
         
-        self.destroy()
