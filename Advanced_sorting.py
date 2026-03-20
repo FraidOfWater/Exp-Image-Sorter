@@ -720,7 +720,7 @@ class Predictions:
             self.gui.after(0, self.gui.train_status_var.set, "")
 
             self.gui.after(0, self.fileManager.wait_indicator_animation_start, "Training")
-            start_training(self.fileManager.train_dir, self.fileManager.model_dir, 4, "latest_model")
+            start_training(self.fileManager.train_dir, self.fileManager.model_dir, 100, "latest_model")
 
             path_to_results_csv = os.path.join(self.fileManager.model_dir, "classify", "latest_run", "results.csv")
 
