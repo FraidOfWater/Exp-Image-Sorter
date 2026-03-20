@@ -238,8 +238,8 @@ class GUIManager(tk.Tk):
 
         #menu_bar.add_cascade(label="File", menu=file_menu)
         #menu_bar.add_cascade(label="View", menu=view_menu)
-        menu_bar.add_cascade(label="Themes", menu=theme_menu)
         menu_bar.add_cascade(label="Order", menu=order_menu)
+        menu_bar.add_cascade(label="Themes", menu=theme_menu)
         menu_bar.add_cascade(label="Training", menu=category_menu)
 
         # File
@@ -770,14 +770,22 @@ Group by Prediction (Order):
                 self.Image_frame = Application(self.middlepane_frame, savedata=self.viewer_prefs, gui=self)
             else:
                 f = True
-            
             adjacent = []
-            n = 3
-            for i in range(1, n+1):
-                if self.imagegrid.current_selection+i<len(self.imagegrid.image_items):
-                    adjacent.append(self.imagegrid.image_items[self.imagegrid.current_selection+i])
-                if self.imagegrid.current_selection-i>=0:
-                    adjacent.append(self.imagegrid.image_items[self.imagegrid.current_selection-i])
+            n = 1  # How many steps outward you want to go
+            current = self.imagegrid.current_selection
+            items = self.imagegrid.image_items
+
+            for i in range(1, n + 1):
+                if current + i < len(items):
+                    adjacent.append(items[current + i].file.path)
+
+                if current - i >= 0:
+                    adjacent.append(items[current - i].file.path)
+            
+            if self.imagegrid.cols > n and current-self.imagegrid.cols < len(items):
+                adjacent.insert(1, items[current-self.imagegrid.cols].file.path)
+            if self.imagegrid.cols > n and current+self.imagegrid.cols < len(items):
+                adjacent.insert(1, items[current+self.imagegrid.cols].file.path)
 
             self.Image_frame.set_image(None if obj == None else obj.path, obj=obj, adjacent=adjacent)
             if flag: self.fileManager.bindhandler.search_widget.new_canvas(self.Image_frame.canvas)

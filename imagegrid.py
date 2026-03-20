@@ -211,6 +211,8 @@ class ImageGrid(tk.Frame):
                 break
 
         pass # update square name (obj.gridsquare, obj.destsquare...), update obj.filename, truncated name...
+    
+    ###
     def clear_canvas(self, unload=False, new_list=None):
         "Remove all items from canvas, but dont unload thumbnails or animations from memory."
         items = set(entry.file for entry in self.image_items)
@@ -596,6 +598,7 @@ class ImageGrid(tk.Frame):
                 width=w,
                 outline=grid_background_colour,
                 fill=grid_background_colour)
+    ###
     
     def reflow_from_index(self, start_idx=0):
         if not self.image_items: return
