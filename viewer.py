@@ -1349,12 +1349,10 @@ class Application(tk.Frame):
         if image is None:
             print("Image load failed for:", path)
             return
-        if getattr(self, "current_load_token", None) != token:
+        if getattr(self, "current_load_token", None) != token and caller != "cached":
             image.close()
             image = None
             return  # outdated load result, ignore
-
-        
 
         if caller == "cached":
             self.pil_image = image[0]
@@ -1373,6 +1371,10 @@ class Application(tk.Frame):
 
             id = self.after(0, lambda: self.draw_image(image, ignore_anti_alias=True, initial_filter=Image.Resampling.NEAREST))
             self.draw_queue.append(id)
+
+            if hasattr(self, "pending_cached") and self.pending_cached[2] == token and self.do_caching:
+                id = self.after(0, lambda p=self.pending_cached[0], c=self.pending_cached[1], t=self.current_load_token: self._on_async_image_ready(p, c, t, caller="cached"))
+                self.draw_queue.append(id)
             
         else:
             self.zoom_fit()
@@ -1424,7 +1426,7 @@ class Application(tk.Frame):
             token = self.loader.request_load(thumbpath, caller="gen_thumb")
         return token
     
-    def _set_picture(self, filename, token=None):
+    def _set_picture(self, filename, token=None, doing_thumb=False):
         "Close the handle and load full copy to memory."
         self.a = False
         
@@ -1432,7 +1434,10 @@ class Application(tk.Frame):
             with self._frame_lock:
                 cached = self.cache.get(filename)
             if cached:
-                self._on_async_image_ready(filename, cached, self.current_load_token, caller="cached")
+                if doing_thumb and self.do_caching:
+                    self.pending_cached = (filename, cached, self.current_load_token) # previous, thumb token
+                else:
+                    self._on_async_image_ready(filename, cached, self.current_load_token, caller="cached")
                 
                 with self._frame_lock:
                     keys_to_check = list(self.cache.keys())
@@ -1541,10 +1546,12 @@ class Application(tk.Frame):
             self._set_animation(filename)
         else: # is picture
             token = None
+            doing_thumb = False
             if self.thumbnail_var.get() != "No thumb":
+                doing_thumb = True
                 token = self._set_thumbnail(thumbpath=thumbpath)
 
-            self._set_picture(filename, token)
+            self._set_picture(filename, token, doing_thumb)
         
     def reset(self, filename):
         def close_vlc():
