@@ -112,7 +112,7 @@ class GUIManager(tk.Tk):
         #autosave               # Exlusively for fileManager
 
         gui = jprefs.get("qui", {}) # should be spelled gui XD
-        self.squares_per_page_intvar = tk.IntVar(value=int(gui.get("squares_per_page", 3000)))
+        self.squares_per_page_intvar = tk.IntVar(value=int(gui.get("squares_per_page", 500)))
         a = gui.get("display_order")
         if a not in ("Smart", "Filename", "Date", "Type", "Size", "Dimensions", "Nearest", "Histogram"):
             a = "Smart"
