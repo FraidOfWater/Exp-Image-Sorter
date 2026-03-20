@@ -2,7 +2,7 @@ pillow
 pyvips
 python-vlc
 imageio
-imageio[ffmpeg]
+imageio-ffmpeg
 av
 pymediainfo
 numpy
