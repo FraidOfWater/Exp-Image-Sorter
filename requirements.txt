@@ -4,6 +4,7 @@ python-vlc
 imageio
 imageio-ffmpeg
 av
+opencv-python
 pymediainfo
 numpy
 psutil
