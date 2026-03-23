@@ -16,6 +16,8 @@ torch
 torchvision
 faiss-cpu
 
+
 #pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu130
 #or probably one your gpu supports?
 #install this FIRST, or non gpu versions will be installed.
+#pip install -r requirements.txt
