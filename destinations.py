@@ -97,8 +97,6 @@ class FolderExplorer(ttk.Frame):
     def __init__(self, parent, hotkeys):
         super().__init__(parent)
         self.assets_path = os.path.join(os.path.dirname(__file__), "assets")
-        self.icon_folder = None
-        self.icon_inspect = None
 
         self.icon_expand = None
         self.icon_collapse = None
