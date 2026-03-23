@@ -58,7 +58,7 @@ class FolderTreeApp(tk.Toplevel):
 
         self.tree.bind('<<TreeviewSelect>>', self.on_select)
         self.tree.bind("<Button-3>", self.on_right_click)
-    
+
     def expand_to_path(self, path):
         target_path = os.path.abspath(path)
 
@@ -221,10 +221,10 @@ class FolderTreeApp(tk.Toplevel):
             self.model_name_field = tk.Entry(self.button_frame, bg="#f0f0f0")
             self.model_name_field.pack(pady=20)
             self.model_name_field.insert(0, self.model_name)
-    
+
     def send_info(self):
         self.func(self.model_name_field.get())
-        
+
     def reset_all_states(self):
         """Reset all folders back to default (no category or exclude)."""
         for path, state in list(self.folder_states.items()):
@@ -280,10 +280,10 @@ class ImagePathDataset(Dataset):
         thumb = self.thumbs[index]
         path = self.images[index].path
         id = self.images[index].id
-        
+
         if thumb == None or path == None or id == None: print("error")
         if self.transform: thumb = self.transform(thumb)
-        
+
         return thumb, path, id
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -304,7 +304,7 @@ class Dataset_gen:
 
     def gen_thumbs(self):
         self.unsplit()
-        
+
         path_hash_lookup = {}
         seen = set()
 
@@ -344,15 +344,15 @@ class Dataset_gen:
                 file_id = os.path.splitext(file)[0]
                 if file_id not in ids:
                     os.remove(os.path.join(root, file))
-        
+
         for x in files1:
             path_hash_lookup[x.id] = {
                             "original_path": x.path,
                             "prediction_thumb_path": x.thumbnail,
                             "label": x.label
-                        } 
+                        }
         return path_hash_lookup
-    
+
     def split(self, ratio):
         import random
         os.makedirs(os.path.join(self.train_dir, "train"), exist_ok=True)
@@ -370,7 +370,7 @@ class Dataset_gen:
                 testing[dir_name] = []
                 for x in files:
                     testing[dir_name].append(os.path.join(d, x))
-            
+
         for label in testing.keys():
             train[label] = []
             val[label] = []
@@ -461,7 +461,7 @@ class Model_inferer:
         self.model_path = model or os.path.join(self.path, "models", "latest_model.pt")
         self.fm = fm
         self.gen_thumb = fm.thumbs.gen_thumb
-        
+
         self.thumbsize = thumbsize
 
     def infer(self, images, lookup):
@@ -475,7 +475,7 @@ class Model_inferer:
         model = YOLO(MODEL_PATH)
         model.to(DEVICE)
         model.eval()
-        
+
         if self.fm.model_classes:
             pass
         else:
@@ -500,7 +500,7 @@ class Model_inferer:
             transforms.Resize((224,224)),
             transforms.ToTensor()
         ])"""
-        
+
         thumbs, objs = load_thumbs_parallel(images, self.thumbsize, self.gen_thumb)
         dataset = ImagePathDataset(images=images, thumbs=thumbs, transform=transform)
         loader = DataLoader(dataset, batch_size=32, shuffle=False)
@@ -512,7 +512,7 @@ class Model_inferer:
             SAVE_DIR = "center_crop"
             os.makedirs(SAVE_DIR, exist_ok=True)
         to_pil = ToPILImage()
-        
+
         with torch.no_grad():
             for batch_i, (images, paths, ids) in enumerate(loader):
                 images = images.to(DEVICE)
@@ -555,7 +555,7 @@ def start_training(training_dir, model_dir, epochs, name, model="yolo11m-cls.pt"
     run_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "classify")
     if os.path.exists(run_dir):
         shutil.rmtree(run_dir)
-        
+
     os.makedirs(model_dir, exist_ok=True)
     model_path = os.path.join(training_dir, model)
     model = YOLO(model_path)

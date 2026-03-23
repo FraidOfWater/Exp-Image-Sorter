@@ -14,10 +14,10 @@ RELIEF = "flat"
 """def get_method_a_color(folder_path):
     import pyvips
     import numpy as np
-    
+
     all_pixels = []
     supported_exts = (".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff")
-    
+
     # Values from sliders/variables
     limit = 32
     crop_ratio = 0.3
@@ -34,61 +34,61 @@ RELIEF = "flat"
                 try:
                     # Using pyvips thumbnail for speed
                     vips_img = pyvips.Image.thumbnail(img_path, 256)
-                    
+
                     # --- FIX 1: Robust Band Handling ---
                     if vips_img.bands == 4:
                         vips_img = vips_img[:3]
                     elif vips_img.bands == 1:
                         # Ensure grayscale images become RGB for stacking
                         vips_img = vips_img.bandjoin([vips_img, vips_img, vips_img])
-                    
+
                     arr = np.ndarray(
-                        buffer=vips_img.write_to_memory(), 
+                        buffer=vips_img.write_to_memory(),
                         dtype=np.uint8,
                         shape=(vips_img.height, vips_img.width, vips_img.bands)
                     )
-                    
+
                     h, w, _ = arr.shape
                     ch, cw = max(1, int(h * crop_ratio)), max(1, int(w * crop_ratio))
                     top, left = (h - ch) // 2, (w - cw) // 2
                     crop = arr[top:top+ch, left:left+cw, :3]
-                    
+
                     # --- FIX 2: Explicit cast to avoid uint8 wrap-around ---
                     max_c = crop.max(axis=2).astype(np.int16)
                     min_c = crop.min(axis=2).astype(np.int16)
                     variation = max_c - min_c
-                    
+
                     mask = (variation > min_var)
-                    
+
                     if np.any(mask):
                         all_pixels.append(crop[mask].reshape(-1, 3))
-                    
+
                     # Check limit: Stop processing files in this folder
                     if len(all_pixels) >= limit:
                         break
-                        
+
                 except Exception as e:
                     print(f"Error processing {fname}: {e}")
                     continue
-        
+
         # Check limit again: Stop walking into further subdirectories
         if len(all_pixels) >= limit:
             break
 
-    if not all_pixels: 
+    if not all_pixels:
         return "#F0F0F0"
-    
+
     # 2. Final Calculation
     pixels = np.vstack(all_pixels)
     median = np.median(pixels, axis=0).astype(np.uint8)
-    
+
     # Boost colorsys
     import colorsys
     r, g, b = median / 255.0
     h, s, v = colorsys.rgb_to_hsv(r, g, b)
     s, v = min(s * sat_boost, 1.0), min(v * val_boost, 1.0)
     final_r, final_g, final_b = colorsys.hsv_to_rgb(h, s, v)
-    
+
     return f'#{int(final_r*255):02x}{int(final_g*255):02x}{int(final_b*255):02x}'
 """
 
@@ -104,7 +104,7 @@ class FolderExplorer(ttk.Frame):
         self.icon_collapse = None
         self.icon_reload = None
         self.expanded_all = False
-        
+
         self.a = None
         self.destw = None
         self.parent = parent.master.master
@@ -133,7 +133,7 @@ class FolderExplorer(ttk.Frame):
         container = ttk.Frame(self, style="Theme_dividers.TFrame")
         container.pack(fill="both", expand=True)
         self.container = container
-        
+
             # --- Top Controls ---
         controls = ttk.Frame(container, style="Theme_dividers.TFrame")
         controls.pack(side="top", fill="x", padx=1, pady=1)
@@ -144,7 +144,7 @@ class FolderExplorer(ttk.Frame):
         body_frame.pack(side="top", fill="both", expand=True, pady=0)
 
         # 3. Pack scrollbar and canvas inside the body_frame
-        self.v_scroll = ttk.Scrollbar(body_frame, orient="vertical", 
+        self.v_scroll = ttk.Scrollbar(body_frame, orient="vertical",
                                     style="Custom.Vertical.TScrollbar",
                                     command=self.controlled_yview)
 
@@ -157,10 +157,10 @@ class FolderExplorer(ttk.Frame):
 
         #self.scrollbar = ttk.Scrollbar(container, orient="vertical", command=self.canvas.yview)
         #self.canvas.configure(yscrollcommand=self.scrollbar.set)
-        
+
         # 2. Pack scrollbar to the right, canvas to the left
-        
-        
+
+
         # ... (keep scroll_frame and scroll_window setup)
 
         # 3. Enable Mouse Wheel binding
@@ -174,7 +174,7 @@ class FolderExplorer(ttk.Frame):
             bg="#555",
             command=self.toggle_expand_collapse_all
         )
-        
+
 
         # Reload button
         self.reload_btn = tk.Button(
@@ -218,16 +218,16 @@ class FolderExplorer(ttk.Frame):
         )
 
         # Pack canvas and scrollbar
-        
+
         bg = self.winfo_toplevel().d_theme["main_colour"]
 
         # 1. Define the Black Style
         self.style = ttk.Style(self)
         self.style.theme_use("default")
-        self.style.configure("Custom.Vertical.TScrollbar", 
-                             background="black", 
-                             troughcolor=bg, 
-                             borderwidth=0, 
+        self.style.configure("Custom.Vertical.TScrollbar",
+                             background="black",
+                             troughcolor=bg,
+                             borderwidth=0,
                              arrowsize=0) # Removing arrows for cleaner look
         self.style.map("Custom.Vertical.TScrollbar",
                        background=[("pressed", "#616161"), ("active", "#4B4B4B")])
@@ -240,19 +240,19 @@ class FolderExplorer(ttk.Frame):
         # 3. CRITICAL: Pack scrollbar FIRST to the right
 
         # 4. Pack the canvas SECOND to fill the remaining left space
-        
+
         self.canvas.configure(yscrollcommand=self.v_scroll.set)
 
         #self.scrollbar.pack(side="right", fill="y")
         #self.canvas.pack(side="left", fill="both", expand=True)
-        
+
         #scrollbar.pack(side="right", fill="y")
-        
+
         # --- Bindings ---
         #self.bind_all("<MouseWheel>", self.on_mouse_wheel)
         self.bind_all("<Button-3>", self.on_right_click)
         #self.bind_all("<Button-2>", self.hide_selected_folder)
-        
+
         self.bind_all("<Button-1>", self.on_left_click)
         self.bind_all("<Control-N>", self.create_new_folder)
         self.bind_all("<Control-n>", self.create_new_folder)
@@ -262,31 +262,21 @@ class FolderExplorer(ttk.Frame):
         container.bind("<Enter>", self.update_selection)
         container.bind("<Leave>", self.update_selection)
         self.canvas.bind("<Motion>", self.update_selection)
-        
+
 
         self.update_selection()
-    
-    def toggle_expand_collapse_all(self):
-        if self.expanded_all:
-            self.collapse_everything()
-            self.expand_btn.config(image=self.icon_expand)
-        else:
-            self.expand_everything()
-            self.expand_btn.config(image=self.icon_collapse)
-
-        self.expanded_all = not self.expanded_all
 
     def controlled_yview(self, *args):
         """Intercepts manual scrollbar dragging to prevent void-scrolling."""
         # args will be something like ('moveto', '0.0') or ('scroll', '1', 'units')
-        
+
         if args[0] == "moveto":
             offset = float(args[1])
             # If the user tries to drag the bar to a negative position (the void)
             if offset < 0:
                 self.canvas.yview_moveto(0)
                 return "break"
-            
+
             # If all folders are in view, the scrollbar 'thumb' fills the track (0 to 1).
             # We prevent moving if we are already seeing everything.
             cur_top, cur_bottom = self.canvas.yview()
@@ -296,95 +286,47 @@ class FolderExplorer(ttk.Frame):
         # Pass valid commands to the actual canvas view
         self.canvas.yview(*args)
 
-    def expand_everything(self):
-        for btn, path, _, _, _ in list(self.buttons):
-            if self.has_subfolders(path):
-                self.expand_folder(path)
-
-    def collapse_everything(self):
-        for btn, path, _, _, _ in reversed(list(self.buttons)):
-            if self.expanded.get(os.path.abspath(path)):
-                self.collapse_folder(os.path.abspath(path))
+    def set_view(self, path):
+        self.root_path = path
+        self.parent.bindhandler.search_widget.set_inclusion(self.parent.destination_entry_field.get())
+        self.clear_all_folders()
 
     def load_svg(self, file_path, size=(18, 18)):
         import pyvips
         from PIL import Image, ImageTk
-
         vips_img = pyvips.Image.thumbnail(file_path, size[0], height=size[1], size="both")
         if vips_img.bands == 3:
             vips_img = vips_img.bandjoin(255)
         mem_vips = vips_img.write_to_memory()
         pil_img = Image.frombytes("RGBA", (vips_img.width, vips_img.height), mem_vips)
-        
         return ImageTk.PhotoImage(pil_img)
-    
-    def caps_lock(self, event):
-        # if outside this widget, allow to activate the scrolling behaviour. If inside, hide the "selection" and let mouse actions do their thing.
-        if event.state == 0 and event.keysym == "Caps_Lock":
-            self.focus()
-            self.scroll_enabled = True
-            self.update_selection(event)
-        else:
-            self.scroll_enabled = False
-            self.update_selection(just_clear=True)
-    
-    def clear_all_folders(self, event=None):
-        """Destroy all current folder buttons and clear internal state."""
-        for _, _, _, frame, _ in self.buttons:
-            frame.destroy()
-        self.buttons.clear()
-        self.expanded.clear()
-        self.selected_index = 0
-        
-        self.update_selection()
-        self.populate_buttons(self.root_path, 0)
-  
-    def set_view(self, path):
-        self.root_path = path
-        self.parent.fileManager.bindhandler.search_widget.set_inclusion(self.parent.fileManager.gui.destination_entry_field.get())
-        self.clear_all_folders()
 
-    def set_current(self, full_path):
-        if not self.root_path:
-            return
+    def load_svg_rotated(self, file_path, size=(12, 12)):
+        from PIL import ImageTk
+        base_img = self.load_svg(file_path, size)
+        pil = ImageTk.getimage(base_img)
+        expand_pil = pil.rotate(90)
+        collapse_pil = pil.rotate(270, expand=True)
+        self.icon_expand = ImageTk.PhotoImage(expand_pil)
+        self.icon_collapse = ImageTk.PhotoImage(collapse_pil)
+        self.expand_btn.config(image=self.icon_expand)
 
-        full_path = os.path.normpath(full_path)
-        root_path = os.path.normpath(self.root_path)
+    def has_subfolders(self, path):
+        return any(os.path.isdir(os.path.join(path, f)) for f in os.listdir(path))
 
-        if not full_path.startswith(root_path):
-            return
+    def get_button_index(self, folder_path):
+        for i, (_, path, _, _, _) in enumerate(self.buttons):
+            if os.path.normpath(path) == os.path.normpath(folder_path):
+                return i
+        return None
 
-        # 1. Calculate the direct lineage (parent paths)
-        rel_path = os.path.relpath(full_path, root_path)
-        if rel_path == ".":
-            parts = []
-        else:
-            folders = rel_path.split(os.sep)
-            parts = [os.path.join(root_path, *folders[:i+1]) for i in range(len(folders))]
-
-        # 2. COLLAPSE LOGIC: Close everything that isn't in our target's lineage
-        # We create a set of the paths we WANT to keep open for fast lookup
-        keep_open = set(parts)
-        
-        # Iterate over a copy of the expanded keys to avoid 'dictionary changed size' errors
-        for path in list(self.expanded.keys()):
-            if path not in keep_open and self.expanded[path]:
-                # Call your existing collapse logic to remove buttons from UI
-                self.collapse_folder(path) 
-
-        # 3. Expand necessary parents downwards
-        for path_segment in parts:
-            if path_segment != full_path:
-                if not self.expanded.get(path_segment, False):
-                    self.expand_folder(path_segment)
-                    self.update_idletasks()
-
-        # 4. Final Selection
-        target_index = self.get_button_index(full_path)
-        if target_index is not None:
-            self.selected_index = target_index
-            self.update_selection()
-            self.scroll_to_selected()
+    # Keys
+    def on_hotkey(self, e, btn):
+        master = e.widget.winfo_toplevel()
+        if "entry" in e.widget._w: return
+        if "toplevel" in e.widget._w: master = e.widget.master
+        if self.parent.bindhandler.search_widget.search_active: return
+        self.parent.fileManager.setDestination({"path": btn.folder_path, "color": btn.default_c}, e)
 
     def reassign_hotkey(self, event=None, btn=None):
         if self.current_reassign:
@@ -394,11 +336,11 @@ class FolderExplorer(ttk.Frame):
             self.unbind_all("<KeyPress>")
             for x in self.buttons:
                 if x[0].hotkey and len(x[0].hotkey) == 1:
-                    self.bind_all(f"<KeyPress-{x[0].hotkey.lower()}>", lambda e, x=x: self.parent.fileManager.setDestination({"path": x[0].folder_path, "color": x[0].default_c}, event))
-                    self.bind_all(f"<KeyPress-{x[0].hotkey.upper()}>", lambda e, x=x: self.parent.fileManager.setDestination({"path": x[0].folder_path, "color": x[0].default_c}, event))
-                elif x[0] == "Delete":
+                    for h in (x[0].hotkey.lower(), x[0].hotkey.upper()):
+                        self.bind_all(f"<KeyPress-{h}>", lambda e, x=x: self.parent.fileManager.setDestination({"path": x[0].folder_path, "color": x[0].default_c}, event))
+                else:
                     self.bind_all(f"<KeyPress-{x[0].hotkey}>", lambda e, x=x: self.parent.fileManager.setDestination({"path": x[0].folder_path, "color": x[0].default_c}, event))
-            
+
             if self.current_reassign == btn:
                 self.current_reassign = None
                 return
@@ -433,7 +375,7 @@ class FolderExplorer(ttk.Frame):
                 new_hotkey = event.keysym
 
                 self.unbind_all("<KeyPress>")
-                
+
                 for x in self.buttons:
                     if x[0].hotkey != None and new_hotkey.upper() == x[0].hotkey.upper():
                         if len(new_hotkey) == 1:
@@ -452,7 +394,7 @@ class FolderExplorer(ttk.Frame):
                         btn_text = f"{suffix}{prefix}{os.path.basename(x[0].folder_path)}"
                         x[0].config(text=btn_text)
 
-                
+
                 title = btn["text"]
                 folder_path = btn.folder_path
                 self.assigned_hotkeys[folder_path] = new_hotkey
@@ -468,14 +410,196 @@ class FolderExplorer(ttk.Frame):
                 for x in self.buttons:
                     if x[0].hotkey == None: continue
                     elif x[0].hotkey and len(x[0].hotkey) == 1:
-                        self.bind_all(f"<KeyPress-{x[0].hotkey.lower()}>", lambda e, x=x: self.parent.fileManager.setDestination({"path": x[0].folder_path, "color": x[0].default_c}, event))
-                        self.bind_all(f"<KeyPress-{x[0].hotkey.upper()}>", lambda e, x=x: self.parent.fileManager.setDestination({"path": x[0].folder_path, "color": x[0].default_c}, event))
+                        for h in (x[0].hotkey.lower(), x[0].hotkey.upper()):
+                            self.bind_all(f"<KeyPress-{h}>", lambda e, x=x: self.parent.fileManager.setDestination({"path": x[0].folder_path, "color": x[0].default_c}, event))
                     else:
                         self.bind_all(f"<KeyPress-{x[0].hotkey}>", lambda e, x=x: self.parent.fileManager.setDestination({"path": x[0].folder_path, "color": x[0].default_c}, event))
                 self.current_reassign = None
-            self.bind_all("<KeyPress>", key_press)  
+            self.bind_all("<KeyPress>", key_press)
         return
-    
+
+    def caps_lock(self, event):
+        # if outside this widget, allow to activate the scrolling behaviour. If inside, hide the "selection" and let mouse actions do their thing.
+        if event.state == 0 and event.keysym == "Caps_Lock":
+            self.focus()
+            self.scroll_enabled = True
+            self.update_selection(event)
+        else:
+            self.scroll_enabled = False
+            self.update_selection(just_clear=True)
+
+    def nav(self, d):
+        if not self.scroll_enabled: return
+        rollover = False
+        if d == "Down":
+            if rollover: self.selected_index = min(self.selected_index + 1, len(self.buttons) - 1)
+            else:
+                self.selected_index += 1
+                if self.selected_index >= len(self.buttons):
+                    self.selected_index = 0
+
+        elif d == "Up":
+            if rollover: self.selected_index = max(self.selected_index - 1, 0)
+            else:
+                self.selected_index -= 1
+                if self.selected_index < 0:
+                    self.selected_index = len(self.buttons) - 1
+
+        self.update_selection()
+        self.scroll_to_selected()
+
+    # Expand/Collapse
+    def toggle_folder(self, folder_path):
+        folder_path = os.path.normpath(folder_path)
+        if self.expanded.get(folder_path):
+            self.collapse_folder(folder_path)
+        else:
+            self.expand_folder(folder_path)
+
+    def expand_folder(self, folder_path):
+        folder_path = os.path.normpath(folder_path)
+        index = self.get_button_index(folder_path)
+        if index is None:
+            return
+        self.expanded[folder_path] = True
+        depth = self.buttons[index][2] + 1
+        subfolders = [f for f in os.listdir(folder_path) if os.path.isdir(os.path.join(folder_path, f))]
+        for i, sub in enumerate(subfolders):
+            full_path = os.path.join(folder_path, sub)
+            self.add_folder_button(full_path, depth, index + i + 1, self.assigned_hotkeys.get(full_path, None))
+        if subfolders:
+            # Update marker to show expanded
+            btn, path, depth, frame, marker = self.buttons[index]
+            self.buttons[index] = (btn, path, depth, frame, "▼ ")
+
+            prefix = f"{btn.hotkey}: " if btn.hotkey else "?: " if "?" in btn["text"] else ""
+            suffix = self.buttons[index][4]
+            btn_text = f"{suffix}{prefix}{os.path.basename(btn.folder_path)}"
+            btn.configure(text=btn_text)
+
+    def collapse_folder(self, folder_path):
+        self.reassign_hotkey()
+        folder_path = os.path.normpath(folder_path)
+        self.expanded[folder_path] = False
+        index = self.get_button_index(folder_path)
+        if index is None:
+            return
+        depth = self.buttons[index][2]
+        i = index + 1
+        while i < len(self.buttons) and self.buttons[i][2] > depth:
+            _, _, _, frame, _ = self.buttons.pop(i)
+            frame.destroy()
+        # Update marker to show collapsed
+        btn, path, depth, frame, _ = self.buttons[index]
+        prefix = f"{btn.hotkey}: " if btn.hotkey else "?: " if "?" in btn["text"] else ""
+        suffix = "▶ " if self.has_subfolders(folder_path) else ""
+        btn_text = f"{suffix}{prefix}{os.path.basename(folder_path)}"
+        self.buttons[index] = (btn, path, depth, frame, suffix)
+        btn.configure(text=btn_text)
+
+    def expand_everything(self):
+        for btn, path, _, _, _ in list(self.buttons):
+            if self.has_subfolders(path): self.expand_folder(path)
+
+    def collapse_everything(self):
+        for btn, path, _, _, _ in reversed(list(self.buttons)):
+            if self.expanded.get(os.path.abspath(path)): self.collapse_folder(os.path.abspath(path))
+
+    def toggle_expand_collapse_all(self):
+        if self.expanded_all:
+            self.collapse_everything()
+            self.expand_btn.config(image=self.icon_expand)
+        else:
+            self.expand_everything()
+            self.expand_btn.config(image=self.icon_collapse)
+        self.expanded_all = not self.expanded_all
+
+    # Events
+    def open_in_explorer(self, btn):
+        os.startfile(btn.folder_path)
+
+    def show_assigned(self, btn):
+        def close_window(event=None):
+            if event:
+                if not self.destw.canvas_clicked(event):
+                    return
+            self.destw.clear_canvas(unload=True)
+            self.destw.destroy()
+            self.destw = None
+            self.a.destroy()
+            self.a = None
+            self.parent.bindhandler.window_focused == "GRID"
+        if self.a != None:
+            close_window()
+
+        self.a = tk.Toplevel()
+        self.a.title(f"Files designated for {btn.folder_path}")
+        self.a.columnconfigure(0, weight=1)
+        self.a.rowconfigure(0, weight=1)
+        self.a.geometry(self.parent.destpane_geometry)
+        self.a.bind("<Button-3>", lambda e: close_window(e))
+        self.a.protocol("WM_DELETE_WINDOW", close_window)
+        self.a.transient(self.parent.gui)
+
+        from imagegrid import ImageGrid
+        self.destw = ImageGrid(self.a, paguirent=self.parent, thumb_size=self.parent.thumbnailsize, center=False, destination=btn.folder_path, bg=self.parent.d_theme["grid_background_colour"],
+                                theme=self.parent.d_theme)
+
+        self.destw.add([obj for obj in reversed(self.parent.fileManager.assigned) if os.path.normpath(obj.dest) == os.path.normpath(btn.folder_path)])
+
+    def clear_all_folders(self, event=None):
+        """Destroy all current folder buttons and clear internal state."""
+        for _, _, _, frame, _ in self.buttons:
+            frame.destroy()
+        self.buttons.clear()
+        self.expanded.clear()
+        self.selected_index = 0
+
+        self.update_selection()
+        self.populate_buttons(self.root_path, 0)
+
+    def set_current(self, full_path):
+        if not self.root_path:
+            return
+
+        full_path = os.path.normpath(full_path)
+        root_path = os.path.normpath(self.root_path)
+
+        if not full_path.startswith(root_path):
+            return
+
+        # 1. Calculate the direct lineage (parent paths)
+        rel_path = os.path.relpath(full_path, root_path)
+        if rel_path == ".":
+            parts = []
+        else:
+            folders = rel_path.split(os.sep)
+            parts = [os.path.join(root_path, *folders[:i+1]) for i in range(len(folders))]
+
+        # 2. COLLAPSE LOGIC: Close everything that isn't in our target's lineage
+        # We create a set of the paths we WANT to keep open for fast lookup
+        keep_open = set(parts)
+
+        # Iterate over a copy of the expanded keys to avoid 'dictionary changed size' errors
+        for path in list(self.expanded.keys()):
+            if path not in keep_open and self.expanded[path]:
+                # Call your existing collapse logic to remove buttons from UI
+                self.collapse_folder(path)
+
+        # 3. Expand necessary parents downwards
+        for path_segment in parts:
+            if path_segment != full_path:
+                if not self.expanded.get(path_segment, False):
+                    self.expand_folder(path_segment)
+                    self.update_idletasks()
+
+        # 4. Final Selection
+        target_index = self.get_button_index(full_path)
+        if target_index is not None:
+            self.selected_index = target_index
+            self.update_selection()
+            self.scroll_to_selected()
+
     def hide_selected_folder(self, event=None, btn=None):
         index = self.selected_index
         if btn and event.state != 2:
@@ -503,9 +627,61 @@ class FolderExplorer(ttk.Frame):
 
             self.update_selection()
 
-    def has_subfolders(self, path):
-        return any(os.path.isdir(os.path.join(path, f)) for f in os.listdir(path))
+    def update_selection(self, event=None, just_clear=False):
+        def clear():
+            for i, (btn, _, _, _, _) in enumerate(self.buttons):
+                if btn["bg"] != btn.default_c or btn["fg"] != "black" or btn["relief"] != RELIEF:
+                    btn.configure(
+                        bg=btn.default_c,
+                        fg="black")
+                #'TkDefaultFont'
+        def highlight(selected_btn=None):
+                if not (self.selected_index < len(self.buttons)): return
+                selected_btn = selected_btn or self.buttons[self.selected_index][0]
+                selected_btn.configure(
+                    bg="blue",   # vivid blue
+                    fg="white"
+                ) # flat, groove, raised, ridge, solid, or sunken
+        if just_clear:
+            clear()
+            return
+        if not self.buttons: return
+        if not event: # when caps lock is called.
+            clear()
+            highlight() # selects selected_index
+            return
+        if event.type == tk.EventType.KeyPress:
+            if event.state == 0 and event.keysym == "Caps_Lock":
+                clear()
+                highlight()
+            elif event.state == 2 and event.keysym == "Caps_Lock":
+                clear()
+            return
+        if event.widget._w.startswith(self.canvas._w) and event.widget.widgetName == "ttk::frame": return
+        if event and event.type == tk.EventType.Enter and event.widget.widgetName == "button":
+            self.selected_index = [x[0] for x in self.buttons].index(event.widget)
+            self.hovered_btn = self.buttons[self.selected_index]
+            clear()
+            event.widget.configure(bg=event.widget.darkened_c, fg="white")
+            return
+        elif event.type == tk.EventType.Leave and event.widget.widgetName == "ttk::frame":
+            clear()
+            if event.state == 2:
+                highlight()
+        # --- When leaving a button (or moving in canvas gaps) ---
+        if event and event.type == tk.EventType.Motion:
+            # Check if cursor is not over any button
+            x, y = event.x, event.y
+            widget_under_mouse = event.widget.winfo_containing(event.widget.winfo_pointerx(), event.widget.winfo_pointery())
+            if not (widget_under_mouse and getattr(widget_under_mouse, "widgetName", "") == "button"):
+                if self.hovered_btn:
+                    self.hovered_btn = None
+                    clear()
+                    if event.state == 2:
+                        highlight()
+            return
 
+    # Adding buttons
     def populate_buttons(self, path, depth):
         folders = [f for f in os.listdir(path) if os.path.isdir(os.path.join(path, f))]
         trash_dir = self.winfo_toplevel().fileManager.trash_dir
@@ -518,7 +694,80 @@ class FolderExplorer(ttk.Frame):
             hotkey = self.assigned_hotkeys[full_path] if self.assigned_hotkeys.get(full_path, None) != None else hotkey
             self.add_folder_button(full_path, depth, hotkey=self.assigned_hotkeys[full_path] if self.assigned_hotkeys.get(full_path, None) != None else hotkey)
             self.assigned_hotkeys[full_path] = hotkey
-    
+
+    def add_folder_button(self, folder_path, depth, index=None, hotkey=None):
+        if depth == 0: pass
+        elif not self.expanded.get(os.path.dirname(folder_path), False): return
+        frame = ttk.Frame(self.scroll_frame, style="Theme_dividers.TFrame")
+        prefix = f"{hotkey}: " if hotkey else ""
+        suffix = "▶ " if self.has_subfolders(folder_path) else ""
+        btn_text = f"{suffix}{prefix}{os.path.basename(folder_path)}"
+        padx = depth * 20
+
+        if self.icon_expand == None and self.icon_collapse == None: self.load_svg_rotated(os.path.join(self.assets_path, "icon_expand_collapse.svg"))
+        if self.icon_reload == None:
+            self.icon_reload = self.load_svg(os.path.join(self.assets_path, "icon_reload.svg"), size=(12,12))
+            self.reload_btn.config(image=self.icon_reload)
+
+        btn = tk.Button(frame, text=btn_text, anchor="w", relief=RELIEF)
+        btn.config(font=("Courier", 12), fg="black")
+        grab = tk.Label(frame,text="≡",cursor="fleur",width=2,bg="#444",fg="white")
+        grab.pack(side="left", fill="y", padx=(0, 0))
+        grab.bind("<ButtonPress-1>", lambda e, btn=btn: self.start_drag(e, btn))
+        grab.bind("<B1-Motion>", self.drag_motion)
+        grab.bind("<ButtonRelease-1>", self.drag_release)
+        btn.pack(side="left", fill="both", expand=True)
+
+        if index is None or index >= len(self.buttons):
+            frame.pack(fill="x", pady=1, padx=(padx, 0), expand=True)
+            self.buttons.append((btn, folder_path, depth, frame, suffix))
+        else:
+            self.buttons.insert(index, (btn, folder_path, depth, frame, suffix))
+            frame.pack(before=self.buttons[index + 1][3] if index + 1 < len(self.buttons) else None,
+                    fill="x", pady=1, padx=(padx, 0), expand=True)
+        btn.grab = grab
+        btn.hotkey = hotkey
+        btn.folder_path = folder_path
+        btn.btn = btn
+        btn.frame = frame
+        btn.default_c = "#F0F0F0"
+        btn.darkened_c = self.darken_color(btn.default_c)
+        btn.bind("<Button-1>", lambda e, btn=btn: self.on_left_click(e, btn=btn))
+        btn.bind("<Button-2>", lambda e, btn=btn: self.reassign_hotkey(e, btn=btn))
+        btn.bind("<Button-3>", lambda e, btn=btn: self.on_right_click(e, btn=btn))
+        btn.bind("<Enter>", self.update_selection)
+        btn.bind("<Leave>", self.update_selection)
+        if hotkey:
+            if len(hotkey) == 1:
+                btn.bind_all(f"<KeyPress-{hotkey.lower()}>", lambda e, btn=btn: self.on_hotkey(e, btn))
+                btn.bind_all(f"<KeyPress-{hotkey.upper()}>", lambda e, btn=btn: self.on_hotkey(e, btn))
+            else: btn.bind_all(f"<KeyPress-{hotkey}>", lambda e, btn=btn: self.on_hotkey(e, btn))
+        self.update()
+        if self.color_cache.get(folder_path, None):
+            hex_vip = self.color_cache[folder_path]
+            self._apply_color(btn, hex_vip)
+        else: self.after_idle(self.executor.submit, self.get_set_color, folder_path, btn)
+
+    def create_new_folder(self, event):
+        if not self.buttons or not (event.state & 0x0002) != 0:
+            parent_path = self.root_path
+            parent_depth = 0
+            index = 0
+        else:
+            parent_path = self.buttons[self.selected_index][1]
+            parent_depth = self.buttons[self.selected_index][2]
+            index = self.selected_index + 1
+        name = simpledialog.askstring("New Folder", "Enter folder name:", parent=self)
+        if not name: return
+        new_folder_path = os.path.join(parent_path, name)
+        try: os.makedirs(new_folder_path, exist_ok=False)
+        except Exception as e:
+            print("Couldn't create folder:", e)
+            return
+        if parent_path != self.root_path: self.expand_folder(parent_path)
+        else: self.add_folder_button(new_folder_path, parent_depth + 1 if parent_depth != 0 else parent_depth, index)
+
+    # Color
     def load_images(self, folder):
         import pyvips
         import numpy as np
@@ -607,18 +856,13 @@ class FolderExplorer(ttk.Frame):
         try:
             hex_vip = self.color_cache.get(path, None)
             if hex_vip: pass
-            elif path == self.winfo_toplevel().fileManager.trash_dir:
-                hex_vip = "#888BF8"
+            elif path == self.winfo_toplevel().fileManager.trash_dir: hex_vip = "#888BF8"
             else:
                 images = self.load_images(path)
                 hex_vip = self.median_center_color_vips(images)
             self.color_cache[path] = hex_vip
-
-            # Schedule the UI update in the main thread
-            if btn:
-                btn.after_idle(self._apply_color, btn, hex_vip)
-            elif square:
-                self.parent.after_idle(self._apply_color_2_sqr, square, hex_vip)
+            if btn: btn.after_idle(self._apply_color, btn, hex_vip)
+            elif square: self.parent.after_idle(self._apply_color_2_sqr, square, hex_vip)
         except Exception as e:
             print("Color extraction failed for:", path, e)
 
@@ -629,145 +873,26 @@ class FolderExplorer(ttk.Frame):
         if btn.winfo_exists():
             btn.default_c = hex_vip
             btn.darkened_c = self.darken_color(btn.default_c)
-            btn.config(bg=hex_vip)
-            self.update_selection()
-    
-    def load_svg_rotated(self, file_path, size=(12, 12)):
-        from PIL import ImageTk
+            btn.grab.config(bg=btn.darkened_c)
+            if btn["bg"] != "blue": btn.config(bg=hex_vip)
 
-        # Load base icon using your existing logic
-        base_img = self.load_svg(file_path, size)
+    def darken_color(self, hex_color, warmth=0.04, richness=0.15, dim=0.1):
+        import colorsys
+        def darken_color1(hex_color, shadow_strength=0.15):
+            if not hex_color or not hex_color.startswith("#") or len(hex_color) != 7: return "#444444"
+            r,g,b = int(hex_color[1:3], 16) / 255.0, int(hex_color[3:5], 16) / 255.0, int(hex_color[5:7], 16) / 255.0
+            h, s, v = colorsys.rgb_to_hsv(r, g, b)
+            h,s,v = (h + 0.02) % 1.0, min(s * 1.1, 1.0), max(v * (1 - shadow_strength), 0)
+            r, g, b = colorsys.hsv_to_rgb(h, s, v)
+            return f"#{int(r*255):02x}{int(g*255):02x}{int(b*255):02x}"
+        hex_color = hex_color.lstrip('#')
+        r, g, b = tuple(int(hex_color[i:i+2], 16)/255 for i in (0, 2, 4))
+        h, s, v = colorsys.rgb_to_hsv(r, g, b)
+        h,s,v = (h - warmth) % 1.0,  min(1.0, s + richness), max(0.0, v - dim)
+        r, g, b = colorsys.hsv_to_rgb(h, s, v)
+        return darken_color1(f"#{int(r*255):02x}{int(g*255):02x}{int(b*255):02x}")
 
-        # Convert PhotoImage → PIL
-        pil = ImageTk.getimage(base_img)
-
-        # Rotate once
-        expand_pil = pil.rotate(90)
-        collapse_pil = pil.rotate(270, expand=True)
-
-        # Convert back to PhotoImage and cache
-        self.icon_expand = ImageTk.PhotoImage(expand_pil)
-        self.icon_collapse = ImageTk.PhotoImage(collapse_pil)
-
-        self.expand_btn.config(image=self.icon_expand)
-
-    def add_folder_button(self, folder_path, depth, index=None, hotkey=None):
-        if depth == 0: pass
-        elif not self.expanded.get(os.path.dirname(folder_path), False): return
-        frame = ttk.Frame(self.scroll_frame, style="Theme_dividers.TFrame")
-
-        prefix = f"{hotkey}: " if hotkey else ""
-        suffix = "▶ " if self.has_subfolders(folder_path) else ""
-        btn_text = f"{suffix}{prefix}{os.path.basename(folder_path)}"
-        
-        padx = depth * 20
-
-        # 1. Pack the secondary button to the RIGHT first
-        # We give it a small width so it doesn't take up too much space
-
-        if self.icon_expand == None and self.icon_collapse == None: self.load_svg_rotated(os.path.join(self.assets_path, "icon_expand_collapse.svg"))
-        if self.icon_reload == None:
-            self.icon_reload = self.load_svg(os.path.join(self.assets_path, "icon_reload.svg"), size=(12,12))
-            self.reload_btn.config(image=self.icon_reload)
-        if self.icon_folder == None: self.icon_folder = self.load_svg(os.path.join(self.assets_path, "icon_folder.svg"))
-        if self.icon_inspect == None: self.icon_inspect = self.load_svg(os.path.join(self.assets_path, "icon_inspect.svg"))
-
-        btn2 = tk.Button(frame, image=self.icon_folder, bg="green", width=10, bd=BD, relief=RELIEF)
-        btn2.pack(side="right", fill="both", padx=(1, 0))
-
-        btn1 = tk.Button(frame, image=self.icon_inspect, bg="aqua", width=10, bd=BD, relief=RELIEF)
-        btn1.pack(side="right", fill="both", padx=(1, 0)) 
-        
-        # 2. Pack the primary folder button to the LEFT
-        # Use expand=True and fill="both" so it takes up all remaining space
-        btn = tk.Button(frame, text=btn_text, anchor="w", bd=BD, relief=RELIEF)
-        btn.config(font=("Courier", 12), fg="black")
-
-        # Drag handle
-        grab = tk.Label(
-            frame,
-            text="≡",
-            cursor="fleur",
-            width=2,
-            bg="#444",
-            fg="white"
-        )
-        grab.pack(side="left", fill="y", padx=(0, 2))
-
-        grab.bind("<ButtonPress-1>", lambda e, btn=btn: self.start_drag(e, btn))
-        grab.bind("<B1-Motion>", self.drag_motion)
-        grab.bind("<ButtonRelease-1>", self.drag_release)
-
-
-        btn.pack(side="left", fill="both", expand=True)
-
-        # ... rest of your logic for packing the frame into the scroll container ...
-        if index is None or index >= len(self.buttons):
-            frame.pack(fill="x", pady=1, padx=(padx, 0), expand=True)
-            self.buttons.append((btn, folder_path, depth, frame, suffix))
-        else:
-            self.buttons.insert(index, (btn, folder_path, depth, frame, suffix))
-            frame.pack(before=self.buttons[index + 1][3] if index + 1 < len(self.buttons) else None,
-                    fill="x", pady=1, padx=(padx, 0), expand=True)
-
-        btn2.config(command=lambda:show_folder())
-        btn1.config(command=lambda:show_assigned())
-        master = self.parent
-        def show_assigned():
-            def close_window(event=None):
-                if event:
-                    if not self.destw.canvas_clicked(event):
-                        return
-                self.destw.clear_canvas(unload=True)
-                self.destw.destroy()
-                self.destw = None
-                self.a.destroy()
-                self.a = None
-            if self.a != None:
-                close_window()
-
-            self.a = tk.Toplevel()
-            self.a.title(f"Files designated for {btn.folder_path}")
-            self.a.columnconfigure(0, weight=1)
-            self.a.rowconfigure(0, weight=1)
-            self.a.geometry(master.fileManager.gui.destpane_geometry)
-            self.a.bind("<Button-3>", lambda e: close_window(e))
-            self.a.protocol("WM_DELETE_WINDOW", close_window)
-            self.a.transient(master.fileManager.gui)
-            
-            from imagegrid import ImageGrid
-            self.destw = ImageGrid(self.a, parent=master.fileManager, thumb_size=master.thumbnailsize, center=False, dest=True, destination=btn.folder_path, bg=master.d_theme["grid_background_colour"], 
-                                    theme=master.d_theme)
-            
-            self.destw.add([obj for obj in reversed(master.fileManager.assigned) if os.path.normpath(obj.dest) == os.path.normpath(btn.folder_path)])
-        def show_folder():
-            os.startfile(btn.folder_path)
-            
-        btn.hotkey = hotkey
-        btn.folder_path = folder_path
-        btn.btn = btn
-        btn.frame = frame
-        btn.default_c = "#F0F0F0"
-        btn.darkened_c = self.darken_color(btn.default_c)
-        btn.bind("<Button-1>", lambda e, btn=btn: self.on_left_click(e, btn=btn))
-        btn.bind("<Button-2>", lambda e, btn=btn: self.reassign_hotkey(e, btn=btn))
-        btn.bind("<Button-3>", lambda e, btn=btn: self.on_right_click(e, btn=btn))
-        btn.bind("<Enter>", self.update_selection)
-        btn.bind("<Leave>", self.update_selection)
-        if hotkey:
-            if len(hotkey) == 1:
-                btn.bind_all(f"<KeyPress-{hotkey.lower()}>", lambda e, btn=btn: self.on_hotkey(e, btn))
-                btn.bind_all(f"<KeyPress-{hotkey.upper()}>", lambda e, btn=btn: self.on_hotkey(e, btn))
-            else:
-                btn.bind_all(f"<KeyPress-{hotkey}>", lambda e, btn=btn: self.on_hotkey(e, btn))
-                
-        self.update()
-        if self.color_cache.get(folder_path, None):
-            hex_vip = self.color_cache[folder_path]
-            self._apply_color(btn, hex_vip)
-        else:
-            self.after_idle(self.executor.submit, self.get_set_color, folder_path, btn)
-    
+    # Mouse events
     def start_drag(self, event, btn):
         # 1. Identify the folder being moved
         self.drag_index = next(i for i, x in enumerate(self.buttons) if x[0] == btn)
@@ -780,17 +905,17 @@ class FolderExplorer(ttk.Frame):
 
         # 3. Create the Ghost Label (the one that follows the mouse)
         self.drag_widget = tk.Label(
-            self.scroll_frame, 
-            text=btn["text"], 
+            self.scroll_frame,
+            text=btn["text"],
             bg="#444", fg="white", font=btn["font"],
             relief="raised", borderwidth=1, anchor="w", padx=10
         )
         self.drag_widget.place(
-            x=self.drag_data[3].winfo_x(), 
-            y=self.drag_data[3].winfo_y(), 
+            x=self.drag_data[3].winfo_x(),
+            y=self.drag_data[3].winfo_y(),
             width=self.drag_data[3].winfo_width()
         )
-        
+
         # 4. Create the Insertion Marker (The White Line)
         self.insertion_line = tk.Frame(self.scroll_frame, height=2, bg="white")
 
@@ -806,7 +931,7 @@ class FolderExplorer(ttk.Frame):
             # If mouse is below the midpoint of this frame, the target is at least the next index
             if y > (frame.winfo_y() + frame.winfo_height() / 2):
                 new_index = i + 1
-        
+
         self.target_index = new_index
 
         # Update the white line's position
@@ -822,17 +947,17 @@ class FolderExplorer(ttk.Frame):
         # 1. Update the underlying list
         # We need to handle the index shift carefully
         moving_item = self.buttons.pop(self.drag_index)
-        
+
         # If we are moving it further down the list, the index shifted by -1
         actual_pos = self.target_index
         if self.target_index > self.drag_index:
             actual_pos -= 1
-            
+
         self.buttons.insert(max(0, actual_pos), moving_item)
 
         # 2. Reset visuals (Restore colors)
         moving_item[0].configure(bg="#2b2b2b", fg="white")   # Restore text color
-        
+
         self.drag_widget.destroy()
         self.insertion_line.destroy()
 
@@ -842,93 +967,12 @@ class FolderExplorer(ttk.Frame):
             depth = item[2]
             frame.pack_forget()
             frame.pack(fill="x", pady=1, padx=(depth * 20, 0), expand=True)
-        
-        self.update_selection()
-    
-    def on_hotkey(self, e, btn):
-        master = e.widget.winfo_toplevel()
-        if "entry" in e.widget._w: return
-        if "toplevel" in e.widget._w:
-            master = e.widget.master
-        master.fileManager.setDestination({"path": btn.folder_path, "color": btn.default_c}, e)
-                    
-    def toggle_folder(self, folder_path):
-        folder_path = os.path.normpath(folder_path)
-        if self.expanded.get(folder_path):
-            self.collapse_folder(folder_path)
-        else:
-            self.expand_folder(folder_path)
-
-    def expand_folder(self, folder_path):
-        folder_path = os.path.normpath(folder_path)
-        index = self.get_button_index(folder_path)
-        if index is None:
-            return
-        self.expanded[folder_path] = True
-        depth = self.buttons[index][2] + 1
-        subfolders = [f for f in os.listdir(folder_path) if os.path.isdir(os.path.join(folder_path, f))]
-        for i, sub in enumerate(subfolders):
-            full_path = os.path.join(folder_path, sub)
-            self.add_folder_button(full_path, depth, index + i + 1, self.assigned_hotkeys.get(full_path, None))
-        if subfolders:
-            # Update marker to show expanded
-            btn, path, depth, frame, marker = self.buttons[index]
-            self.buttons[index] = (btn, path, depth, frame, "▼ ")
-            
-            prefix = f"{btn.hotkey}: " if btn.hotkey else "?: " if "?" in btn["text"] else ""
-            suffix = self.buttons[index][4]
-            btn_text = f"{suffix}{prefix}{os.path.basename(btn.folder_path)}"
-            btn.configure(text=btn_text)
-
-    def collapse_folder(self, folder_path):
-        self.reassign_hotkey()
-        folder_path = os.path.normpath(folder_path)
-        self.expanded[folder_path] = False
-        index = self.get_button_index(folder_path)
-        if index is None:
-            return
-        depth = self.buttons[index][2]
-        i = index + 1
-        while i < len(self.buttons) and self.buttons[i][2] > depth:
-            _, _, _, frame, _ = self.buttons.pop(i)
-            frame.destroy()
-        # Update marker to show collapsed
-        btn, path, depth, frame, _ = self.buttons[index]
-        prefix = f"{btn.hotkey}: " if btn.hotkey else "?: " if "?" in btn["text"] else ""
-        suffix = "▶ " if self.has_subfolders(folder_path) else ""
-        btn_text = f"{suffix}{prefix}{os.path.basename(folder_path)}"
-        self.buttons[index] = (btn, path, depth, frame, suffix)
-        btn.configure(text=btn_text)
-
-    def get_button_index(self, folder_path):
-        for i, (_, path, _, _, _) in enumerate(self.buttons):
-            if os.path.normpath(path) == os.path.normpath(folder_path):
-                return i
-        return None
-
-    def nav(self, d):
-        if not self.scroll_enabled: return
-        rollover = False
-        if d == "Down":
-            if rollover: self.selected_index = min(self.selected_index + 1, len(self.buttons) - 1)
-            else:
-                self.selected_index += 1
-                if self.selected_index >= len(self.buttons):
-                    self.selected_index = 0
-        
-        elif d == "Up":
-            if rollover: self.selected_index = max(self.selected_index - 1, 0)
-            else:
-                self.selected_index -= 1
-                if self.selected_index < 0:
-                    self.selected_index = len(self.buttons) - 1
 
         self.update_selection()
-        self.scroll_to_selected()
 
     def on_mouse_wheel(self, event):
         if "!imagegrid" in event.widget._w: return "break"
-        
+
         if self.scroll_enabled:
             # Mode A: Caps Lock is ON -> Move the blue selection bar
             hovering_buttons = event.widget._w.startswith(self.canvas._w) and (".!frame.!canvas.!frame" in event.widget._w or "!button" in event.widget._w)
@@ -941,7 +985,7 @@ class FolderExplorer(ttk.Frame):
                     self.selected_index += 1
                     if self.selected_index >= len(self.buttons):
                         self.selected_index = 0
-        
+
             else:
                 if rollover: self.selected_index = max(self.selected_index - 1, 0)
                 else:
@@ -954,7 +998,7 @@ class FolderExplorer(ttk.Frame):
         else:
             # Mode B: Caps Lock is OFF -> Scroll the canvas view normally
             current_pos = self.canvas.yview()
-            
+
             # 2. Only scroll up if we aren't already at the top
             if event.delta > 0 and current_pos[0] <= 0:
                 return "break"
@@ -977,296 +1021,62 @@ class FolderExplorer(ttk.Frame):
         elif btn_bottom > canvas_bottom:
             self.canvas.yview_moveto((btn_bottom - self.canvas.winfo_height()) / self.scroll_frame.winfo_height())
 
-    
-    def update_selection(self, event=None, just_clear=False):
-        def clear():
-            for i, (btn, _, _, _, _) in enumerate(self.buttons):
-                if btn["bg"] != btn.default_c or btn["fg"] != "black" or btn["relief"] != RELIEF:
-                    btn.configure(
-                        bg=btn.default_c,
-                        fg="black")
-                #'TkDefaultFont'
-        def highlight(selected_btn=None):
-                if not (self.selected_index < len(self.buttons)): return
-                selected_btn = selected_btn or self.buttons[self.selected_index][0]
-                selected_btn.configure(
-                    bg="blue",   # vivid blue
-                    fg="white"
-                ) # flat, groove, raised, ridge, solid, or sunken
-        if just_clear: 
-            clear()
-            return
-        if not self.buttons: return
-        if not event: # when caps lock is called.
-            clear()
-            highlight() # selects selected_index
-            return
-        if event.type == tk.EventType.KeyPress:
-            if event.state == 0 and event.keysym == "Caps_Lock":
-                clear()
-                highlight()
-            elif event.state == 2 and event.keysym == "Caps_Lock":
-                clear()
-            return
-        if event.widget._w.startswith(self.canvas._w) and event.widget.widgetName == "ttk::frame": return
-        if event and event.type == tk.EventType.Enter and event.widget.widgetName == "button":
-            self.selected_index = [x[0] for x in self.buttons].index(event.widget)
-            self.hovered_btn = self.buttons[self.selected_index]
-            clear()
-            event.widget.configure(bg=event.widget.darkened_c, fg="white")
-            return
-        elif event.type == tk.EventType.Leave and event.widget.widgetName == "ttk::frame":
-            clear()
-            if event.state == 2:
-                highlight()
-        # --- When leaving a button (or moving in canvas gaps) ---
-        if event and event.type == tk.EventType.Motion:
-            # Check if cursor is not over any button
-            x, y = event.x, event.y
-            widget_under_mouse = event.widget.winfo_containing(event.widget.winfo_pointerx(), event.widget.winfo_pointery())
-            if not (widget_under_mouse and getattr(widget_under_mouse, "widgetName", "") == "button"):
-                if self.hovered_btn:
-                    self.hovered_btn = None
-                    clear()
-                    if event.state == 2:
-                        highlight()
-            return
-
     def on_left_click(self, event, btn=None):
+        if self.parent.dock_view.get() and self.parent.Image_frame:
+            canvas = self.parent.Image_frame.canvas
+            items = canvas.find_withtag("canvas_menu")
+            if items:
+                canvas.delete("canvas_menu")
+        elif self.parent.second_window_viewer is not None and self.parent.second_window_viewer.winfo_exists():
+            canvas = self.parent.second_window_viewer.canvas
+            items = canvas.find_withtag("canvas_menu")
+            if items:
+                canvas.delete("canvas_menu")
+
         ignored_events = ("ttk::scale", "label", "ttk::panedwindow", "tk_optionMenu", 'entry', "ttk::entry", "ttk::button", "ttk::frame", "ttk::checkbutton", "scrollbar")
         if event.widget._w.startswith(self.canvas._w): self.focus()
 
-        """is_toplevel_canvas = "toplevel" in event.widget._w and "canvas" in event.widget._w
-        is_middle_canvas = "middlepane" in event.widget._w and "canvas" in event.widget._w
-        
-        if is_toplevel_canvas or is_middle_canvas:
-            canvas = event.widget  # The specific canvas that was clicked
-            canvas.delete("detach_ui")"""
-        
         if "!imagegrid" in event.widget._w: return
         if "!toplevel" in event.widget._w: return
-        master = event.widget.winfo_toplevel()
-        if "!folderexplorer" in event.widget._w and event.widget.widgetName == "button" and btn: 
-            master.fileManager.setDestination({"path": btn.folder_path, "color": btn.default_c}, event)
+        fm = self.parent.fileManager
+        if "!folderexplorer" in event.widget._w and event.widget.widgetName == "button" and btn:
+            if event.state in (1, 3, 5, 6, 7, 33, 35, 37, 39): # ctrl
+                self.show_assigned(btn)
+            else:
+                fm.setDestination({"path": btn.folder_path, "color": btn.default_c}, event)
         elif event.widget.widgetName in ignored_events: return
         elif event.state in (2, 3, 6) and event.widget.widgetName != "button":
             btn, selected_path, _, _, _ = self.buttons[self.selected_index]
             if event.state == 2:
                 color = btn.default_c
-                master.fileManager.setDestination({"path": selected_path, "color": color}, event)
+                fm.setDestination({"path": selected_path, "color": color}, event)
 
     def on_right_click(self, event, btn=None):
+        if hasattr(self, "canvas_menu_canvas"):
+            items = self.canvas_menu_canvas.find_withtag("canvas_menu")
+            if items:
+                self.canvas_menu_canvas.delete("canvas_menu")
+
         ignored_events = ("label", "ttk::panedwindow", "tk_optionMenu", 'entry', "ttk::entry", "ttk::button", "ttk::frame", "ttk::checkbutton", "scrollbar")
         if isinstance(event.widget, str): return # buttonpress event
         if event.widget._w.startswith(self.canvas._w): self.focus()
-        
+
         if "!imagegrid" in event.widget._w: return
         if "!folderexplorer" in event.widget._w and event.widget.widgetName == "button" and btn:
-            self.toggle_folder(btn.folder_path) # (path, color)
+            if event.state in (1, 3, 5, 6, 7, 33, 35, 37, 39): # ctrl
+                self.open_in_explorer(btn)
+            else:
+                self.toggle_folder(btn.folder_path) # (path, color)
         elif event.widget.widgetName in ignored_events: return
         elif event.state in (2, 3, 6) and event.widget.widgetName != "button":
             btn, selected_path, _, _, _ = self.buttons[self.selected_index]
             if event.state == 2:
                 self.toggle_folder(selected_path)
         elif ("toplevel" in event.widget._w and "canvas" in event.widget._w) or "middlepane" in event.widget._w and "canvas" in event.widget._w:
-            self.handle_canvas_menu(event)
-    
-    def handle_canvas_menu(self, event):
-        is_toplevel = "toplevel" in event.widget._w and "canvas" in event.widget._w
-        is_middle = "middlepane" in event.widget._w and "canvas" in event.widget._w
-        
-        if not (is_toplevel or is_middle):
-            return
+            self.parent.bindhandler.handle_canvas_menu(event)
 
-        canvas = event.widget
-        if "!canvas.!frame.!canvas.!frame" in event.widget._w: return # video cant draw over it
-        canvas.delete("canvas_menu") 
-
-        x, y = event.x, event.y
-        btn_w, btn_h = 150, 35  # Slightly wider to fit the checkmark
-        
-        BG_NORMAL = "#2b2b2b"
-        BG_HOVER = "#4a4a4a"
-        TEXT_COLOR = "white"
-        ACCENT_COLOR = "#00ff00" # Green for the checkmark
-        BORDER_COLOR = "#666666"
-
-        def helper():
-            self.parent.dock_view.set(not self.parent.dock_view.get())
-            self.parent.change_viewer() # Execute your detach logic
-        def helper2():
-            self.parent.dock_side.set(not self.parent.dock_side.get())
-            self.parent.change_dock_side() # Execute your detach logic
-        def helper3():
-            self.parent.show_next.set(not self.parent.show_next.get())
-        def helper4():
-            self.parent.viewer_prefs["unbound_pan"] = not self.parent.viewer_prefs["unbound_pan"]
-            if self.parent.Image_frame.canvas == event.widget:
-                self.parent.Image_frame.unbound_var.set(self.parent.viewer_prefs["unbound_pan"])
-            elif self.parent.second_window_viewer:
-                self.parent.second_window_viewer.unbound_var.set(self.parent.viewer_prefs["unbound_pan"])
-        def helper5():
-            options = ["None", "Default", "Advanced", "Debug"]
-            def get_next(old):
-                old_index = options.index(old)
-                if old_index+1 >= len(options): return options[0]
-                else: return options[old_index+1]
-            if self.parent.Image_frame.canvas == event.widget:
-                old = self.parent.Image_frame.statusbar_mode.get()
-                self.parent.Image_frame.statusbar_mode.set(get_next(old))
-            elif self.parent.second_window_viewer:
-                old = self.parent.second_window_viewer.statusbar_mode.get()
-                self.parent.second_window_viewer.statusbar_mode.set(get_next(old))
-
-        # --- 1. Define Options List (Show Next is now first) ---
-        # format: (Label, Command, Show_Checkmark)
-        
-        checkmark = "✓ " if self.parent.show_next.get() else "  "
-        checkmark1 = "✓ " if self.parent.viewer_prefs["unbound_pan"] else "  "
-        options = [
-            ("Detach" if is_middle else "Dock", helper)
-        ]
-        
-        if is_middle:
-            options.append(("Switch Sides", helper2))
-        options.append((f"Cycle statusbar", helper5))
-        options.append((f"{checkmark}Show Next", helper3))
-        #options.append((f"{checkmark1}Unbound Pan", helper4))
-        
-
-        # --- 2. Draw and Bind ---
-        for i, (label, cmd) in enumerate(options):
-            btn_y = y + (i * btn_h)
-            row_tag = f"row_{i}"
-            bg_tag = f"bg_{i}"
-
-            # Draw Background
-            canvas.create_rectangle(
-                x, btn_y, x + btn_w, btn_y + btn_h,
-                fill=BG_NORMAL, outline=BORDER_COLOR,
-                tags=("canvas_menu", row_tag, bg_tag)
-            )
-            
-            # Draw Text (Anchor 'w' for left-alignment to keep checkmarks lined up)
-            text_item = canvas.create_text(
-                x + 10, btn_y + (btn_h / 2),
-                text=label, fill=TEXT_COLOR,
-                anchor="w",
-                font=("Segoe UI", 10),
-                tags=("canvas_menu", row_tag)
-            )
-
-            # Apply green color specifically to the checkmark part if active
-            if "✓" in label:
-                # Note: canvas.itemconfig can't color partial text, 
-                # so we just keep the whole string white or green for the 'Active' row
-                canvas.itemconfig(text_item, fill=ACCENT_COLOR)
-
-            # --- Interactive Hover Logic ---
-            def on_enter(e, bt=bg_tag):
-                canvas.itemconfig(bt, fill=BG_HOVER)
-                canvas.config(cursor="hand2")
-
-            def on_leave(e, bt=bg_tag):
-                canvas.itemconfig(bt, fill=BG_NORMAL)
-                canvas.config(cursor="")
-
-            canvas.tag_bind(row_tag, "<Enter>", on_enter)
-            canvas.tag_bind(row_tag, "<Leave>", on_leave)
-
-            # --- Click Action ---
-            canvas.tag_bind(row_tag, "<Button-1>", lambda e, c=cmd: [canvas.delete("canvas_menu"), c()])
-
-        # Auto-dismiss on canvas click elsewhere
-        canvas.after(100, lambda: canvas.bind("<Button-1>", lambda e: canvas.delete("canvas_menu"), add="+"))
-
-    def create_new_folder(self, event):
-        if not self.buttons or not (event.state & 0x0002) != 0:
-            parent_path = self.root_path
-            parent_depth = 0
-            index = 0
-        else:
-            parent_path = self.buttons[self.selected_index][1]
-            parent_depth = self.buttons[self.selected_index][2]
-            index = self.selected_index + 1
-        
-        name = simpledialog.askstring("New Folder", "Enter folder name:", parent=self)
-        if not name:
-            return
-
-        new_folder_path = os.path.join(parent_path, name)
-        try:
-            os.makedirs(new_folder_path, exist_ok=False)
-        except Exception as e:
-            print("Couldn't create folder:", e)
-            return
-
-        # Make sure parent folder is marked as expanded
-        if parent_path != self.root_path:
-            self.expand_folder(parent_path)
-        else:
-            self.add_folder_button(new_folder_path, parent_depth + 1 if parent_depth != 0 else parent_depth, index)
-        # Add new folder button after currently selected folder
-        #
-
-    def darken_color(self, hex_color, warmth=0.04, richness=0.15, dim=0.1):
-        def darken_color1(hex_color, shadow_strength=0.15):
-            import colorsys
-            """
-            Return a visually pleasing 'shadowed' version of a given hex color.
-            Slightly reduces brightness, adds a hint of complementary hue,
-            and boosts saturation for richness.
-            """
-            if not hex_color or not hex_color.startswith("#") or len(hex_color) != 7:
-                return "#444444"
-
-            # Convert hex → RGB (0–1)
-            r = int(hex_color[1:3], 16) / 255.0
-            g = int(hex_color[3:5], 16) / 255.0
-            b = int(hex_color[5:7], 16) / 255.0
-
-            # Convert RGB → HSV
-            h, s, v = colorsys.rgb_to_hsv(r, g, b)
-
-            # Artistic tweaks:
-            h = (h + 0.02) % 1.0  # tiny hue shift (warmer or cooler shadow)
-            s = min(s * 1.1, 1.0)  # slightly more saturated
-            v = max(v * (1 - shadow_strength), 0)  # darker but not dead
-
-            # Convert back → RGB
-            r, g, b = colorsys.hsv_to_rgb(h, s, v)
-            return f"#{int(r*255):02x}{int(g*255):02x}{int(b*255):02x}"
-        
-        import colorsys
-        """
-        Return a warmer and richer version of the given hex color.
-        warmth: how much to shift hue toward red/orange (0–1 fraction of hue circle)
-        richness: how much to increase saturation
-        dim: how much to slightly lower brightness (value)
-        """
-        # Convert from hex to RGB [0–1]
-        hex_color = hex_color.lstrip('#')
-        r, g, b = tuple(int(hex_color[i:i+2], 16)/255 for i in (0, 2, 4))
-
-        # Convert to HSV
-        h, s, v = colorsys.rgb_to_hsv(r, g, b)
-
-        # Shift hue toward red/orange
-        h = (h - warmth) % 1.0
-        # Boost saturation
-        s = min(1.0, s + richness)
-        # Slightly lower brightness for depth
-        v = max(0.0, v - dim)
-
-        # Convert back to RGB
-        r, g, b = colorsys.hsv_to_rgb(h, s, v)
-        t = darken_color1(f"#{int(r*255):02x}{int(g*255):02x}{int(b*255):02x}")
-        return t
 
 if __name__ == "__main__":
-    import tkinter as tk
-    from tkinter import ttk
-
     root = tk.Tk()
     root.title("Main Window")
     root.geometry("600x600")
