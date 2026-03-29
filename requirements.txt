@@ -1,11 +1,7 @@
 pillow
 pyvips
 python-vlc
-imageio
-imageio-ffmpeg
 av
-opencv-python
-pymediainfo
 numpy
 psutil
 natsort
@@ -15,7 +11,6 @@ ultralytics
 torch
 torchvision
 faiss-cpu
-
 
 #pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu130
 #or probably one your gpu supports?
