@@ -9,6 +9,7 @@ os.add_dll_directory(vipsbin)
 if os.path.isdir(vipsbin): os.add_dll_directory(vipsbin)
 
 # get rid of menu bar, VLC style, PURPLE theme, Anim debug colors, font change to dest buttons, UNDO IN DESTW
+# should get rid of opencv and use something else. Cuts the filesize to half lol!
 
 # rename this to sessionmanager/
 class Imagefile:
@@ -235,8 +236,8 @@ class SortImages:
 
         save = {
             "paths": {
-                "source": source,
-                "destination": destination,
+                "source": source.strip(),
+                "destination": destination.strip(),
                 "lastsession": gui.lastsession,
                 "exclude": self.exclude,
                 "categories": self.gui.categories,
@@ -282,7 +283,8 @@ class SortImages:
     def savesession(self):
         start = perf_counter()
         if not self.assigned: return
-        savelocation = os.path.join(self.script_dir, gui.lastsession or "_last_session.json")
+        savelocation = gui.lastsession or os.path.join(self.script_dir, "_last_session.json")
+
         if not savelocation: return
 
         colors = {}
@@ -296,6 +298,7 @@ class SortImages:
         try:
             with open(savelocation, "w+") as json_file:
                 json.dump(save, json_file, indent=4)
+                gui.lastsession = savelocation
         except Exception as e:
             print(("Failed to save session:", e))
         
@@ -306,6 +309,7 @@ class SortImages:
 
         if gui.session_entry_field:
             lastsession = gui.session_entry_field.get()
+            if not lastsession: return
             sessionpath = os.path.normpath(os.path.join(self.script_dir, lastsession))
             gui.lastsession = lastsession if os.path.isfile(sessionpath) else gui.lastsession
         
@@ -387,8 +391,12 @@ class SortImages:
         
         if gui.session_entry_field:
             lastsession = gui.session_entry_field.get()
-            sessionpath = os.path.normpath(os.path.join(self.script_dir, lastsession))
-            gui.lastsession = lastsession if os.path.isfile(sessionpath) else gui.lastsession
+            if not lastsession or lastsession == "No last Session": lastsession = "_last_session.json"
+            if "/" not in lastsession and "\\" not in lastsession: # just name
+                sessionpath = os.path.normpath(os.path.join(self.script_dir, lastsession))
+            else:
+                sessionpath = lastsession
+            gui.lastsession = sessionpath or gui.lastsession
         
         bad = False
         for ref, entry in (("src", gui.source_entry_field), ("dest", gui.destination_entry_field)):
@@ -699,25 +707,35 @@ class SortImages:
                     # Replace the original list
                     self.imagelist[:] = combined
                 case "dimensions":
+                    from PIL import Image
                     for obj in self.imagelist:
                         if obj.dimensions == (-2, 0.0):
-                            from PIL import Image
-                            from imageio import get_reader # 130 ms
                             if obj.ext in ("mp4", "webm", "mkv", "m4v", "mov"):
+                                import av
                                 try:
-                                    reader = None
-                                    reader = get_reader(obj.path)
-                                    pil_img = Image.fromarray(reader.get_data(0))
-                                    w, h = pil_img.size
-                                    ratio = w/h # ratio
-                                    if w == h: orientation = 0.0
-                                    elif w < h: orientation = -1.0
-                                    else: orientation = 1.0
+                                    container = None
+                                    container = av.open(obj.path)
+                                    
+                                    video = container.streams.video[0]
+                                    
+                                    w = video.width
+                                    h = video.height
+                                    
+                                    ratio = w / h
+                                    if w == h: 
+                                        orientation = 0.0
+                                    elif w < h: 
+                                        orientation = -1.0
+                                    else: 
+                                        orientation = 1.0
+                                        
                                     obj.dimensions = (orientation, ratio)
+                                
                                 except Exception as e:
                                     print(f"Couldn't read: {obj.name} : Error: {e}")
                                 finally:
-                                    if reader: reader.close()
+                                    if container:
+                                        container.close()
                             else:
                                 try:
                                     with Image.open(obj.path) as pil_img:
@@ -751,8 +769,7 @@ class SortImages:
         after_tasks()
 
     def reorder_as_nearest1(self, imagefiles, reverse=False): # imagegrid should do this
-        import cv2
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from concurrent.futures import ThreadPoolExecutor
         import os
         from time import perf_counter
 
@@ -763,27 +780,116 @@ class SortImages:
         # We sort by the file name without extension to ensure the same starting point.
         test = sorted(imagefiles, key=lambda x: os.path.basename(x.path).rsplit(".", 1)[0])
 
-        def extract_logic_exact(obj):
-            """Replicates extract_hist_features logic exactly using cv2.imread."""
+        import numpy as np
+        from PIL import Image
+        from imagegrid import ImageGrid
+        def gen_thumb(obj, size, cache_dir): # session just calls this for displayedlist  
+            interp = ImageGrid.ThumbManager.av.video.reformatter.Interpolation.AREA
+            THUMB_FORMAT = self.THUMB_FORMAT
+
+            if not obj.id: obj.gen_id()
+
+            pil_img = None
+            failed = False
+
+            if cache_dir:
+                thumbnail_path = os.path.join(cache_dir, f"{obj.id}{THUMB_FORMAT}")
+                
+            if cache_dir and os.path.exists(thumbnail_path): # default and train will have cache_dir
+                try:
+                    thumb = None
+                    with ImageGrid.ThumbManager.Image.open(thumbnail_path) as pil_img: # pil is faster here.
+                        pil_img.load()
+                        obj.thumbnail = thumbnail_path
+                    return pil_img
+                except Exception as e:
+                    print(f"Pillows couldn't load thumbnail from cache: {obj.name} : Error: {e}.")
+                    failed = True
+
+            vips_used = False
+            av_formats = {"webm", "mp4", "mkv", "m4v", "mov", "gif"}
+            if obj.ext in av_formats: #Webm, mp4
+                pix_fmt = 'rgba' if any(f in obj.ext for f in ["webp", "gif"]) else 'rgb24'
+                container = None
+                try:
+                    container = ImageGrid.ThumbManager.av.open(obj.path)
+                    stream = container.streams.video[0]
+                    w, h = stream.width, stream.height
+                    max_size = 256
+                    scale = max_size / max(w, h)
+                    new_w = int(w * scale)
+                    new_h = int(h * scale)
+
+                    for frame in container.decode(stream):
+                        resized_frame = frame.reformat(width=new_w, height=new_h, interpolation=interp, format=pix_fmt)
+                        pil_img = resized_frame.to_image()
+                        pil_img.save(thumbnail_path, format=THUMB_FORMAT[1:], quality=100)
+                        obj.thumbnail = thumbnail_path
+                        return pil_img
+                        break
+                except Exception as e:
+                    print(f"PyAV thumbnail error for {obj.name}: {e}")
+                    failed = True
+                finally:
+                    if container:
+                        container.close()
+            else:
+                try:
+                    vips_img = ImageGrid.ThumbManager.pyvips.Image.thumbnail(obj.path, size)
+                    buffer = vips_img.write_to_memory()
+                    pil_format = self.get_mode(vips_img)
+                    pil_img =  ImageGrid.ThumbManager.Image.frombytes(pil_format, (vips_img.width, vips_img.height), buffer, "raw")
+                    vips_used = True
+                except Exception as e: # Pillow fallback
+                    print(f"Pyvips couldn't create thumbnail: {obj.name} : Error: {e}.")
+                    failed = True
+                if not vips_used or failed:
+                    try:
+                        with ImageGrid.ThumbManager.Image.open(obj.path) as pil_img:
+                            pil_img.thumbnail((size, size))
+                    except Exception as e:
+                        print(f"Pillows couldn't create thumbnail, either: {obj.name} : Error: {e}")
+                        failed = True
+
+            if not pil_img: return
+
+            if pil_img.mode != "RGBA": pil_img = pil_img.convert("RGBA")
+
+            # save it to cache if we can
+            if cache_dir: # default and train
+                pil_img.save(thumbnail_path, format=THUMB_FORMAT[1:], quality=100)
+                thumb = None
+            obj.thumbnail = thumbnail_path
+            return pil_img
+            
+        def extract_features_pillow(obj): # this could actually load and generate the thumbnail proper.
             try:
-                # We use obj.path to get the raw file path, bypassing gen_thumb/PyVips
-                cv_img = cv2.imread(obj.path)
-                if cv_img is None:
-                    return None, None
+                # Load and convert to HSV using Pillow
+                img = gen_thumb(obj, self.gui.thumbnailsize, self.data_dir).convert('HSV')
+                img_arr = np.array(img)
+                
+                # Calculate 3D Histogram: 8 bins per channel
+                # img_arr shape is (H, W, 3)
+                h, s, v = img_arr[:,:,0], img_arr[:,:,1], img_arr[:,:,2]
+                
+                # Define bins (8 bins each)
+                h_bins = np.linspace(0, 180, 9)
+                s_bins = np.linspace(0, 256, 9)
+                v_bins = np.linspace(0, 256, 9)
+                hist, _ = np.histogramdd((h.ravel(), s.ravel(), v.ravel()), bins=(h_bins, s_bins, v_bins))
 
-                # 1. BGR to HSV (OpenCV imread default)
-                cv_img = cv2.cvtColor(cv_img, cv2.COLOR_BGR2HSV)
-
-                # 2. 3D Histogram with exact ranges: H(0-180), S(0-256), V(0-256)
-                #hist = cv2.calcHist([cv_img], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256])
-                hist = cv2.calcHist([cv_img], [0, 1, 2], None, [8, 8, 8], [0, 180, 0, 256, 0, 256])
-
-                # 3. Normalize and Flatten
-                cv2.normalize(hist, hist)
+                # old new above
+                #bins = [np.linspace(0, 255, 9) for _ in range(3)]
+                #hist, _ = np.histogramdd((h.ravel(), s.ravel(), v.ravel()), bins=bins)
+                
+                # Normalize
+                hist = hist.astype(np.float32)
+                sum_hist = np.sum(hist)
+                if sum_hist > 0:
+                    hist /= sum_hist
+                    
                 return hist.flatten(), obj
-
             except Exception as e:
-                print(f"Skipping {os.path.basename(obj.path)} due to error: {e}")
                 return None, None
 
         # 2. FEATURE EXTRACTION
@@ -792,7 +898,7 @@ class SortImages:
 
         # Using ThreadPool to maintain speed while using cv2.imread
         with ThreadPoolExecutor(max_workers=max(1, self.threads - 1)) as executor:
-            results = list(executor.map(extract_logic_exact, test))
+            results = list(executor.map(extract_features_pillow, test))
 
         for feat, obj in results:
             if feat is not None:
@@ -810,20 +916,27 @@ class SortImages:
         current_idx = unvisited_indices.pop(0)
         order = [current_idx]
 
+        def bhattacharyya_dist(h1, h2):
+            # 1. Calculate the Bhattacharyya Coefficient (overlap)
+            # Both h1 and h2 must be normalized so sum(h) == 1
+            bc = np.sum(np.sqrt(h1 * h2))
+            
+            # 2. Return the Hellinger distance (what OpenCV calls BHATTACHARYYA)
+            # We use max(0, ...) to prevent tiny floating point errors from becoming negative
+            return np.sqrt(max(0, 1 - bc))
+
         while unvisited_indices:
             best_match_local_idx = -1
             min_dist = float('inf')
-
             current_feat = features_list[current_idx]
 
             for i, cand_idx in enumerate(unvisited_indices):
-                # BHATTACHARYYA distance: 0 is perfect match
-                dist = cv2.compareHist(current_feat, features_list[cand_idx], cv2.HISTCMP_BHATTACHARYYA)
+                dist = bhattacharyya_dist(current_feat, features_list[cand_idx])
 
                 if dist < min_dist:
                     min_dist = dist
                     best_match_local_idx = i
-
+                    
             # current = best_match
             current_idx = unvisited_indices.pop(best_match_local_idx)
             order.append(current_idx)

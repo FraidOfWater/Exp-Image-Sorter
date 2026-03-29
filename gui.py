@@ -240,7 +240,6 @@ class GUIManager(tk.Tk):
         # Menus
         menu_bar = tk.Menu(self.master)
         file_menu = tk.Menu(menu_bar, tearoff=tk.OFF)
-        view_menu = tk.Menu(menu_bar, tearoff=tk.OFF)
         order_menu = tk.Menu(menu_bar, tearoff=tk.OFF)
         category_menu = tk.Menu(menu_bar, tearoff=tk.OFF)
         theme_menu = tk.Menu(menu_bar, tearoff=tk.OFF)
@@ -290,20 +289,7 @@ class GUIManager(tk.Tk):
                 order_menu.entryconfig("Confidence", state="disabled")
         order_menu.add_checkbutton(label="Group by Prediction", variable=self.prediction, command=test)
 
-        def toggle_statusbar():
-            if not self.do_debug.get():
-                self.statusbar.grid_forget()
-                if self.Image_frame:
-                    self.Image_frame.mouse_double_click_left()
-            else:
-                self.statusbar.grid(row=1, column=0, sticky="ew")
-                if self.Image_frame:
-                    self.Image_frame.mouse_double_click_left()
 
-        view_menu.add_checkbutton(label="Statusbar", variable=self.do_debug, command=toggle_statusbar)
-        view_menu.add_separator()
-        view_menu.add_separator()
-        view_menu.add_command(label="Settings")
 
         # Category
         def load_module():
@@ -418,7 +404,7 @@ class GUIManager(tk.Tk):
         self.source_entry_field.xview_moveto(1.0)
         self.destination_entry_field.insert(0, self.destination_folder or "Right click to Select Destination Folder")
         self.destination_entry_field.xview_moveto(1.0)
-        self.session_entry_field.insert(0, self.lastsession or "No last Session")
+        self.session_entry_field.insert(0, os.path.basename(self.lastsession) or "No last Session")
         self.session_entry_field.xview_moveto(1.0)
 
         new_session_b = tk.Button(self.first_frame, text="New Session", command=lambda: self.after_idle(self.fileManager.validate))
@@ -470,12 +456,8 @@ class GUIManager(tk.Tk):
         clear_all_b = tk.Button(frame, text="Unselect", command=clear)
         move_all_b = tk.Button(self.first_frame, text="Move All", command=self.fileManager.moveall)
 
-        view_options = ["Unassigned", "Assigned", "Moved"]
         self.current_view = tk.StringVar(value="Unassigned")
         self.current_view.trace_add("write", lambda *args: self.current_view_changed())
-
-        view_menu = tk.OptionMenu(frame, self.current_view, *view_options)
-        view_menu.config(highlightthickness=0)
 
         from destinations import FolderExplorer
         self.folder_explorer = FolderExplorer(self.leftui, self.hotkeys)
@@ -486,7 +468,6 @@ class GUIManager(tk.Tk):
         frame.columnconfigure(0, weight=8)
         frame.columnconfigure(1, weight=1)
 
-        view_menu.grid(row=0, column=0, sticky = "EW")
         clear_all_b.grid(row=0, column=1, sticky="EW")
 
         move_all_b.grid(row=2, column=0, sticky="EW")

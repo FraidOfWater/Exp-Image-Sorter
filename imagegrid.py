@@ -599,7 +599,6 @@ class ImageGrid(tk.Frame):
                     frame_count = min(max_frames, round(duration * sampling_fps))
                     return sampling_fps, frame_count
                 def get_fps_and_duration(path: str):
-                    # Replaces pymediainfo entirely, saving ~15ms and redundant IO
                     with ImageGrid.ThumbManager.av.open(path) as container:
                         stream = container.streams.video[0]
                         fps = float(stream.average_rate) if stream.average_rate else 24.0
