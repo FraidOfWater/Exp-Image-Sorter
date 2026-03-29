@@ -12,6 +12,8 @@ MIN_VARIATION = 30
 BD = 2
 RELIEF = "flat"
 
+# color dropper icon
+
 """def get_method_a_color(folder_path):
     import pyvips
     import numpy as np
@@ -147,11 +149,13 @@ class FolderExplorer(ttk.Frame):
         self.reload_btn = tk.Button(controls,image=self.icon_reload,bd=BD,relief=RELIEF,bg="#555",command=self.clear_all_folders)
         self.expand_btn = tk.Button(controls,image=self.icon_expand,bd=BD,relief=RELIEF,bg="#555",command=self.toggle_expand_collapse_all)
         self.recolor_btn = tk.Button(controls, image=self.icon_reload, bd=BD, relief=RELIEF, bg="#555", command=self.recolor_buttons_to_contents)
+        self.new_folder_btn = tk.Button(controls, image=self.icon_reload, bd=BD, relief=RELIEF, bg="#555", command=self.create_new_folder)
         
         controls.pack(fill="x", padx=1, pady=0)
         self.reload_btn.pack(side="left", padx=(0, 4))
         self.expand_btn.pack(side="left")
         self.recolor_btn.pack(side="left", padx=(4, 0))
+        self.new_folder_btn.pack(side="left", padx=(4, 0))
 
         def _icon_hover(btn, on=True):
             btn.config(bg="#555" if on else self.winfo_toplevel().d_theme["main_colour"])
@@ -616,9 +620,11 @@ class FolderExplorer(ttk.Frame):
         if self.icon_expand == None and self.icon_collapse == None: self.load_svg_rotated(os.path.join(self.assets_path, "icon_expand_collapse.svg"))
         if self.icon_reload == None:
             self.icon_reload = self.load_svg(os.path.join(self.assets_path, "icon_reload.svg"))
-            self.icon_inspect = self.load_svg(os.path.join(self.assets_path, "icon_inspect.svg"))
+            self.icon_color_dropper = self.load_svg(os.path.join(self.assets_path, "icon_color_dropper.svg"))
+            self.icon_plus = self.load_svg(os.path.join(self.assets_path, "icon_plus.svg"))
             self.reload_btn.config(image=self.icon_reload)
-            self.recolor_btn.config(image=self.icon_inspect)
+            self.recolor_btn.config(image=self.icon_color_dropper)
+            self.new_folder_btn.config(image=self.icon_plus)
 
         default_c = self.randomColor() if folder_path != self.winfo_toplevel().fileManager.trash_dir else "#888BF8"
         darkened_c = self.darken_color(default_c)
@@ -657,15 +663,20 @@ class FolderExplorer(ttk.Frame):
             else: btn.bind_all(f"<KeyPress-{hotkey}>", lambda e, btn=btn: self.on_hotkey(e, btn))
         self.update()
 
-    def create_new_folder(self, event):
-        if not self.buttons or not (event.state & 0x0002) != 0:
+    def create_new_folder(self, event=None):
+        if not event:
             parent_path = self.root_path
             parent_depth = 0
-            index = 0
+            index = len(self.buttons)-1
         else:
-            parent_path = self.buttons[self.selected_index][1]
-            parent_depth = self.buttons[self.selected_index][2]
-            index = self.selected_index + 1
+            if not self.buttons or not (event.state & 0x0002) != 0:
+                parent_path = self.root_path
+                parent_depth = 0
+                index = 0
+            else:
+                parent_path = self.buttons[self.selected_index][1]
+                parent_depth = self.buttons[self.selected_index][2]
+                index = self.selected_index + 1
         name = simpledialog.askstring("New Folder", "Enter folder name:", parent=self)
         if not name: return
         new_folder_path = os.path.join(parent_path, name)

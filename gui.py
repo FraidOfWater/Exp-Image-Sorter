@@ -456,8 +456,12 @@ class GUIManager(tk.Tk):
         clear_all_b = tk.Button(frame, text="Unselect", command=clear)
         move_all_b = tk.Button(self.first_frame, text="Move All", command=self.fileManager.moveall)
 
+        view_options = ["Unassigned", "Assigned", "Moved"]
         self.current_view = tk.StringVar(value="Unassigned")
         self.current_view.trace_add("write", lambda *args: self.current_view_changed())
+
+        view_menu = tk.OptionMenu(frame, self.current_view, *view_options)
+        view_menu.config(highlightthickness=0)
 
         from destinations import FolderExplorer
         self.folder_explorer = FolderExplorer(self.leftui, self.hotkeys)
@@ -467,7 +471,8 @@ class GUIManager(tk.Tk):
 
         frame.columnconfigure(0, weight=8)
         frame.columnconfigure(1, weight=1)
-
+        
+        view_menu.grid(row=0, column=0, sticky = "EW")
         clear_all_b.grid(row=0, column=1, sticky="EW")
 
         move_all_b.grid(row=2, column=0, sticky="EW")
