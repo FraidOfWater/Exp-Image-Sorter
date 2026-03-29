@@ -1,14 +1,15 @@
 import os, tkinter as tk
 from tkinter import ttk
 from tkinter.ttk import Panedwindow
+
 class Bindhandler:
     def __init__(self, gui):
         "Binds that touch multiple modules"
         self.gui = gui
         self.fileManager = gui.fileManager
         self.window_focused = "GRID"
-        from search_overlay import ImageViewer
-        self.search_widget = ImageViewer(self)
+        from search_overlay import SearchOverlay
+        self.search_widget = SearchOverlay(self)
 
     def arrow_key(self, event):
         if isinstance(event.widget, tk.Entry): return
@@ -84,21 +85,35 @@ class Bindhandler:
                 old_index = options.index(old)
                 if old_index+1 >= len(options): return options[0]
                 else: return options[old_index+1]
-            if self.gui.Image_frame.canvas == event.widget:
-                old = self.gui.Image_frame.statusbar_mode.get()
-                self.gui.Image_frame.statusbar_mode.set(get_next(old))
-            elif self.gui.second_window_viewer:
+            if isinstance(event.widget.winfo_toplevel(), tk.Toplevel):
                 old = self.gui.second_window_viewer.statusbar_mode.get()
                 self.gui.second_window_viewer.statusbar_mode.set(get_next(old))
+            else:
+                old = self.gui.Image_frame.statusbar_mode.get()
+                self.gui.Image_frame.statusbar_mode.set(get_next(old))
+        def helper6():
+            frame = self.gui.Image_frame if self.gui.dock_view.get() else self.gui.second_window_viewer
+            if frame:
+                frame.show_ram.set(not frame.show_ram.get())
+
+        def helper7():
+            frame = self.gui.Image_frame if self.gui.dock_view.get() else self.gui.second_window_viewer
+            frame.menu_reveal_in_file_explorer_clicked()
 
         checkmark = "✓ " if self.gui.show_next.get() else "  "
+        frame = self.gui.Image_frame if self.gui.dock_view.get() else self.gui.second_window_viewer
+        checkmark_show_ram = "✓ " if frame.show_ram.get() else "  "
         options = [("Detach" if is_middle else "Dock", helper)]
 
         if is_middle:
             options.append(("Switch Sides", helper2))
-        options.append((f"Cycle statusbar", helper5))
         options.append((f"{checkmark}Show Next", helper3))
+        options.append((f"Cycle statusbar", helper5))
+        options.append((f"{checkmark_show_ram}Show RAM", helper6))
+        options.append((f"Open in Explorer", helper7))
+        
 
+        y += 10
         for i, (label, cmd) in enumerate(options):
             btn_y = y + (i * btn_h)
             row_tag = f"row_{i}"
@@ -115,113 +130,79 @@ class Bindhandler:
                 canvas.itemconfig(bt, fill=BG_NORMAL)
                 canvas.config(cursor="")
 
+            def on_delete(e, bt=bg_tag, c=cmd):
+                canvas.config(cursor="")
+                canvas.delete("canvas_menu")
+                c()
+
             canvas.tag_bind(row_tag, "<Enter>", on_enter)
             canvas.tag_bind(row_tag, "<Leave>", on_leave)
-            canvas.tag_bind(row_tag, "<Button-1>", lambda e, c=cmd: [canvas.delete("canvas_menu"), c()])
+            canvas.tag_bind(row_tag, "<Button-1>", on_delete)
 
 class GUIManager(tk.Tk):
+    fileManager = None
     Image_frame = None
     second_window_viewer = None
-    focused_on_secondwindow = False
-    last_model = None
     displayed_obj = None
+    model_path = None
+    last_model = None
     last_displayed = None
-    def __init__(self, jprefs, jthemes) -> None:
+    first_render = True
+    def __init__(self, jprefs: dict={}, jthemes: dict={}) -> None:
         super().__init__()
-        self.fileManager = None
-        self.train_thread = None
-        self.train_status_var = tk.StringVar(value="")
-        self.model_path = None
-        self.selected_btn = None
-        self.first_render = True
-        "INITIALIZE USING PREFS: THEME"
-        self.jprefs = jprefs
-        self.themes = jthemes
-        default = self.themes.get("Midnight", {})
-        self.d_theme = default
+        self.jprefs, self.themes = jprefs, jthemes
 
-        "INITIALIZE USING PREFS: SETTINGS"
-        "VALIDATION"
-        expected_keys = ["paths", "user", "technical", "qui", "window_settings", "viewer"]
-        missing_keys = [key for key in expected_keys if jprefs and key not in jprefs]
-        if missing_keys: print(f"Missing a key(s) in prefs: {missing_keys}, defaults will be used.")
-        if jprefs == None: jprefs = {}
-        paths = jprefs.get("paths", {})
+        paths = jprefs.get("paths", {}) # No prefs file, uses "", etc as default.
+        user = jprefs.get("user", {})
+        technical = jprefs.get("technical", {})
+        self.viewer_prefs = jprefs.get("viewer", {})
+
         self.source_folder = paths.get("source", "")
         self.destination_folder = paths.get("destination", "")
         self.lastsession = paths.get("lastsession", "")
         self.categories = paths.get("categories", [])
         self.excludes = paths.get("excludes", [])
         self.model_path = paths.get("model", None)
+        
+        self.thumbnailsize = int(technical.get("thumbnailsize", 256))
+        self.squares_per_page_intvar = tk.IntVar(value=int(technical.get("squares_per_page", 500)))
+        self.hotkeys = technical.get("hotkeys", "123456qwerty7890uiopasdfghjklzxcvbnm")
+        self.do_debug = tk.BooleanVar(value=technical.get("do_debug", False))
 
-        user = jprefs.get("user", {})
-        self.thumbnailsize = int(user.get("thumbnailsize", 256))
-        self.prediction_thumbsize = int(user.get("prediction_thumbsize", 224))
-        self.hotkeys = user.get("hotkeys", "123456qwerty7890uiopasdfghjklzxcvbnm")
-        self.auto_load = bool(user.get("auto_load", True))
-        self.do_debug = tk.BooleanVar(value=user.get("do_debug", False))
+        self.theme = tk.StringVar(value=user.get("theme", "Midnight"))
+        self.d_theme = self.themes[self.theme.get()] 
+        name = user.get("display_order")
+        self.display_order = tk.StringVar(value=name if name in ("Smart", "Filename", "Date", "Type", "Size", "Dimensions", "Histogram") else "Smart")
+        self.show_next = tk.BooleanVar(value=bool(user.get("show_next", True)))
+        self.dock_view = tk.BooleanVar(value=bool(user.get("dock_view", True)))
+        self.dock_side = tk.BooleanVar(value=bool(user.get("dock_side", True)))
+        self.main_geometry = user.get("main_geometry", "zoomed")
+        self.viewer_geometry = user.get("viewer_geometry", f"{int(self.winfo_screenwidth()*0.5)}x{int(self.winfo_screenheight()*0.5)}+{-8+365}+60")
+        self.destpane_geometry = user.get("destpane_geometry", f"{int(self.winfo_screenwidth()*0.5)}x{int(self.winfo_screenheight()-120)}+{-8+365}+60")
+        self.leftpane_width = int(user.get("leftpane_width", 363))
+        self.middlepane_width = int(user.get("middlepane_width", 363))
+        self.images_sorted = int(user.get("images_sorted", 0))
 
-        tech = jprefs.get("technical", {})
-        self.filter_mode = tech.get("quick_preview_filter") if tech.get("quick_preview_filter") in ["NEAREST", "BILINEAR", "BICUBIC", "LANCZOS"] else "BILINEAR"
+        viewer_defaults = { # Aliases
+            "canvas": self.d_theme["viewer_bg"],
+            "statusbar": self.d_theme["main_colour"],
+            "statusbar_divider": self.d_theme.get("main_accent", self.d_theme["main_colour"]),
+            "button": self.d_theme["button_colour"],
+            "active_button": self.d_theme["button_colour_when_pressed"],
+            "text": self.d_theme["field_text_colour"]
+        }
+        self.viewer_prefs["colors"] = self.viewer_prefs.get("colors", viewer_defaults)
 
-        gui = jprefs.get("qui", {}) # should be spelled gui XD
-        self.squares_per_page_intvar = tk.IntVar(value=int(gui.get("squares_per_page", 500)))
-        a = gui.get("display_order")
-        if a not in ("Smart", "Filename", "Date", "Type", "Size", "Dimensions", "Nearest", "Histogram"):
-            a = "Smart"
-        self.display_order = tk.StringVar(value=a)
-
-        self.show_next = tk.BooleanVar(value=bool(gui.get("show_next", True)))
-        self.dock_view = tk.BooleanVar(value=bool(gui.get("dock_view", True)))
-        self.dock_side = tk.BooleanVar(value=bool(gui.get("dock_side", True)))
-        self.theme = tk.StringVar(value=gui.get("theme", "Midnight"))
-        self.d_theme = self.themes[self.theme.get()]
-        self.volume = int(gui.get("volume", 50))
-
-        w = jprefs.get("window_settings", {})
-        self.main_geometry = w.get("main_geometry", "zoomed")
-        self.viewer_geometry = w.get("viewer_geometry", f"{int(self.winfo_screenwidth()*0.5)}x{int(self.winfo_screenheight()*0.5)}+{-8+365}+60")
-        self.destpane_geometry = w.get("destpane_geometry", f"{int(self.winfo_screenwidth()*0.5)}x{int(self.winfo_screenheight()-120)}+{-8+365}+60")
-        self.leftpane_width = int(w.get("leftpane_width", 363))
-        self.middlepane_width = int(w.get("middlepane_width", 363))
-        self.images_sorted = int(w.get("images_sorted", 0))
-        self.images_sorted_strvar = tk.StringVar(value=f"Sorted: {self.images_sorted}") # Sorted: 1953
-        self.winfo_toplevel().title(f"")
-
-        self.viewer_prefs = jprefs.get("viewer", {})
-        self.viewer_prefs["colors"] = self.viewer_prefs.get("colors", None) or {
-                "canvas": self.d_theme["viewer_bg"],
-                "statusbar": self.d_theme["main_colour"],
-                "statusbar_divider": self.d_theme.get("main_accent", self.d_theme["main_colour"]),
-                "button": self.d_theme["button_colour"],
-                "active_button": self.d_theme["button_colour_when_pressed"],
-                "text": self.d_theme["field_text_colour"]
-                }
-
-        if self.main_geometry == "zoomed": self.state("zoomed")
-        else: self.geometry(self.main_geometry)
-        self.columnconfigure(0, weight=1)
-        self.rowconfigure(0, weight=1)
-        self.protocol("WM_DELETE_WINDOW", self.closeprogram)
-        self.current_ram_strvar = tk.StringVar(value="RAM: 0 MB") # RAM: 95.34 MB
         self.animation_stats_var = tk.StringVar(value="Anim: 0/100") # Anim: displayedlist with frames/displayedlist with framecount/(queue)
         self.resource_limiter_var = tk.StringVar(value="0/1000") # Frames: frames + frames_dest / max
         self.frame_gen_queue_var = tk.StringVar(value="Q:")
+        self.train_status_var = tk.StringVar(value="")
 
-    def filedialog(self, entry, event=None, type1=None):
-        from tkinter import filedialog as tkFileDialog
-        match type1:
-            case "session": path = tkFileDialog.askopenfile(initialdir=os.getcwd(), title="Select Session Data File", filetypes=(("JavaScript Object Notation", "*.json"),))
-            case "src": path = tkFileDialog.askdirectory(initialdir=self.source_entry_field.get(), title="Select Source folder")
-            case "dst": path = tkFileDialog.askdirectory(initialdir=self.destination_entry_field.get(), title="Select Destination folder")
-        if path == "" or path == None: return
-        entry.delete(0, tk.END)
-        entry.insert(0, path.name if type1 == "session" else path)
-        entry.xview_moveto(1.0)
-        if type1 == "dst" and hasattr(self, "folder_explorer") and self.folder_explorer:
-            self.folder_explorer.set_view(path)
-            self.fileManager.validate("button")
-        elif type1 == "src": self.fileManager.validate("button")
+        self.winfo_toplevel().title(f"")
+        self.state("zoomed") if self.main_geometry == "zoomed" else self.geometry(self.main_geometry)
+        self.protocol("WM_DELETE_WINDOW", self.closeprogram)
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(0, weight=1)
 
     def initialize(self):
         self.bindhandler = Bindhandler(self)
@@ -243,14 +224,12 @@ class GUIManager(tk.Tk):
         self.grid_rowconfigure(1, weight=0)
         self.grid_columnconfigure(0, weight=1)
 
-        self.sorted_label = tk.Label(statusbar, textvariable=self.images_sorted_strvar, bg=statusbar_bg, fg=txt_color, anchor="e", padx=5)
         self.animation_stats_label = tk.Label(statusbar, textvariable=self.animation_stats_var, bg=statusbar_bg, fg=txt_color, anchor="e", padx=5)
         self.resource_limiter = tk.Label(statusbar, textvariable=self.resource_limiter_var, bg=statusbar_bg, fg=txt_color, anchor="e", padx=5)
         self.frame_gen_queue_label = tk.Label(statusbar, textvariable=self.frame_gen_queue_var, bg=statusbar_bg, fg=txt_color, anchor="e", padx=5)
-        self.ram_label = tk.Label(statusbar, textvariable=self.current_ram_strvar, bg=statusbar_bg, fg=txt_color, anchor="e", padx=5)
+        self.ram_label = tk.Label(statusbar, text="RAM: 0.0 MB", bg=statusbar_bg, fg=txt_color, anchor="e", padx=5)
         self.train_status = tk.Label(statusbar, textvariable=self.train_status_var, bg=statusbar_bg , fg=txt_color, anchor="w", padx=10)
 
-        self.sorted_label.pack(side="left", fill="y")
         self.train_status.pack(side="right", fill="y")
         if self.do_debug.get():
             self.animation_stats_label.pack(side="left", fill="y")
@@ -375,13 +354,28 @@ class GUIManager(tk.Tk):
 
         canvas = tk.Canvas(middlepane_frame, bg=self.d_theme["viewer_bg"],highlightthickness=0,width=self.middlepane_width,height=600)
         canvas.place(relx=0.5, rely=0.5, anchor="center")
+        self.middlepane_canvas = canvas
+        canvas.bind("<Button-1>", lambda e: self.focus())
 
         ascii_art = """"""
-        canvas.create_text(self.middlepane_width//2+100, 300,text=ascii_art,fill="grey",font=("Consolas", 4),justify="center")
-        canvas.create_text(self.middlepane_width//2, 300,text=help_text,fill="white",font=font_style,justify="left")
+        self.ascii_art_id = canvas.create_text(self.middlepane_width, 300, text=ascii_art,fill="grey",font=("Consolas", 4),justify="center")
+        self.help_text_id = canvas.create_text(self.middlepane_width//2, 300, text=help_text,fill="white",font=font_style, anchor="center", justify="left")
+        canvas.pack(fill="both", expand=True)
 
+        def redraw(event):
+            w = event.width
+            h = event.height
+            
+            # Position both in the center of the current canvas area
+            canvas.coords(self.help_text_id, w // 2, h // 2)
+            canvas.coords(self.ascii_art_id, (w // 2) + 100, h // 2)
+            
+            # CRITICAL: If the text is larger than the canvas, 
+            # this creates a scrollable area so it never gets "cut off"
+            canvas.config(scrollregion=canvas.bbox("all"))
+
+        canvas.bind("<Configure>", redraw)
         self.middle_label = canvas
-        self.destgrid = None
         leftui.grid_propagate(False)
         self.leftui = leftui
         leftui.bind("<Button-1>", lambda e: self.focus())
@@ -412,6 +406,9 @@ class GUIManager(tk.Tk):
         self.source_entry_field = tk.Entry(self.first_frame, text="")
         self.destination_entry_field = tk.Entry(self.first_frame, text="")
         self.session_entry_field = tk.Entry(self.first_frame)
+
+        self.source_entry_field.bind("<Return>", lambda e: self.fileManager.validate())
+        self.destination_entry_field.bind("<Return>", lambda e: self.fileManager.validate())
 
         s_b = tk.Button(self.first_frame, text="Source", command=lambda: self.filedialog(self.source_entry_field, type="src"))
         d_b = tk.Button(self.first_frame, text="Destination", command=lambda: self.filedialog(self.destination_entry_field, type="dst"))
@@ -452,7 +449,7 @@ class GUIManager(tk.Tk):
 
     def guisetup(self):
         x = self.bindhandler
-
+        self.toppane.forget(self.middlepane_frame) if not self.dock_view.get() else None
         action_map = {"<Up>": x.arrow_key, "<Down>": x.arrow_key, "<Left>": x.arrow_key, "<Right>": x.arrow_key, "<Return>": x.enter, "<Control-z>": x.undo, "<Control-Z>": x.undo}
         for name, func in action_map.items():
             self.bind_all(f"{name}", func)
@@ -471,7 +468,6 @@ class GUIManager(tk.Tk):
                     self.folder_explorer.destw.unmark_entry(x)
 
         clear_all_b = tk.Button(frame, text="Unselect", command=clear)
-
         move_all_b = tk.Button(self.first_frame, text="Move All", command=self.fileManager.moveall)
 
         view_options = ["Unassigned", "Assigned", "Moved"]
@@ -499,20 +495,48 @@ class GUIManager(tk.Tk):
         self.leftui.rowconfigure(3, weight=1)
         self.folder_explorer.grid(row=3, column=0, sticky="nsew")
 
+        self.Image_frame = None
+        self.second_window_viewer = None
+
         self.change_theme(self.theme.get())
+        
+    def filedialog(self, entry, event=None, type=None):
+        from tkinter import filedialog as tkFileDialog
+        match type:
+            case "session": path = tkFileDialog.askopenfile(initialdir=os.getcwd(), title="Select Session Data File", filetypes=(("JavaScript Object Notation", "*.json"),))
+            case "src": path = tkFileDialog.askdirectory(initialdir=self.source_entry_field.get(), title="Select Source folder")
+            case "dst": path = tkFileDialog.askdirectory(initialdir=self.destination_entry_field.get(), title="Select Destination folder")
+        if path == "" or path == None: return
+        entry.delete(0, tk.END)
+        entry.insert(0, path.name if type == "session" else os.path.normpath(path))
+        entry.xview_moveto(1.0)
+        if type == "dst" and hasattr(self, "folder_explorer") and self.folder_explorer:
+            self.folder_explorer.set_view(path)
+            self.fileManager.validate("button")
+        elif type == "src": self.fileManager.validate("button")
 
     "Navigation / options"
     def change_viewer(self):
         """Change which viewer is in use. Dock or secondary window"""
-        m_frame = self.middlepane_frame
-        toppane = self.toppane
-        imagegrid = self.imagegrid
+        from viewer import Application
+        m_frame, toppane, imagegrid = self.middlepane_frame, self.toppane, self.imagegrid, 
+        current_panes = [str(p) for p in toppane.panes()]
         if m_frame.winfo_width() > 1: self.middlepane_width = m_frame.winfo_width()
         self.displayed_obj = None
-        self.focused_on_secondwindow = False
-        current_panes = [str(p) for p in toppane.panes()]
+        self.first_render = True
+        if self.dock_view.get(): # close immediately
+            if self.second_window_viewer: # hide, reset, dont close.
+                self.displayed_obj = None
+                self.second_window_viewer.save_json()
+                if self.Image_frame:
+                    self.Image_frame.set_vals(self.second_window_viewer.savedata)
+                self.second_window_viewer.master.attributes("-alpha", 0.0)
+                self.second_window_viewer.master.withdraw()
+                self.update_idletasks()
+
         if str(m_frame) in current_panes: toppane.forget(m_frame)
         if str(imagegrid) in current_panes: toppane.forget(imagegrid)
+
         if self.dock_view.get():
             if self.dock_side.get(): # Middlepane on Left
                 toppane.add(m_frame)
@@ -520,34 +544,41 @@ class GUIManager(tk.Tk):
             else: # Middlepane on Right
                 toppane.add(imagegrid)
                 toppane.add(m_frame)
-            if self.second_window_viewer:
-                self.second_window_viewer.window_close()
-                self.second_window_viewer = None
+            toppane.update_idletasks()
+            if not self.Image_frame:
+                self.Image_frame = Application(self.middlepane_frame, savedata=self.viewer_prefs, gui=self)
+            self.Image_frame.canvas.update()
+            self.bindhandler.search_widget.new_canvas(self.Image_frame.canvas)
+            if self.bindhandler.search_widget.search_active: self.bindhandler.search_widget.draw_search_box()
             if self.imagegrid.current_selection_entry:
-                self.Image_frame.canvas.update()
-                self.bindhandler.search_widget.new_canvas(self.Image_frame.canvas)
                 self.displayimage(self.imagegrid.current_selection_entry.file)
-            if self.Image_frame:
-                self.bindhandler.search_widget.new_canvas(self.Image_frame.canvas)
-            self.bind("<Control-s>", lambda e: self.Image_frame.statusbar.set(not self.Image_frame.statusbar.get()))
-            self.bind("<Control-S>", lambda e: self.Image_frame.statusbar.set(not self.Image_frame.statusbar.get()))
+                self.Image_frame.canvas.update()
+                
+            self.bind("<Control-s>", lambda e: self.Image_frame.toggle_statusbar(True))
+            self.bind("<Control-S>", lambda e: self.Image_frame.toggle_statusbar(True))
+            self.second_window_viewer.set_image(None)
         else:
-            original = self.title().split(" -", 1)[0]
-            self.title(original)
-            try:
-                if self.Image_frame:
-                    self.Image_frame.set_image(None)
-                    self.Image_frame.save_json()
-                toppane.add(imagegrid)
-                if self.imagegrid.current_selection_entry: self.displayimage(self.imagegrid.current_selection_entry.file)
-                if self.second_window_viewer: self.bindhandler.search_widget.new_canvas(self.second_window_viewer.canvas)
-                def safe_call(event=None):
-                    if self.second_window_viewer and hasattr(self.second_window_viewer, "statusbar"):
-                        self.second_window_viewer.statusbar.set(not self.second_window_viewer.statusbar.get())
-                self.bind("<Control-s>", safe_call)
-                self.bind("<Control-S>", safe_call)
-            except Exception as e: print(f"Error in change_viewer (Window Mode): {e}")
-        toppane.update_idletasks()
+            self.title(self.title().split(" -", 1)[0])
+            if not self.second_window_viewer: 
+                self.second_window_viewer = Application(savedata=self.viewer_prefs, gui=self)
+            if self.Image_frame:
+                self.Image_frame.save_json()
+                self.second_window_viewer.set_vals(self.Image_frame.savedata)
+            
+            self.bindhandler.search_widget.new_canvas(self.second_window_viewer.canvas)
+            if self.bindhandler.search_widget.search_active: self.bindhandler.search_widget.draw_search_box()
+            if self.imagegrid.current_selection_entry: self.displayimage(self.imagegrid.current_selection_entry.file)
+            if self.second_window_viewer.master.state() not in ("normal", "zoomed"): self.second_window_viewer.master.deiconify()
+            self.second_window_viewer.master.attributes("-alpha", 1.0)
+            toppane.add(imagegrid)
+
+            self.update()
+            def safe_call(event=None):
+                if self.second_window_viewer and hasattr(self.second_window_viewer, "statusbar"):
+                    self.second_window_viewer.statusbar.set(not self.second_window_viewer.statusbar.get())
+            self.bind("<Control-s>", safe_call)
+            self.bind("<Control-S>", safe_call)
+            if self.Image_frame: self.Image_frame.set_image(None)
 
     def change_dock_side(self):
         "Change which side you want the dock"
@@ -571,7 +602,7 @@ class GUIManager(tk.Tk):
         "When view is changed, send the wanted list to the gridmanager for rendering"
         fileManager = self.fileManager
         if fileManager.first_run: return
-        fileManager.thumbs.stop_background_worker()
+        self.imagegrid.thumbs.stop_background_worker()
         selected_option = self.current_view.get()
         if selected_option == "Unassigned":
             list_to_display = []
@@ -590,201 +621,112 @@ class GUIManager(tk.Tk):
         self.imagegrid.add(list_to_display)
 
     def change_theme(self, theme_name):
-        def set_vals(theme):
-            def recursive(children, all_children={}):
-                def add_to_dict(key):
-                    if key:
-                        vals = all_children.get(key, None)
-                        if isinstance(vals, list):
-                            vals.append(value)
-                            all_children[key] = vals
-                        else:
-                            all_children[key] = [value]
+        def _apply_theme_to_children(parent_widget, theme):
+            """Recursively traverses the widget tree and applies the theme based on widget class."""
+            for child in parent_widget.winfo_children():
+                if not child.winfo_exists(): continue
 
-                for key, value in children.items():
-                    key = key.strip("!")
-                    while key and key[-1].isdigit():
-                        key = key[:-1]
-                    add_to_dict(key)
-                    if value.children != {}:
-                        recursive(value.children, all_children)
-                    """if key in ("button", "frame", "checkbutton", "canvas"):
-                        add_to_dict(key)"""
-                return all_children
+                w_class = child.winfo_class().lower()
+                match w_class:
+                    case "frame":
+                        if child != self.leftui and child.widgetName != "ttk::frame":
+                            child.configure(bg=theme["grid_background_colour"])
+                    case "button":
+                        if "!folderexplorer" not in str(child._w):
+                            child.configure(bg=theme["button_colour"], fg=theme["button_text_colour"], activebackground=theme["button_colour_when_pressed"], activeforeground=theme["button_text_colour_when_pressed"])
+                            child.bind("<Enter>", lambda e, w=child: w.config(bg=self.d_theme["button_colour_when_pressed"], fg=self.d_theme["button_text_colour_when_pressed"]))
+                            child.bind("<Leave>", lambda e, w=child: w.config(bg=self.d_theme["button_colour"], fg=self.d_theme["button_text_colour"]))
+                    case "menubutton":
+                        child.config(bg=theme["button_colour"], fg=theme["button_text_colour"],activebackground=theme["button_colour_when_pressed"], activeforeground=theme["button_text_colour_when_pressed"])
+                    case "entry":
+                        child.config(bg=theme["field_colour"], fg=theme["field_text_colour"])
+                        child.bind("<FocusIn>", lambda e, w=child: w.config(bg=self.d_theme["field_activated_colour"], fg=self.d_theme["field_text_activated_colour"]))
+                        child.bind("<FocusOut>", lambda e, w=child: w.config(bg=self.d_theme["field_colour"], fg=self.d_theme["field_text_colour"]))
+                
+                if child.winfo_children():
+                    _apply_theme_to_children(child, theme)
 
-            all_children = recursive(self.toppane.children)
+        new_theme = self.themes[theme_name]
+        self.d_theme = new_theme
 
-            "Checkboxes"
-            self.style.configure("Theme_checkbox.TCheckbutton", background=theme["main_colour"], foreground=theme["button_text_colour"]) # Theme for checkbox
-            for x in all_children["frame"]:
-                if x.winfo_exists() and x.widgetName != "ttk::frame":
-                    x.config(bg=theme["main_colour"])
+        self.config(bg=new_theme["main_colour"])
+        self.style.configure('Theme_dividers.TPanedwindow', background=new_theme["pane_divider_colour"])
 
-            "Frames"
-            self.style.configure("Theme_square.TCheckbutton", background=theme["square_text_box_colour"], foreground=theme["button_text_colour"]) # Gridsquare name and checkbox
-            for x in all_children["frame"]:
-                if x.winfo_exists() and x.widgetName != "ttk::frame":
-                    x.configure(bg=theme["grid_background_colour"])
+        self.leftui.configure(bg=new_theme["main_colour"])
+        self.middlepane_frame.configure(bg=new_theme["viewer_bg"])
+        if self.Image_frame and self.middlepane_canvas: 
+            self.middlepane_canvas.destroy()
+            self.middlepane_canvas = None
+        elif self.middlepane_canvas and self.middlepane_canvas.winfo_exists():
+            self.middlepane_canvas.config(bg=new_theme["viewer_bg"])
+        self.imagegrid.change_theme(theme=new_theme)
 
-            "Buttons"
-            self.style.configure("Theme_square.TCheckbutton", background=theme["square_text_box_colour"], foreground=theme["button_text_colour"]) # Gridsquare name and checkbox
-            but_c_bg = theme["button_colour"]
-            but_c_fg = theme["button_text_colour"]
-            but_c_a_bg = theme["button_colour_when_pressed"]
-            but_c_a_fg = theme["button_text_colour_when_pressed"]
+        colors = {"canvas": self.d_theme["viewer_bg"],"statusbar": self.d_theme["main_colour"],"statusbar_divider": self.d_theme.get("main_accent", self.d_theme["main_colour"]),"button": self.d_theme["button_colour"],"active_button": self.d_theme["button_colour_when_pressed"],"text": self.d_theme["field_text_colour"]}
+        if self.Image_frame: self.Image_frame.change_theme(colors)
+        if self.second_window_viewer: self.second_window_viewer.change_theme(colors)
 
-            for x in all_children["button"]:
-                if "!folderexplorer" in x._w or not x.winfo_exists(): continue
-                x.configure(bg=but_c_bg, fg=but_c_fg, activebackground=but_c_a_bg, activeforeground=but_c_a_fg)
-                x.bind("<Enter>", lambda e, x=x: x.config(bg=but_c_a_bg, fg=but_c_a_fg))
-                x.bind("<Leave>", lambda e, x=x: x.config(bg=but_c_bg, fg=but_c_fg))
-
-            "Optionmenus"
-            for x in all_children.get("optionmenu", []):
-                if x.winfo_exists():
-                    x.config(bg=theme["button_colour"], fg=theme["button_text_colour"],
-                        activebackground = theme["button_colour_when_pressed"], activeforeground=theme["button_text_colour_when_pressed"])
-            "Entryfields"
-            f_a_bg = theme["field_activated_colour"]
-            f_a_fg = theme["field_text_activated_colour"]
-            field_c = theme["field_colour"]
-            field_t_c = theme["field_text_colour"]
-            for x in all_children["entry"]:
-                if x.winfo_exists():
-                    x.config(bg=theme["field_colour"], fg=theme["field_text_colour"])
-                    x.bind("<FocusIn>", lambda e, x=x: x.config(bg=f_a_bg, fg=f_a_fg))
-                    x.bind("<FocusOut>", lambda e, x=x: x.config(bg=field_c, fg=field_t_c))
-
-        theme = self.themes[theme_name]
-        self.d_theme = theme
-
-        self.config(bg=theme["main_colour"])
-        self.style.configure('Theme_dividers.TPanedwindow', background=theme["pane_divider_colour"])
-
-        self.leftui.configure(bg=theme["main_colour"])
-
-        self.middlepane_frame.configure(bg=theme["viewer_bg"])
-        if self.Image_frame != None:
-            self.Image_frame.style.configure("bg.TFrame", background=theme["viewer_bg"])
-            self.Image_frame.canvas.config(bg=theme["viewer_bg"])
-
-        self.imagegrid.configure(bg=theme["grid_background_colour"])
-        self.imagegrid.change_theme(theme=self.d_theme)
-
-        if hasattr(self, "folder_explorer") and hasattr(self.folder_explorer, "destw") and self.folder_explorer.destw != None and self.folder_explorer.destw.winfo_exists():
-            self.folder_explorer.destw.configure(bg=theme["grid_background_colour"])
-            self.folder_explorer.destw.change_theme(theme=self.d_theme)
-
-        if hasattr(self, "folder_explorer"):
-            self.folder_explorer.style.configure("Theme_dividers.TFrame", background=theme["main_colour"])
-            self.folder_explorer.canvas.configure(bg=theme["main_colour"])
-        if hasattr(self, "Image_frame") and self.Image_frame: self.Image_frame.canvas.config(bg=theme["viewer_bg"])
-        if hasattr(self, "second_window_viewer") and self.second_window_viewer: self.second_window_viewer.canvas.config(bg=theme["viewer_bg"])
-        set_vals(theme)
-
+        if hasattr(self, "folder_explorer"): # we are deleting tk tk each time and destw, maybe make them persistent
+            self.folder_explorer.style.configure("Theme_dividers.TFrame", background=new_theme["main_colour"])
+            self.folder_explorer.canvas.configure(bg=new_theme["main_colour"])
+            if hasattr(self.folder_explorer, "destw") and self.folder_explorer.destw != None and self.folder_explorer.destw.winfo_exists():
+                self.folder_explorer.destw.configure(bg=new_theme["grid_background_colour"])
+                self.folder_explorer.destw.change_theme(theme=new_theme)            
+            
+        _apply_theme_to_children(self.toppane, new_theme)
         self.update()
-
+    
+       
     "Viewer"
     def displayimage(self, obj):
-        "Display image in viewer"
-        if self.middle_label != None:
+        from viewer import Application
+        search_widget = self.bindhandler.search_widget
+        if self.middle_label != None: # Clean up keybinding guide
             self.middle_label.destroy()
             self.middle_label = None
-        self.displayed_obj = obj
-        self.focused_on_secondwindow = True
-        from viewer import Application
-        f = False
-        adjacent = []
-        n = 1  # How many steps outward you want to go
-        current = self.imagegrid.current_selection
-        items = self.imagegrid.image_items
-
-        for i in range(1, n + 1):
-            if current + i < len(items):
-                adjacent.append(items[current + i].file.path)
-            if current - i >= 0:
-                adjacent.append(items[current - i].file.path)
-
-        if self.imagegrid.cols > n and 0 <= current-self.imagegrid.cols < len(items):
-            adjacent.insert(1, items[current-self.imagegrid.cols].file.path)
-        if self.imagegrid.cols > n and 0 <= current+self.imagegrid.cols < len(items):
-            adjacent.insert(1, items[current+self.imagegrid.cols].file.path)
-
-        if self.dock_view.get(): # Dock
-            flag = False
-            if not self.Image_frame:
-                self.first_render = True
-                flag = True
+        
+        if self.dock_view.get(): # Initialize the viewer
+            if not self.Image_frame: 
                 self.Image_frame = Application(self.middlepane_frame, savedata=self.viewer_prefs, gui=self)
-            else:
-                f = True
-            self.Image_frame.set_image(None if obj == None else obj.path, obj=obj, adjacent=adjacent, first_run=flag)
-
-        else: # Window
-            if not self.second_window_viewer:
-                self.first_render = True
+                search_widget.new_canvas(self.Image_frame.canvas)
+                if self.first_render: search_widget.display_instructions()
+        else:
+            if not self.second_window_viewer: 
                 self.second_window_viewer = Application(savedata=self.viewer_prefs, gui=self)
-            else:
-                f = True
+                search_widget.new_canvas(self.second_window_viewer.canvas)
+                if self.first_render: search_widget.display_instructions()
+
+        adjacent = self.imagegrid.get_items_adjacent_to_selection() # Tells viewer what images to precache
+        path = None if obj is None else obj.path
+        if self.dock_view.get(): self.Image_frame.set_image(path, obj, adjacent)
+        else:
+            if self.second_window_viewer.master.state() not in ("normal", "zoomed"): self.second_window_viewer.master.deiconify()
             self.second_window_viewer.master.lift()
-            self.second_window_viewer.set_image(None if obj == None else obj.path, obj=obj, adjacent=adjacent)
-        if self.first_render and f:
-            self.first_render = False
-            self.bindhandler.search_widget.canvas.delete("msg")
+            self.second_window_viewer.master.attributes("-alpha", 1.0)
+            self.second_window_viewer.set_image(path, obj, adjacent)
+
+        self.displayed_obj = obj
+        
+        if not self.first_render and search_widget.guide_text_id: search_widget.remove_instruction() # Cleanup keybindining guide of search_widget after first_render
+        self.first_render = False        
 
     "Exit function"
     def closeprogram(self):
-        "This should clear cache of imgs that are not in gridsquarelist"
-        "Stop animations and threads."
-        "Save preferences, close windows, move temp to trash and exit the application."
-        def purge_cache():
-            data_dir = self.fileManager.data_dir
-            if os.path.isdir(data_dir):
-                with os.scandir(data_dir) as files:
-                    ids = {entry.file.id for entry in self.imagegrid.image_items}
-                    for file in files:
-                        id = file.name.rsplit(".", 1)[0]
-                        if id in ids: continue
-                        try: os.remove(file.path)
-                        except Exception as e: print("Failed to remove old cached thumbnails from the data directory.", e)
-        def move_temp_to_trash():
-            trash_dir = self.fileManager.trash_dir
-            if not os.path.isdir(trash_dir): return
-            from send2trash import send2trash
-            with os.scandir(trash_dir) as files:
-                for file in files:
-                    try:
-                        send2trash(file.path)
-                    except Exception as e:
-                        print("Trashing error", e)
-
-        if self.fileManager.autosave and self.fileManager.assigned and self.fileManager.assigned != self.fileManager.last_assigned_list_for_autosave:
-            try:
-                self.fileManager.last_assigned_list_for_autosave = self.fileManager.assigned.copy()
-                self.fileManager.savesession(asksavelocation=False)
-            except Exception as e:
-                print(("Failed to save session:", e))
-
-        self.fileManager._autosave
         from tkinter.messagebox import askokcancel
-        if hasattr(self.fileManager, "all_objs") and [x for x in self.fileManager.all_objs if x.dest] and not askokcancel("Designated but Un-Moved files, really quit?", "You have destination designated, but unmoved files. (Simply cancel and Move All if you want)"):
+        if self.fileManager.assigned and not askokcancel("Designated but Un-Moved files, really quit?", "You have destination designated, but unmoved files. (Simply cancel and Move All if you want)"):
             return
 
-        self.fileManager.thumbs.stop_background_worker()
-
-        for id in self.fileManager.animate.running.copy():
-            self.fileManager.animate.stop(id)
-
-        if hasattr(self.fileManager, "all_objs"):
-            image_references = [obj for obj in self.fileManager.all_objs if obj.thumb]
-            for obj in image_references:
-                obj.thumb = None
-
-        # dest close
-        if self.second_window_viewer: self.second_window_viewer.window_close()
-        if self.Image_frame: self.Image_frame.save_json()
+        if self.fileManager.assigned:
+            self.fileManager.last_assigned_list_for_autosave = self.fileManager.assigned.copy()
+            self.fileManager.savesession()
+        self.imagegrid.thumbs.stop_background_worker()
+        if hasattr(self, "folder_explorer") and self.folder_explorer:
+            self.folder_explorer.executor.shutdown()
+        if self.dock_view.get(): 
+            if self.Image_frame: self.Image_frame.save_json()
+        else:
+            if self.second_window_viewer: self.second_window_viewer.save_json()
 
         self.fileManager.saveprefs(self)
         self.destroy()
-        purge_cache()
-        move_temp_to_trash()
+        self.fileManager.purge_cache()
+        self.fileManager.move_temp_to_trash()

@@ -327,11 +327,12 @@ class Dataset_gen:
                 files1.append(ThumbData(name, path, ext, label))
 
         i = 0
-        with ThreadPoolExecutor(max_workers=max(1,self.filemanager.threads-1), thread_name_prefix="thumbs") as executor:
+        workers = max(1,self.filemanager.threads-1)
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="thumbs") as executor:
             futures = []
             for obj in files1:
                 cache_dir = os.path.join(self.train_dir, obj.label)
-                futures.append(executor.submit(self.filemanager.thumbs.gen_thumb, obj, size=self.thumbsize, cache_dir=cache_dir, user="train", mode="as_is")) #name is for filename truncation, done along the thumbnail.
+                futures.append(executor.submit(self.filemanager.gui.imagegrid.thumbs.gen_thumb, obj, size=self.thumbsize, cache_dir=cache_dir, user="train", mode="as_is")) #name is for filename truncation, done along the thumbnail.
             for f in as_completed(futures):
                 i += 1
                 if i % 100 == 0:
@@ -460,7 +461,7 @@ class Model_inferer:
         self.path = os.path.dirname(os.path.abspath(__file__))
         self.model_path = model or os.path.join(self.path, "models", "latest_model.pt")
         self.fm = fm
-        self.gen_thumb = fm.thumbs.gen_thumb
+        self.gen_thumb = fm.imagegrid.thumbs.gen_thumb
 
         self.thumbsize = thumbsize
 
@@ -506,11 +507,6 @@ class Model_inferer:
         loader = DataLoader(dataset, batch_size=32, shuffle=False)
 
         results_list = []
-
-        SAVE_TRANSFORMED = False
-        if SAVE_TRANSFORMED:
-            SAVE_DIR = "center_crop"
-            os.makedirs(SAVE_DIR, exist_ok=True)
         to_pil = ToPILImage()
 
         with torch.no_grad():

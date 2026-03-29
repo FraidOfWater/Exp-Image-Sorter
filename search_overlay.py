@@ -1,9 +1,10 @@
 import os, tkinter as tk
 
-class ImageViewer:
+class SearchOverlay:
     def __init__(self, root):
         self.root = root
         self.canvas = None
+        self.guide_text_id = None
 
         self.include_folder = None
         self.exclude_folder = set()
@@ -50,34 +51,24 @@ class ImageViewer:
         else: # bind also to the new separate tkinter window
             canvas.master.bind("<Control-a>", self.clear_search)
             canvas.master.bind("<Control-i>", self.show_hotkeys)
-
             canvas.master.bind("<Key>", self.on_key_press)
+            
         root.bind("<Control-a>", self.clear_search)
         root.bind("<Control-i>", self.show_hotkeys)
-
         root.bind("<Key>", self.on_key_press)
 
-        self.search_active = False
-        self.search_minimized = False
-        self.search_ui.clear()
-        self.search_text = ""
-
-        # mouse events
-        self.canvas.bind("<ButtonPress-1>", self.on_mouse_down)
-        self.canvas.bind("<ButtonRelease-1>", self.on_mouse_up)
-        self.canvas.bind("<B1-Motion>", self.on_mouse_drag)
-
-        self.display_instructions()
-
     def display_instructions(self):
-        self.canvas.delete("sorter")
         msg = "Press Spacebar to activate search.\nType to search.\n↑, ↓ to Navigate.\nEnter to Confirm.\nCtrl+a to Clear.\nEscape to Exit."
-        self.a = self.canvas.create_text(
+        self.guide_text_id = self.canvas.create_text(
             self.canvas.winfo_width()//2,
             self.canvas.winfo_height()//2,
             text=msg, tags=("sorter", "msg"), fill="grey", font=("Arial", 14), justify="center"
         )
-        self.canvas.lift(self.a)
+        self.canvas.lift(self.guide_text_id)
+
+    def remove_instruction(self):
+        self.canvas.delete(self.guide_text_id)
+        self.guide_text_id = None
 
     def close(self):
         if ".!toplevel" in self.root._w:
@@ -121,6 +112,7 @@ class ImageViewer:
     # Search
     def on_key_press(self, e):
         def select_result():
+            if not self.search_results: return
             name, rel = self.search_results[self.locked_search_index]
             partial = rel
             full_path = os.path.join(self.include_folder, partial)
@@ -166,18 +158,20 @@ class ImageViewer:
                     self.update_search()
             else:
                 if e.keysym == "Return":
-                    if self.search_results and self.search_results[self.selected_index] in self.recent_searches:
-                        self.recent_searches.remove(self.search_results[self.selected_index])
-                    self.recent_searches.append(self.search_results[self.selected_index])
+                    if self.search_results:
+                        if self.search_results[self.selected_index] in self.recent_searches:
+                            self.recent_searches.remove(self.search_results[self.selected_index])
+                        self.recent_searches.append(self.search_results[self.selected_index])
                     if len(self.recent_searches) > 100: self.recent_searches.pop(0)
                     self.locked_search_index = self.selected_index
 
                     # partial like flu, flut, flutt or t, cel will know what full path they should be.
-                    for i in range(1, len(self.search_text)+1):
-                        self.search_memory[self.search_text[:i]] = self.recent_searches[-1]
-                    self.search_text = self.recent_searches[-1][0]
+                    if self.recent_searches:
+                        for i in range(1, len(self.search_text)+1):
+                            self.search_memory[self.search_text[:i]] = self.recent_searches[-1]
+                        self.search_text = self.recent_searches[-1][0]
+                        self.hotkeys[self.search_text[0]] = self.recent_searches[-1]
 
-                    self.hotkeys[self.search_text[0]] = self.recent_searches[-1]
                     self.search_minimized = True
                     self.update_search_box()
                     if self.search_results: select_result()
@@ -201,8 +195,7 @@ class ImageViewer:
         self.scroll_offset = 0
         self.selected_index = 0
         self.search_results = []
-        self.create_search_box()
-        self.update_search()
+        self.draw_search_box()
 
     def clear_search(self, event=None):
         self.search_minimized = False
@@ -238,7 +231,7 @@ class ImageViewer:
 
         for query in plain_queries: # sort path and word queries. /, \\ or dir: to search for paths
             query = query.replace("/", "\\")
-            if "/" in query: path_queries.append(query.strip("/")) # test/test1
+            if "\\" in query: path_queries.append(query.strip("\\")) # test/test1
             elif query.startswith("dir:"): path_queries.append(query[4:]) # dir:test/test
             else: word_queries.append(query)
 
@@ -266,7 +259,7 @@ class ImageViewer:
                     break
 
         matching_recents.reverse()
-        other_matches = [item for item in filtered_cache if item[1] not in recent_paths]
+        other_matches = [item for item in filtered_cache if item[1].lower() not in recent_paths]
         self.search_results = matching_recents + other_matches
 
         if not self.search_results: self.selected_index = 0
@@ -289,11 +282,14 @@ class ImageViewer:
         bg = self.canvas.create_rectangle(x, y, x + w, y + h, tags="sorter", fill="#222", outline="#555", width=2)
         txt = self.canvas.create_text(x + 10, y + 15, anchor="w", tags="sorter", text=f"> {self.search_text}", fill="white", font=("Consolas", 13))
         self.search_ui = {"box": bg, "text": txt, "results": []}
+        # mouse events
+        self.canvas.tag_bind("sorter", "<ButtonPress-1>", self.on_mouse_down)
+        self.canvas.tag_bind("sorter", "<ButtonRelease-1>", self.on_mouse_up)
+        self.canvas.tag_bind("sorter", "<B1-Motion>", self.on_mouse_drag)
 
     def draw_search_box(self):
-        if not self.search_ui:
-            self.create_search_box()
-            self.update_search_box()
+        self.create_search_box()
+        self.update_search_box()
 
     def update_search_box(self):
         if not self.search_ui: return
@@ -410,8 +406,7 @@ class ImageViewer:
 
     # Drag / Resize handling
     def on_mouse_down(self, e):
-        if not self.search_active: return
-        if not self.search_ui: return
+        if not self.search_active or not self.search_ui or self.search_minimized: return
         x1, y1, x2, y2 = self.canvas.coords(self.search_ui["box"])
         if x1 <= e.x <= x2 and y1 <= e.y <= y2:
             if e.x >= x2 - 10 and e.y >= y2 - 10:
@@ -429,7 +424,7 @@ class ImageViewer:
         self.dragging, self.resizing = False, False
 
     def on_mouse_drag(self, e):
-        if not self.search_active or not self.search_ui: return
+        if not self.search_active or not self.search_ui or self.search_minimized: return
         x1, y1, x2, y2 = self.canvas.coords(self.search_ui["box"])
         if self.dragging:
             dx, dy = self.drag_offset
@@ -443,6 +438,6 @@ class ImageViewer:
 if __name__ == "__main__":
     root = tk.Tk()
     root.geometry("800x600")
-    app = ImageViewer(root)
+    app = SearchOverlay(root)
 
     root.mainloop()

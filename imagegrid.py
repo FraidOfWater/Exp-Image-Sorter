@@ -3,6 +3,7 @@ from tkinter import simpledialog
 from time import perf_counter
 from typing import Literal
 
+# the scrollbar flickers on resize, the divider flickers on resize...
 class dummy:
     theme = {}
     def __init__(self, file, ids, tag, row, col, center_x, center_y, canvas, image_items, make_selection):
@@ -72,9 +73,12 @@ class ImageGrid(tk.Frame):
     class Animate:
         def __init__(self):
             self.gui = None
-            self.running = {}  # obj -> after_id (for cancellation)
+            self.running = set()
+            self.synchronized = set()
+            self.frametime = None
+            self.sync_after_id = None
 
-        def add_animation(self, obj):
+        def add_animation(self, obj, frametime):
             """Start per-object animation respecting frame delays."""
             if obj in self.running: return
             instances = [f for f in (obj.frame, obj.destframe) if f]
@@ -83,36 +87,65 @@ class ImageGrid(tk.Frame):
                     f.change_color("orange")
 
             obj.index = 0
-            self._step(obj)
+            if frametime:
+                start = False
+                if not self.synchronized: 
+                    start = True
+                self.synchronized.add(obj)
+                self.frametime = frametime
+                if start:
+                    self._step_in_sync()
+            else:
+                self._step(obj)
+        
+        def _step_in_sync(self):
+            
+            to_remove = set()
+            self.gui.after(self.frametime, self._step_in_sync)
+            for obj in self.synchronized:
+                instances = [f for f in (obj.frame, obj.destframe) if f]
+                if not instances or not obj.frames or obj.index > len(obj.frames):
+                    to_remove.add(obj)
+                else:
+                    obj.index = (obj.index + 1) % len(obj.frames)
+                    frame_img = obj.frames[obj.index][0]
+                    for f in instances:
+                        try:
+                            f.canvas.itemconfig(f.img_id, image=frame_img)
+                        except Exception as e:
+                            print(e)
+                            to_remove.add(obj)
+                            continue
+            self.synchronized -= to_remove
+            if not self.synchronized: return
 
         def _step(self, obj):
             instances = [f for f in (obj.frame, obj.destframe) if f]
-
             if not instances or not obj.frames or obj.index > len(obj.frames):
                 self.stop(obj.id)
                 return
-
-            # frame also has ref to the canvas! or it has a ref to function to change image.
-
+            obj.index = (obj.index + 1) % len(obj.frames)
+            self.gui.after(obj.frames[obj.index][1] or 100, self._step, obj)
             frame_img = obj.frames[obj.index][0]
             for f in instances:
                 try:
-                    f.change_image(frame_img)
+                    f.canvas.itemconfig(f.img_id, image=frame_img)
                 except Exception as e:
                     print(e)
-
-            obj.index = (obj.index + 1) % len(obj.frames)
-            delay = obj.frames[obj.index][1] or 100
-
-            after_id = self.gui.after(delay, self._step, obj)
-            self.running[obj.id] = after_id
-
-        def stop(self, id1):
-            after_id = self.running.pop(id1, None)
-            if after_id: self.gui.after_cancel(after_id)
+                    self.stop(obj.id)
+                    return
+            
+            
+        def stop(self, id):
+            self.running.discard(id)
+            self.synchronized.discard(id)
 
     class ThumbManager:
         from concurrent.futures import ThreadPoolExecutor
+        from PIL import Image, ImageTk
+        import numpy
+        import pyvips
+        import av
         class CachedTruncator:
             def __init__(self, thumbmanager):
                 import tkinter.font as tkfont
@@ -199,12 +232,27 @@ class ImageGrid(tk.Frame):
                     except Exception:
                         import traceback
                         traceback.print_exc()
+
         thumb_ext = {"png", "jpg", "jpeg", "bmp", "pcx", "tiff", "psd", "jfif", "gif", "webp", "avif"}
         anim_ext = {"gif", "webp", "webm", "mp4", "mkv", "m4v", "mov"}
         video_ext = {"webm", "mp4", "mkv", "m4v", "mov"}
         thumb_pool = None
         frame_pool = None
-        def __init__(self):
+        def __init__(self, fileManager):
+            self.fileManager = fileManager
+            self.gui = fileManager.gui
+            self.threads = fileManager.threads
+            self.data_dir = fileManager.data_dir
+
+            self.truncator = ImageGrid.ThumbManager.CachedTruncator(self)
+
+            # Thread pool sizes
+            self.thumb_workers = max(1, min(self.threads, 3))
+            self.frame_workers = max(1, min(self.threads, 3))
+
+            self.gif_semaphore = threading.Semaphore(1)
+            self.av_semaphore = threading.Semaphore(2)
+
             self.thumb_after_id = None
             self.frame_after_id = None
             # Queues
@@ -214,24 +262,11 @@ class ImageGrid(tk.Frame):
             self.thumb_worker = None
             self.frame_worker = None
             self.stop_event = threading.Event()
-            self.worker_ready = threading.Event()
             self._cf_lock = threading.Lock()
             self._cf_cond = threading.Condition(self._cf_lock)
             self._left_lock = threading.Lock()
             self.left = 0
             self.left_f = 0
-
-        def initialize(self, fileManager):
-            self.fileManager = fileManager
-            self.gui = fileManager.gui
-            self.threads = fileManager.threads
-            self.data_dir = fileManager.data_dir
-
-            self.truncator = ImageGrid.ThumbManager.CachedTruncator(self)
-
-            # Thread pool sizes
-            self.thumb_workers = min(8, fileManager.threads)  # parallel thumbs
-            self.frame_workers = min(4, fileManager.threads)  # parallel frames
 
         def start_background_worker(self):
             if self.stop_event.is_set():
@@ -239,9 +274,11 @@ class ImageGrid(tk.Frame):
 
             # recreate executors if missing
             if not getattr(self, "thumb_pool", None):
-                self.thumb_pool = ImageGrid.ThumbManager.DaemonThreadPoolExecutor(thread_name_prefix="(Pool) T_thread", max_workers=self.thumb_workers)
+                self.thumb_pool = ImageGrid.ThumbManager.DaemonThreadPoolExecutor(
+                    thread_name_prefix="Thumb_loader", max_workers=self.thumb_workers)
             if not getattr(self, "frame_pool", None):
-                self.frame_pool = ImageGrid.ThumbManager.DaemonThreadPoolExecutor(thread_name_prefix="(Pool) F_thread", max_workers=self.frame_workers)
+                self.frame_pool = ImageGrid.ThumbManager.DaemonThreadPoolExecutor(
+                    thread_name_prefix="Frame_loader", max_workers=self.frame_workers)
 
             # start worker threads only if dead
             if not getattr(self, "_thumb_worker_running", False):
@@ -304,8 +341,8 @@ class ImageGrid(tk.Frame):
                 frames_left = self.left_f
                 gui.after(0, lambda imgs=thumbs_left, frames=frames_left: gui.frame_gen_queue_var.set(f"Ingen: {imgs}/{frames}"))
 
-            #print(perf_counter()-self.start)
             if not self.frame_queue.empty() and self.thumb_queue.unfinished_tasks == 0:
+                print(perf_counter()-self.start)
                 self._frame_worker()
 
         def _frame_worker(self):
@@ -354,6 +391,7 @@ class ImageGrid(tk.Frame):
                 for f in instances:
                     f.change_color(color)
             with self._left_lock:
+                print(perf_counter()-self.start)
                 self.left_f = max(0, self.left_f - 1)
                 thumbs_left = self.left
                 frames_left = self.left_f
@@ -395,7 +433,7 @@ class ImageGrid(tk.Frame):
             self.start_background_worker()
 
         def gen_name(self, obj, overwrite=False):
-            if self.fileManager.thumbs.stop_event.is_set(): return
+            if self.gui.imagegrid.thumbs.stop_event.is_set(): return
             if overwrite: trunc = self.truncator.truncate(obj.name)
             else: trunc = obj.truncated_filename or self.truncator.truncate(obj.name)
             obj.truncated_filename = trunc
@@ -403,10 +441,7 @@ class ImageGrid(tk.Frame):
             if obj.frame: self.gui.imagegrid.canvas.itemconfig(obj.frame.ids["label"], text=obj.truncated_filename)
             if obj.destframe: self.gui.folder_explorer.destw.canvas.itemconfig(obj.destframe.ids["label"], text=obj.truncated_filename)
 
-        def gen_thumb(self, obj, size, cache_dir, user="default", mode="as_is"): # session just calls this for displayedlist
-            from PIL import Image, ImageTk
-            gui = self.fileManager.gui
-            THUMB_FORMAT = self.fileManager.THUMB_FORMAT
+        def gen_thumb(self, obj, size, cache_dir, user="default", mode="as_is"): # session just calls this for displayedlist  
             def load_thumb(thumb):
                 "Loads thumb to canvas"
                 def run(thumb):
@@ -417,16 +452,19 @@ class ImageGrid(tk.Frame):
                         obj.thumb = thumb
                         for f in instances:
                             f.change_color() # defaults to grid bg
-                            f.change_image(thumb)
+                            f.canvas.itemconfig(f.img_id, image=thumb)
                     #print(perf_counter()-self.start)
 
                 gui.after_idle(run, thumb)
 
-            # first we check if we need to stop, and make sure id is generated.
+            interp = ImageGrid.ThumbManager.av.video.reformatter.Interpolation.AREA
+            gui = self.fileManager.gui
+            THUMB_FORMAT = self.fileManager.THUMB_FORMAT
+
             if self.stop_event.is_set(): return
             if user=="default" and not (obj.frame or obj.destframe): return
-            elif user == "mobilenet":
-                if obj.embed is not None and obj.color_embed is not None: return # no mobilenet or color inferring needed
+            elif user == "mobilenet" and obj.embed is not None and obj.color_embed is not None:
+                return
             else:
                 if not obj.id: obj.gen_id()
 
@@ -436,15 +474,17 @@ class ImageGrid(tk.Frame):
 
             pil_img = None
             failed = False
+
             if cache_dir:
                 thumbnail_path = os.path.join(cache_dir, f"{obj.id}{THUMB_FORMAT}")
+                
             if cache_dir and os.path.exists(thumbnail_path): # default and train will have cache_dir
                 try:
                     if user != "default": return
                     thumb = None
-                    with Image.open(thumbnail_path) as pil_img: # pil is faster here.
+                    with ImageGrid.ThumbManager.Image.open(thumbnail_path) as pil_img: # pil is faster here.
                         obj.thumbnail = thumbnail_path
-                        thumb = ImageTk.PhotoImage(pil_img)
+                        thumb = ImageGrid.ThumbManager.ImageTk.PhotoImage(pil_img)
                     load_thumb(thumb)
                     return
                 except Exception as e:
@@ -452,33 +492,50 @@ class ImageGrid(tk.Frame):
                     failed = True
             # if no found, we should generate it.
             vips_used = False
-            if obj.ext in self.video_ext: #Webm, mp4
-                from imageio import get_reader # 130 ms
+
+            av_formats = {"webm", "mp4", "mkv", "m4v", "mov", "gif"}
+            if obj.ext in av_formats: #Webm, mp4
+                pix_fmt = 'rgba' if any(f in obj.ext for f in ["webp", "gif"]) else 'rgb24'
+                container = None
                 try:
-                    reader = None
-                    reader = get_reader(obj.path)
-                    pil_img = Image.fromarray(reader.get_data(0))
+                    container = ImageGrid.ThumbManager.av.open(obj.path)
+                    stream = container.streams.video[0]
+                    w, h = stream.width, stream.height
+                    max_size = 256
+                    scale = max_size / max(w, h)
+                    new_w = int(w * scale)
+                    new_h = int(h * scale)
+
+                    for frame in container.decode(stream):
+                        resized_frame = frame.reformat(width=new_w, height=new_h, interpolation=interp, format=pix_fmt)
+                        pil_img = resized_frame.to_image()
+                        pil_img.save(thumbnail_path, format=THUMB_FORMAT[1:], quality=100)
+                        obj.thumbnail = thumbnail_path
+                        thumb = ImageGrid.ThumbManager.ImageTk.PhotoImage(pil_img)
+                        load_thumb(thumb)                            
+                        break
+                    return
                 except Exception as e:
-                    print(f"Couldn't create thumbnail for video: {obj.name} : Error: {e}")
+                    print(f"PyAV thumbnail error for {obj.name}: {e}")
                     failed = True
                 finally:
-                    if reader: reader.close()
+                    if container:
+                        container.close()
             else:
                 if mode == "as_is":
                     try:
-                        import pyvips
-                        vips_img = pyvips.Image.thumbnail(obj.path, size)
+                        vips_img = ImageGrid.ThumbManager.pyvips.Image.thumbnail(obj.path, size)
                         buffer = vips_img.write_to_memory()
                         pil_format = self.get_mode(vips_img)
-                        pil_img = Image.frombytes(pil_format, (vips_img.width, vips_img.height), buffer, "raw")
+                        pil_img =  ImageGrid.ThumbManager.Image.frombytes(pil_format, (vips_img.width, vips_img.height), buffer, "raw")
                         vips_used = True
                     except Exception as e: # Pillow fallback
                         print(f"Pyvips couldn't create thumbnail: {obj.name} : Error: {e}.")
                         failed = True
-                if not vips_used:
+                if not vips_used or failed:
                     try:
-                        with Image.open(obj.path) as pil_img:
-                            pil_img = pil_img.copy() # -rep
+                        with ImageGrid.ThumbManager.Image.open(obj.path) as pil_img:
+                            pil_img.thumbnail((size, size))
                     except Exception as e:
                         print(f"Pillows couldn't create thumbnail, either: {obj.name} : Error: {e}")
                         failed = True
@@ -490,57 +547,42 @@ class ImageGrid(tk.Frame):
             if not pil_img:
                 return
 
-            # now we have a pil_img we should convert it if needed
-            if user == "default":
-                if pil_img.mode not in ("RGBA", "RGB"): # Train, infer and mobilenet want rgb
-                    pil_img = pil_img.convert("RGBA")
-            else:
-                if pil_img.mode != ("RGB"):
-                    pil_img = pil_img.convert("RGB")
-
             # resize according to mode
             if mode == "as_is" and not vips_used:
                 pil_img.thumbnail((size, size))
-            elif mode == "stretch":
-                pil_img = pil_img.resize((size, size))
             elif mode == "letterbox":
                 pil_img.thumbnail((size, size))
                 w, h = pil_img.size
-                new_im = Image.new("RGB", (size, size), (114, 114, 114))
+                new_im = ImageGrid.ThumbManager.Image.new("RGB", (size, size), (114, 114, 114))
                 left = (size - w) // 2
                 top = (size - h) // 2
                 new_im.paste(pil_img, (left, top))
                 pil_img = new_im
-            elif mode == "center_crop":
-                w, h = pil_img.size
-                side = min(w, h)
-                left = (w - side) // 2
-                top = (h - side) // 2
-                pil_img = pil_img.crop((left, top, left + side, top + side))
-                pil_img = pil_img.resize((size, size), Image.BILINEAR)
+
+            format = "RGBA" if user == "default" else "RGB"
+            if pil_img.mode != format: pil_img = pil_img.convert(format)
 
             # save it to cache if we can
-            if cache_dir and pil_img: # default and train
+            if cache_dir: # default and train
                 pil_img.save(thumbnail_path, format=THUMB_FORMAT[1:], quality=100)
                 thumb = None
-                if user == "default": # for default, save path to imgfile and gen imgtk for it.
-                    obj.thumbnail = thumbnail_path
-                    thumb = ImageTk.PhotoImage(pil_img)
-                    load_thumb(thumb)
+            if user == "default": # for default, save path to imgfile and gen imgtk for it.
+                obj.thumbnail = thumbnail_path
+                thumb = ImageGrid.ThumbManager.ImageTk.PhotoImage(pil_img)
+                load_thumb(thumb)
 
             if user == "classify":
                 return pil_img, obj # for classify
             elif user == "mobilenet":
-                from numpy import array, uint8 # 100 ms
-                return array(pil_img, dtype=uint8), obj # for mobilenet
+                return ImageGrid.ThumbManager.numpy.array(pil_img, dtype=ImageGrid.ThumbManager.numpy.uint8), obj # for mobilenet
 
         def gen_frames(self, obj):
-            from PIL import ImageTk
+            # some kind of limits here for both methods, like a time 15 seconds max or 20.
             gui = self.gui
             size, animate = gui.thumbnailsize, gui.imagegrid.animate
             if self.stop_event.is_set(): return
-            def gui_enable_animation(o=obj):
-                animate.add_animation(o)
+            def gui_enable_animation(o=obj, frametime=None):
+                animate.add_animation(o, frametime)
             obj.frames.clear()
             if obj.ext in self.video_ext:
                 def pick_sampling_rate(duration: float, native_fps: float,min_fps: float = 12.0, max_frames: int = 500, mode: Literal["stretch", "limit"] = "stretch"): # st
@@ -557,62 +599,137 @@ class ImageGrid(tk.Frame):
                     frame_count = min(max_frames, round(duration * sampling_fps))
                     return sampling_fps, frame_count
                 def get_fps_and_duration(path: str):
-                    from pymediainfo import MediaInfo # 15 ms
-                    mi = MediaInfo.parse(path)
-                    vt = next((t for t in mi.tracks if t.track_type=="Video"), None)
-                    gt = next((t for t in mi.tracks if t.track_type=="General"), None)
-                    if not vt or not gt: raise RuntimeError("Missing tracks")
-                    if vt.frame_rate_num and vt.frame_rate_den: fps = float(vt.frame_rate_num) / float(vt.frame_rate_den)
-                    else: fps = float(vt.frame_rate or 0) or 24.0
-                    duration = float(gt.duration or 0) / 1000.0
-                    return fps, duration
+                    # Replaces pymediainfo entirely, saving ~15ms and redundant IO
+                    with ImageGrid.ThumbManager.av.open(path) as container:
+                        stream = container.streams.video[0]
+                        fps = float(stream.average_rate) if stream.average_rate else 24.0
+                        duration = float(container.duration) / ImageGrid.ThumbManager.av.time_base if container.duration else 0.0
+                        return fps, duration
                 def extract_with_pyav(path: str, timestamps: list, frametime_ms: int):
-                    import av # 50 ms
-                    with av.open(obj.path) as container:
+                    interp = ImageGrid.ThumbManager.av.video.reformatter.Interpolation.AREA
+                    with ImageGrid.ThumbManager.av.open(path) as container:
                         video_stream = container.streams.video[0]
-                        time_base = video_stream.time_base
-                        for t in timestamps:
-                            if (self.stop_event.is_set() and not (obj.frame or obj.destframe)) or not (obj.frame or obj.destframe): break
-                            container.seek(int(t / time_base), any_frame=False, backward=True, stream=video_stream)
-                            for packet in container.demux(video_stream):
-                                for frame in packet.decode():
-                                    if frame.pts * time_base >= t:
-                                        img = frame.to_image()
-                                        img.thumbnail((size, size))
-                                        obj.frames.append((ImageTk.PhotoImage(img), frametime_ms))
-                                        if len(obj.frames) == 2:
-                                            self.gui.after_idle(gui_enable_animation)
-                                        break
-                                else: continue
+                        w, h = video_stream.width, video_stream.height
+                        max_size = 256
+                        scale = max_size / max(w, h)
+                        new_w = int(w * scale)
+                        new_h = int(h * scale)
+                        video_stream.thread_type = "AUTO"
+                        time_base = float(video_stream.time_base)
+                        target_pts_list = [int(t / time_base) for t in timestamps]
+                        current_target_idx = 0
+                        total_targets = len(target_pts_list)
+                        last_pts = -1
+                        while current_target_idx < total_targets:
+                            if (self.stop_event.is_set() and not (obj.frame or obj.destframe)) or not (obj.frame or obj.destframe): 
                                 break
-                try:
-                    fps, duration = get_fps_and_duration(obj.path)
-                    sampling_fps, n = pick_sampling_rate(duration=duration, native_fps=fps, min_fps=12, max_frames=100, mode="limit")
-                    frametime_ms = int(round(1000.0 / sampling_fps))
-                    timestamps = [(i / sampling_fps) for i in range(n)]
-                    extract_with_pyav(obj.path, timestamps, frametime_ms)
-                except Exception as e:
-                    print("error in gen frames (av)", e)
+                            target_pts = target_pts_list[current_target_idx]
+
+                            if last_pts == -1 or (target_pts - last_pts) > (1.0 / time_base):
+                                container.seek(target_pts, any_frame=False, backward=True, stream=video_stream)
+                            
+                            try:
+                                for frame in container.decode(video_stream):
+                                    if frame.pts >= target_pts:
+                                        resized_frame = frame.reformat(width=new_w, height=new_h, interpolation=interp, format="rgb24")
+                                        pil_img = resized_frame.to_image()
+                                        obj.frames.append(((ImageGrid.ThumbManager.ImageTk.PhotoImage(pil_img)), frametime_ms if sampling_fps == min_fps else frametime_ms))
+
+                                        if len(obj.frames) == 2:
+                                            self.gui.after_idle(gui_enable_animation, obj, frametime_ms if sampling_fps == min_fps else None)
+                                        
+                                        last_pts = frame.pts
+                                        current_target_idx += 1
+                                        break # Move to the next timestamp
+                            except ImageGrid.ThumbManager.av.EOFError:
+                                current_target_idx = total_targets
+                with self.av_semaphore:
+                    try:
+                        min_fps = 24
+                        max_frames = 200
+                        fps, duration = get_fps_and_duration(obj.path)
+                        sampling_fps, n = pick_sampling_rate(duration=duration, native_fps=fps, min_fps=min_fps, max_frames=max_frames, mode="limit")
+                        frametime_ms = int(round(1000.0 / sampling_fps))
+                        timestamps = [(i / sampling_fps) for i in range(n)]
+                        
+                        extract_with_pyav(obj.path, timestamps, frametime_ms)
+                    except Exception as e:
+                        print("error in gen frames (av)", e)
             elif obj.ext in self.anim_ext:
-                from PIL import Image
-                with Image.open(obj.path, "r") as img:
-                    i = 0
-                    while True:
-                        if (self.stop_event.is_set() and not (obj.frame or obj.destframe)) or not (obj.frame or obj.destframe): break
+                def gen_using_pil():
+                    with ImageGrid.ThumbManager.Image.open(obj.path, "r") as img:
+                        i = 0
+                        while True:
+                            if (self.stop_event.is_set() and not (obj.frame or obj.destframe)) or not (obj.frame or obj.destframe): break
+                            try:
+                                img.seek(i)
+                                duration, frame = (img.info.get('duration', 100) or 100, img.copy().convert("RGBA"))
+                                frame.thumbnail((size, size))
+                                obj.frames.append((ImageGrid.ThumbManager.ImageTk.PhotoImage(frame), duration))
+                                i += 1
+                                if len(obj.frames) == 2: self.gui.after_idle(gui_enable_animation)
+                            except EOFError: break
+                            except Exception as e:
+                                print("gen fraems error:", e)
+                                break
+                def gen_using_vips():
+                    import pyvips
+                    try:
+                        # Load the full animation pipeline (tax paid here)
+                        full_image = pyvips.Image.gifload(obj.path, n=-1)
+                        # Apply the 'shrink-on-load' thumbnail logic
+                        image = pyvips.Image.thumbnail_image(full_image, size, height=size, size='down')
+                        
+                        frame_h = image.get("page-height")
+                        n_pages = image.get("n-pages")
+                        
+                        # Handle metadata (centiseconds to milliseconds)
                         try:
-                            img.seek(i)
-                            duration, frame = (img.info.get('duration', 100) or 100, img.copy().convert("RGBA"))
-                            frame.thumbnail((size, size))
-                            obj.frames.append((ImageTk.PhotoImage(frame), duration))
-                            i += 1
-                            if len(obj.frames) == 2: self.gui.after_idle(gui_enable_animation)
-                        except EOFError: break
-                        except Exception as e:
-                            print("gen fraems error:", e)
-                            break
+                            raw_delays = image.get("delay")
+                            if not isinstance(raw_delays, list):
+                                raw_delays = [raw_delays] * n_pages
+                            # Standardizing: if < 20, assume centiseconds; else assume ms
+                            delays = [d * 10 if d < 20 else d for d in raw_delays]
+                        except:
+                            delays = [100] * n_pages
+
+                        for i in range(n_pages):
+                            # Control checks matching your PIL logic
+                            if (self.stop_event.is_set() and not (obj.frame or obj.destframe)) or not (obj.frame or obj.destframe):
+                                break
+
+                            # Extract current frame from the vertical strip
+                            vips_frame = image.crop(0, i * frame_h, image.width, frame_h)
+                            
+                            # Ensure RGBA for Tkinter compatibility
+                            if vips_frame.bands == 3:
+                                vips_frame = vips_frame.bandjoin(255)
+                            
+                            # Execute the pipeline and convert to PhotoImage
+                            mem = vips_frame.write_to_memory()
+                            pil_img = ImageGrid.ThumbManager.Image.frombuffer(
+                                'RGBA', (vips_frame.width, vips_frame.height), mem, 'raw', 'RGBA', 0, 1
+                            )
+                            
+                            photo = ImageGrid.ThumbManager.ImageTk.PhotoImage(pil_img)
+                            duration = delays[i]
+                            
+                            obj.frames.append((photo, duration))
+                            
+                            # Trigger the GUI enable on the 2nd frame, exactly like your PIL code
+                            if len(obj.frames) == 2:
+                                self.gui.after_idle(gui_enable_animation)
+
+                    except Exception as e:
+                        print("gen frames vips error:", e)
+                        obj.clear_frames()
+                        gen_using_pil()
+                
+                with self.gif_semaphore: #? works or no
+                    gen_using_vips() # falls back to pil.
             if len(obj.frames) <= 1: gui.after_idle(obj.clear_frames)
 
-        def get_mode(vips_img) -> Literal["RGB", "L", "I;16"]:
+        def get_mode(self, vips_img) -> Literal["RGB", "L", "I;16"]:
             "Return the mode needed to convert a PYVIPS.Image to a PIL.Image format via PIL.Image.frombytes()."
             "Most common formats are srgb, b-w, rgb16 and grey16."
             vips_format, pil_format = str(vips_img.interpretation).lower(), None
@@ -625,7 +742,8 @@ class ImageGrid(tk.Frame):
             return pil_format
 
     animate = Animate()
-    thumbs = ThumbManager()
+    thumbs = None
+
     def __init__(self, master, gui, thumb_size=256, center=False,
                  bg="blue", destination=None,
                  theme={"square_default": "white",
@@ -643,7 +761,6 @@ class ImageGrid(tk.Frame):
         self.fileManager = gui.fileManager
         self.gui = gui
         self.animate.gui = gui
-        self.thumbs.initialize(self.fileManager)
         self.destination = destination
         # thumb size MUST be set in PREFS. This only loads the generated thumbs from cache, never resizes or creates them.
         self.script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -656,6 +773,7 @@ class ImageGrid(tk.Frame):
         self.center = center
 
         self.theme = theme
+        dummy.theme = self.theme
         self.theme["square_border_size"] = 3
         w = self.theme["square_border_size"]
         theme["square_padx"] = 2
@@ -754,7 +872,15 @@ class ImageGrid(tk.Frame):
         btn_img = self.btn_thumbs.get("default", None)
         if btn_img == None:
             from PIL import Image, ImageTk
-            self.btn_thumbs = {"default": ImageTk.PhotoImage(Image.open(os.path.join(self.assets_dir, "button.png"))), "pressed": ImageTk.PhotoImage(Image.open(os.path.join(self.assets_dir, "button_pressed.png")))}
+            import os
+            bg_color = self.theme.get("grid_background_colour")
+            def process_button_img(path, bg_hex):
+                img = Image.open(path).convert("RGBA")
+                background = Image.new("RGBA", img.size, bg_hex)
+                combined = Image.alpha_composite(background, img)
+                return ImageTk.PhotoImage(combined)
+
+            self.btn_thumbs = {"default": process_button_img(os.path.join(self.assets_dir, "button.png"), bg_color),"pressed": process_button_img(os.path.join(self.assets_dir, "button_pressed.png"), bg_color)}
             btn_img = self.btn_thumbs["default"]
 
         btn_offset_x = w
@@ -836,7 +962,7 @@ class ImageGrid(tk.Frame):
         self.image_items.insert(pos, entry)
 
         if objs_w_no_thumbs:
-            self.fileManager.thumbs.generate(objs_w_no_thumbs)
+            self.thumbs.generate(objs_w_no_thumbs)
 
         self.reflow_from_index(pos)
         self.make_selection(self.image_items[pos])
@@ -934,7 +1060,6 @@ class ImageGrid(tk.Frame):
                 tags=tag)
 
             item_ids = {"rect":rect, "img":img, "label":label, "but":but, "txt_rect":txt_rect}
-            dummy.theme = self.theme
             entry = dummy(file, item_ids, tag, row, col, x_center, y_center, self.canvas, self.image_items, self.make_selection)
             if not self.destination:
                 file.frame = entry
@@ -1006,7 +1131,7 @@ class ImageGrid(tk.Frame):
 
             self.id_index += 1
         if objs_w_no_thumbs:
-            self.fileManager.thumbs.generate(objs_w_no_thumbs)
+            self.thumbs.generate(objs_w_no_thumbs)
         self._update_scrollregion()
 
     def remove(self, sublist, unload=True): # removes squares
@@ -1296,7 +1421,7 @@ class ImageGrid(tk.Frame):
                     os.rename(path, new_path)
                     obj.path = new_path
                     obj.name = os.path.basename(new_path)
-                    self.fileManager.thumbs.gen_name(obj, overwrite=True)
+                    self.thumbs.gen_name(obj, overwrite=True)
                     gui.displayimage(obj)
                     break
                 except Exception as e:
@@ -1307,6 +1432,23 @@ class ImageGrid(tk.Frame):
                 break
 
         pass # update square name (obj.gridsquare, obj.destsquare...), update obj.filename, truncated name...
+    
+    def get_items_adjacent_to_selection(self):
+        current, items, cols = self.current_selection, self.image_items, self.cols
+        n = 2 # Preload distance
+        adjacent_indexes = []
+        seen = set()
+        for iteration in range(1, n+1):
+            next = current+iteration
+            under = current+iteration*cols
+            previous = current-iteration
+            above = current+iteration*cols
+            for x in (next, under, previous, above):
+                if x in seen or not 0<=x<len(items): continue
+                seen.add(x)
+                adjacent_indexes.append(x)
+
+        return [items[i].file.path for i in adjacent_indexes]
 
     # Updates
     def reflow_from_index(self, start_idx=0):
@@ -1388,6 +1530,10 @@ class ImageGrid(tk.Frame):
 
     def change_theme(self, theme):
         self.theme = theme
+        dummy.theme = theme
+        self.configure(bg=theme["grid_background_colour"])
+        self.canvas.configure(bg=theme["grid_background_colour"])
+
         for i in range(0, len(self.image_items)):
             item = self.image_items[i]
 
@@ -1430,7 +1576,7 @@ class ImageGrid(tk.Frame):
     def toggle_entry(self, entry):
         if entry in self.selected: self.unmark_entry(entry)
         else: self.mark_entry(entry)
-
+    
 
 class debug_imgfile:
     def __init__(self, imgtk, filename):

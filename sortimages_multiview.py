@@ -8,9 +8,7 @@ os.environ['PATH'] = os.pathsep.join((vipsbin, os.environ['PATH']))
 os.add_dll_directory(vipsbin)
 if os.path.isdir(vipsbin): os.add_dll_directory(vipsbin)
 
-# do gifs work in viewer? thumbs, buffers preloading etc?
-# OLD RANDOM COLORS, get rid of menu bar, VLC style, PURPLE theme, Anim debug colors, font change to dest buttons, UNDO IN DESTW
-# Refactor thumbmanager and anim to imagegrid.
+# get rid of menu bar, VLC style, PURPLE theme, Anim debug colors, font change to dest buttons, UNDO IN DESTW
 
 # rename this to sessionmanager/
 class Imagefile:
@@ -105,9 +103,15 @@ class Imagefile:
 
 class SortImages:
     "Sessionmanager controls walking and interacting with the filesystem, sorting, and saving & loading of prefs and sessions."
+    imagelist = [] # Store all Imagefiles
+    exclude = []
+    assigned = []
+    moved = []
+
     THUMB_FORMAT = ".webp"
     supported_formats = {"png", "gif", "jpg", "jpeg", "bmp", "pcx", "tiff", "webp", "psd", "jfif", "mp4", "mkv", "mov", "m4v", "webm", "avif"}
-
+    threads = 3
+    
     script_dir = os.path.dirname(os.path.abspath(__file__))
     data_dir = os.path.join(script_dir, "data")
     trash_dir = os.path.join(script_dir, "Trash")
@@ -115,57 +119,46 @@ class SortImages:
     train_dir = os.path.join(script_dir, "training")
     model_dir = os.path.join(script_dir, "models")
     os.makedirs(model_dir, exist_ok=True)
-    model_classes = None
-    names_2_path = None
-
     prefs_path = os.path.join(script_dir, "_prefs.json")
     themes_path = os.path.join(script_dir, "_themes.json")
 
-    imagelist = [] # Store all Imagefiles
-    exclude = []
-    assigned = []
-    moved = []
+    model_classes = None
+    names_2_path = None
 
     # Flags
     last_call_time = 0
     last_sort = (None, False)
-    autosave = True
-    threads = int(os.cpu_count()/2)
     concurrent_frames = 0
-    max_concurrent_frames = 2500
+    max_concurrent_frames = 10000
+    first_run = True
 
     def __init__(self, gui) -> None:
         "Sortimages setups the program. It creates imagefiles from the folder given, loads and saves prefs, loads and saves sessions, and starts up the gui and other modules."
-        self.jthemes = gui.themes
-        self.first_run = True
-
-        "Start modules"
-        prefs = gui.jprefs
-        if prefs: self.THUMB_FORMAT = prefs.get("THUMB_FORMAT", self.THUMB_FORMAT)
-
         self.gui = gui
+        technical = gui.jprefs.get("technical", {})
+        self.THUMB_FORMAT = technical.get("THUMB_FORMAT", self.THUMB_FORMAT)
+        
         gui.fileManager = self
-
         self.gui.initialize()       # Let GUI initialize fully now with loaded values.
-        self.animate = gui.imagegrid.animate
-        self.thumbs = gui.imagegrid.thumbs
 
         self.squares_per_page_old = 0
         self.last_assigned_list_for_autosave = []
         self.wait_animation_after_id = None
-
+        
         def load_modules():
             # load expensive modules we need only after gui has appeared
+            import av
             import hashlib
             import concurrent.futures
             import numpy
             import PIL
             import pyvips
-            import av
-            import pymediainfo
+            
             from destinations import FolderExplorer
             from viewer import Application
             from imagegrid import ImageGrid
+            self.gui.imagegrid.thumbs = ImageGrid.ThumbManager(self)
+            
             self.update_info()
             self.val_thumb_cache(self.data_dir)
 
@@ -173,12 +166,10 @@ class SortImages:
         self.gui.after(1, load_modules)
 
     def _autosave(self):
-        if self.autosave and self.assigned and self.assigned != self.last_assigned_list_for_autosave:
-            try:
-                self.last_assigned_list_for_autosave = self.assigned.copy()
-                self.savesession(asksavelocation=False)
-            except Exception as e:
-                print(("Failed to save session:", e))
+        if self.assigned and self.assigned != self.last_assigned_list_for_autosave:
+            self.last_assigned_list_for_autosave = self.assigned.copy()
+            self.savesession()
+
         self.gui.after(60000, self._autosave) # autosaves once every minute
 
     def val_thumb_cache(self, path):
@@ -212,6 +203,26 @@ class SortImages:
             except Exception as e:
                 print(f"Couldn't delete/create data folder: {e}")
 
+    def move_temp_to_trash(self):
+        trash_dir = self.trash_dir
+        if not os.path.isdir(trash_dir): return
+        from send2trash import send2trash
+        with os.scandir(trash_dir) as files:
+            for file in files:
+                try: send2trash(file.path)
+                except Exception as e: print("Trashing error", e)
+
+    def purge_cache(self):
+        data_dir = self.data_dir
+        if os.path.isdir(data_dir):
+            with os.scandir(data_dir) as files:
+                ids = {entry.file.id for entry in self.gui.imagegrid.image_items}
+                for file in files:
+                    id = file.name.rsplit(".", 1)[0]
+                    if id in ids: continue
+                    try: os.remove(file.path)
+                    except Exception as e: print("Failed to remove old cached thumbnails from the data directory.", e)
+
     def saveprefs(self, gui):
         "Saves all customizable stuff to prefs.json."
         if gui.middlepane_frame.winfo_width() == 1: # Do not try to save invalid value
@@ -219,44 +230,34 @@ class SortImages:
         else:
             gui.middlepane_width = gui.middlepane_frame.winfo_width()
 
-        sdp = gui.source_entry_field.get() if os.path.exists(gui.source_entry_field.get()) else ""
-        ddp = gui.destination_entry_field.get() if os.path.exists(gui.destination_entry_field.get()) else ""
+        source = gui.source_entry_field.get() if os.path.exists(gui.source_entry_field.get()) else ""
+        destination = gui.destination_entry_field.get() if os.path.exists(gui.destination_entry_field.get()) else ""
 
         save = {
             "paths": {
-                "source": sdp,
-                "destination": ddp,
+                "source": source,
+                "destination": destination,
                 "lastsession": gui.lastsession,
                 "exclude": self.exclude,
                 "categories": self.gui.categories,
                 "excludes": self.gui.excludes,
                 "model": self.gui.model_path
             },
-            "user": {
+            "technical": {
+                "threads": self.threads, # hard coded to be no more than 3 to avoid lag.
+                "max_concurrent_frames": self.max_concurrent_frames,
+                "THUMB_FORMAT": self.THUMB_FORMAT,
                 "thumbnailsize": gui.thumbnailsize,
-                "prediction_thumbsize": gui.prediction_thumbsize,
+                "squares_per_page": gui.squares_per_page_intvar.get(),
                 "hotkeys": gui.hotkeys,
-                "auto_load": gui.auto_load,
                 "do_debug": gui.do_debug.get()
             },
-            "technical": {
-                "quick_preview_filter": gui.filter_mode,
-                "threads": self.threads,
-                "max_concurrent_frames": self.max_concurrent_frames,
-                "autosave_session":self.autosave,
-                "THUMB_FORMAT": self.THUMB_FORMAT
-            },
-
-            "qui": {
-                "squares_per_page": gui.squares_per_page_intvar.get(),
+            "user": {
+                "theme": gui.theme.get(),
                 "display_order": gui.display_order.get(),
                 "show_next": gui.show_next.get(),
                 "dock_view": gui.dock_view.get(),
                 "dock_side": gui.dock_side.get(),
-                "theme": gui.theme.get(),
-                "volume": gui.volume,
-            },
-            "window_settings": {
                 "main_geometry": "zoomed" if self.gui.state() == "zoomed" else gui.winfo_geometry(),
                 "viewer_geometry": gui.viewer_geometry,
                 "destpane_geometry":gui.destpane_geometry,
@@ -275,71 +276,46 @@ class SortImages:
             print(("Failed to save prefs:", e))
 
         "Save session"
-        try:
-            if self.autosave:
-                self.savesession(asksavelocation=False)
-        except Exception as e:
-            print(("Failed to save session:", e))
+        self.savesession()
 
-    def savesession(self, asksavelocation):
-        "Saves assigned without having to move them."
-        "If there is nothing to save"
+
+    def savesession(self):
         start = perf_counter()
         if not self.assigned: return
-
-        if asksavelocation:
-            from tkinter import filedialog as tkFileDialog
-            custom_session_name = f"{os.path.basename(self.sdp)}-{os.path.basename(self.ddp)}.json"
-            filet=[("Javascript Object Notation","*.json")]
-            savelocation=tkFileDialog.asksaveasfilename(confirmoverwrite=True,defaultextension=filet,filetypes=filet,
-                                                        initialdir=os.getcwd(),initialfile=custom_session_name)
-        else:
-            savelocation = gui.lastsession if gui.lastsession != "" else "_last_session.json"
-
+        savelocation = os.path.join(self.script_dir, gui.lastsession or "_last_session.json")
         if not savelocation: return
-        seen = {}
+
+        colors = {}
         assigned = []
         for x in self.assigned:
-            seen[x.dest] = x.color
+            colors[x.dest] = x.color
             assigned.append((x.path, x.dest))
 
-        save = {"destination": self.ddp, "source": self.sdp, "colors": seen, "assigned": assigned, "moved": self.moved}
+        save = {"destination": self.gui.destination_folder, "source": self.gui.source_folder, "colors": colors, "assigned": assigned, "moved": self.moved}
 
-        with open(os.path.join(self.script_dir, savelocation), "w+") as json_file:
-            json.dump(save, json_file, indent=4)
+        try:
+            with open(savelocation, "w+") as json_file:
+                json.dump(save, json_file, indent=4)
+        except Exception as e:
+            print(("Failed to save session:", e))
+        
         print("session saved in:", perf_counter()-start)
 
     def loadsession(self):
         gui = self.gui
-        "If there is no last session, early exit"
-        last_session = os.path.join(self.script_dir, "_last_session.json")
-        if not os.path.exists(last_session):
-            print("No Last Session!")
+
+        if gui.session_entry_field:
+            lastsession = gui.session_entry_field.get()
+            sessionpath = os.path.normpath(os.path.join(self.script_dir, lastsession))
+            gui.lastsession = lastsession if os.path.isfile(sessionpath) else gui.lastsession
+        
+        if not os.path.exists(sessionpath):
+            print("That session doesn't exist!")
             return
 
-        with open(last_session, "r") as json_file:
+        with open(sessionpath, "r") as json_file:
             sdata = json_file.read()
             savedata = json.loads(sdata)
-
-        gui.lastsession = last_session
-
-        self.sdp = savedata['source']
-        self.ddp = savedata['destination']
-
-        gui.source_entry_field.delete(0, tk.END)
-        gui.source_entry_field.insert(0, self.sdp)
-        gui.source_entry_field.xview_moveto(1.0)
-
-        gui.destination_entry_field.delete(0, tk.END)
-        gui.destination_entry_field.insert(0, self.ddp)
-        gui.destination_entry_field.xview_moveto(1.0)
-
-        gui.guisetup()
-
-        print("")
-        print(f'Using session:  "{os.path.basename(gui.lastsession)}"')
-        print(f'Source:   "{self.sdp}"')
-        print(f'Target:   "{self.ddp}"')
 
         temp = []
         for x in savedata["assigned"]:
@@ -400,61 +376,51 @@ class SortImages:
             imagefile.setdest(dest)
 
         grid.selected.clear()
-        if gui.auto_load and (self.gui.current_view.get() == "Unassigned"): self.load_more()
+        if (self.gui.current_view.get() == "Unassigned"): self.load_more()
         assigned_count, images_left = len(self.assigned), len(self.all_objs)-len(self.assigned)-len(self.moved)
         title = f"Assigned: {assigned_count}, Left: {images_left}" + "" if self.gui.displayed_obj is None else f" - {self.gui.displayed_obj.name}"
         gui.winfo_toplevel().title(title)
 
     def validate(self, btn=None): # new session
-        if btn and self.first_run:
-            return
-        else:
-            self.first_run = False
+        if btn and self.first_run: return # The first run requires you to press "New Session"
         gui = self.gui
-        self.sdp = os.path.normpath(gui.source_entry_field.get())
-        self.ddp = os.path.normpath(gui.destination_entry_field.get())
-        samepath = (self.sdp == self.ddp)
+        
+        if gui.session_entry_field:
+            lastsession = gui.session_entry_field.get()
+            sessionpath = os.path.normpath(os.path.join(self.script_dir, lastsession))
+            gui.lastsession = lastsession if os.path.isfile(sessionpath) else gui.lastsession
+        
+        bad = False
+        for ref, entry in (("src", gui.source_entry_field), ("dest", gui.destination_entry_field)):
+            clean = os.path.normpath(entry.get().strip().strip('"'))
+            if not os.path.isdir(clean):
+                entry.delete(0, tk.END); entry.insert(0, "ERROR"); entry.xview_moveto(1.0)
+                bad = True
+                continue
+            entry.delete(0, tk.END); entry.insert(0, clean+"  "); entry.xview_moveto(1.0)
+            if ref == "src": gui.source_folder = clean
+            elif ref == "dest": gui.destination_folder = clean
+        if bad: return
 
-        if os.path.isdir(self.sdp):
-            pass
+        if self.first_run: gui.guisetup()
         else:
-            gui.source_entry_field.delete(0, tk.END)
-            gui.source_entry_field.insert(0, "ERROR INVALID PATH")
-            gui.source_entry_field.xview_moveto(1.0)
+            if gui.Image_frame: gui.Image_frame.set_image(None)
+            if gui.second_window_viewer: gui.second_window_viewer.set_image(None)
+        
+        gui.folder_explorer.set_view(gui.destination_folder)
 
-        if os.path.isdir(self.ddp):
-            pass
-        else:
-            gui.destination_entry_field.delete(0, tk.END)
-            gui.destination_entry_field.insert(0, "ERROR INVALID PATH")
-            gui.destination_entry_field.xview_moveto(1.0)
+        print(f'\nSource:   "{gui.source_folder}"\nTarget:   "{gui.destination_folder}"\n')
+        samepath = (gui.source_folder == gui.destination_folder)
+        os.makedirs(self.data_dir, exist_ok=True)
+        self.imagelist = self.walk(gui.source_folder, samepath)
+        self.first_run = False
 
-        if os.path.isdir(self.sdp) and os.path.isdir(self.ddp):
-            if not hasattr(self.gui, "folder_explorer"):
-                gui.guisetup()
-            #if gui.imagegrid.gridsquarelist:
-            #    gui.imagegrid.clear_all()
-            if gui.Image_frame != None:
-                gui.Image_frame.set_image(None)
-            if gui.second_window_viewer != None:
-                gui.second_window_viewer.set_image(None)
-            gui.folder_explorer.set_view(self.ddp)
-            gui.buttons = gui.folder_explorer.buttons.copy()
+        assigned_count, images_left = len(self.assigned), len(self.imagelist)
+        title = f"Assigned: {assigned_count}, Left: {images_left}" + "" if gui.displayed_obj is None else f" - {gui.displayed_obj.name}"
+        gui.winfo_toplevel().title(title)
 
-            print("")
-            print(f'Source:   "{self.sdp}"')
-            print(f'Target:   "{self.ddp}"')
-
-            self.imagelist = self.walk(self.sdp, samepath)
-
-            assigned_count, images_left = len(self.assigned), len(self.imagelist)
-            title = f"Assigned: {assigned_count}, Left: {images_left}" + "" if self.gui.displayed_obj is None else f" - {self.gui.displayed_obj.name}"
-            gui.winfo_toplevel().title(title)
-
-            self.gui.imagegrid.clear_canvas(unload=True)
-            self.sort_imagelist()
-
-        self.gui.update_idletasks()
+        gui.imagegrid.clear_canvas(unload=True)
+        self.sort_imagelist()
 
     def load_more(self): # should be deprecated with virtual grid
         count_in_grid = len(self.gui.imagegrid.image_items)
@@ -466,7 +432,6 @@ class SortImages:
         load = self.imagelist[-items:]
         load.reverse()
         self.imagelist = self.imagelist[:-items]
-
         self.gui.imagegrid.add(load)
 
         if self.gui.prediction.get():
@@ -501,8 +466,7 @@ class SortImages:
         # remove from imagelist, but add back from image_items
         from operator import attrgetter
         from natsort import natsorted
-        if self.first_run:
-            return
+        if self.first_run: return
         gui = self.gui
 
         def after_tasks():
@@ -899,7 +863,7 @@ class SortImages:
             with ThreadPoolExecutor(
                 max_workers=max(1, self.threads - 1), thread_name_prefix="mobilenet_thumbs"
             ) as executor:
-                futures = {executor.submit(self.thumbs.gen_thumb, obj, size=TARGET_SIZE, cache_dir=None, user="mobilenet", mode="letterbox"): i
+                futures = {executor.submit(self.gui.imagegrid.thumbs.gen_thumb, obj, size=TARGET_SIZE, cache_dir=None, user="mobilenet", mode="letterbox"): i
                         for i, obj in enumerate(imagefiles)}
 
                 for f in as_completed(futures):
@@ -1127,12 +1091,12 @@ class SortImages:
             process = psutil.Process()
             memory_info = process.memory_info()
             return (memory_info.rss)
-        if self.gui.do_debug.get(): self.gui.current_ram_strvar.set(f"RAM: {get_memory_usage() / (1024 ** 2):.2f} MB")
+        if self.gui.do_debug.get(): self.gui.ram_label["text"] = f"RAM: {get_memory_usage() / (1024 ** 2):.2f} MB"
 
         "Anim: displayedlist with frames/displayedlist with framecount/(queue)"
         if self.gui.imagegrid:
             temp = [x for x in self.gui.imagegrid.image_items if x.file.frames]
-            self.gui.animation_stats_var.set(f"Objs In animate/With references: {len(self.animate.running)}/{len(temp)}")
+            self.gui.animation_stats_var.set(f"Objs In animate/With references: {len(self.gui.imagegrid.animate.running)}/{len(temp)}")
 
             "Frames: frames + frames_dest / max"
             temp = [x.file.frames for x in self.gui.imagegrid.image_items if x.file.frames]
@@ -1142,8 +1106,8 @@ class SortImages:
             self.gui.resource_limiter_var.set(f"{c}/{self.max_concurrent_frames}")
 
             self.concurrent_frames = c
-            with self.thumbs._cf_cond:
-                self.thumbs._cf_cond.notify_all()
+            with self.gui.imagegrid.thumbs._cf_cond:
+                self.gui.imagegrid.thumbs._cf_cond.notify_all()
 
         self.gui.after(333, self.update_info)
 
@@ -1165,12 +1129,12 @@ if __name__ == '__main__':
             with open(prefs_path, "r") as prefsfile:
                 jdata = prefsfile.read()
                 if jdata == "":
-                    return None
+                    return {}
                 jprefs = json.loads(jdata)
                 return jprefs
         except Exception as e:
             print(f"Error loading prefs.json: {e}")
-            return None
+            return {}
 
     def load_themes():
         try:
@@ -1180,7 +1144,7 @@ if __name__ == '__main__':
                 return jthemes["themes"]
         except Exception as e:
             print("Error loading themes:", e)
-            return None
+            return {}
 
     jthemes = load_themes()
     prefs = loadprefs()
