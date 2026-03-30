@@ -36,7 +36,7 @@ class Bindhandler:
     def enter(self, event):
         if isinstance(event.widget, tk.Entry): return
         caps_lock = (event.state & 0x0002) != 0
-        if caps_lock and not self.bindhandler.search_widget.search_active:
+        if caps_lock and not self.search_widget.search_active:
             fe = self.gui.folder_explorer
             destinat = fe.buttons[fe.selected_index][1]
             coloring = self.gui.folder_explorer.color_cache[destinat]
@@ -347,16 +347,17 @@ class GUIManager(tk.Tk):
 
         help_text = (
             f"{'--- NAVIGATION & SELECTION ---':^{total_w}}\n"
-            f"{fmt('Left-Click, Hotkey', 'Mark')}"
+            f"{fmt('Left-Click', 'Mark')}"
             f"{fmt('Arrows', 'Navigate Images')}"
             "\n"
             f"{'--- FOLDERS & ASSIGNING ---':^{total_w}}\n"
-            f"{fmt('Left-Click, Hotkey', 'Assign')}"
+            f"{fmt('Left-Click, Hotkey', 'Assign Highlighted')}"
             f"{fmt('Right-Click', 'Expand/Collapse')}"
             f"{fmt('Shift + L-Click', 'View Assigned')}"
             f"{fmt('Shift + R-Click', 'Open Explorer')}"
             f"{fmt('Mid-Click + Key', 'Reassign')}"
             f"{fmt('Caps + Scroll', 'Nav Destination')}"
+            f"{fmt('Caps + Enter', 'Assign Highlighted')}"
             "\n"
             f"{'--- VIEWER CONTROLS ---':^{total_w}}\n"
             f"{fmt('L-Click (Drag)', 'Pan')}"

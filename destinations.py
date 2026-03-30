@@ -628,6 +628,7 @@ class FolderExplorer(ttk.Frame):
 
         default_c = self.randomColor() if folder_path != self.winfo_toplevel().fileManager.trash_dir else "#888BF8"
         darkened_c = self.darken_color(default_c)
+        self.color_cache[folder_path] = default_c
         btn = tk.Button(frame, text=btn_text, bg=default_c, anchor="w", relief=RELIEF)
         btn.config(font=("Courier", 12), fg="black")
         grab = tk.Label(frame,text="≡",cursor="fleur",width=2,bg="#444",fg="white")
