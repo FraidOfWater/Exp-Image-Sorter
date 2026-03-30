@@ -41,7 +41,6 @@ class Application(tk.Frame):
     def __init__(self, master=None, savedata={}, gui=None):
         self.current_load_token = None
         self.loader = AsyncImageLoader(self)
-        self.viewport = ViewportState()
         self.draw_queue = []
         self.undo = []
         self.debug = []
@@ -203,6 +202,7 @@ class Application(tk.Frame):
         self._old = None
         self.frames = []
         self.lazy_index = 0
+        self.scale_key = None
         self.dragging = False
         self.dragging_and_zooming = False
         self.ready = True
@@ -215,6 +215,7 @@ class Application(tk.Frame):
         self.filenames = []
         self.filename_index = 0
 
+        self.reset_transform()
         self.create_widgets()
 
     "UI creation"
@@ -523,7 +524,7 @@ class Application(tk.Frame):
             return
         cw, ch = self.canvas.winfo_width(), self.canvas.winfo_height()
         iw, ih = self.img_pointer.width, self.img_pointer.height
-        s_current = self.viewport.mat_affine[0, 0]
+        s_current = self.mat_affine[0, 0]
 
         factor = self.zoom_magnitude if event.delta > 0 else (1 / self.zoom_magnitude)
 
@@ -548,17 +549,17 @@ class Application(tk.Frame):
 
         # Final check: if factor is effectively 1 (no change), skip scale_at to save perf
         if factor != 1.0:
-            self.viewport.scale_at(factor, event.x, event.y)
+            self.scale_at(factor, event.x, event.y)
 
         if not self.unbound_var.get():
             s_new = s_current * factor
             if s_new <= s_fit:
                 tx = (cw - iw * s_new) / 2
                 ty = (ch - ih * s_new) / 2
-                self.viewport.mat_affine[0, 2] = tx
-                self.viewport.mat_affine[1, 2] = ty
+                self.mat_affine[0, 2] = tx
+                self.mat_affine[1, 2] = ty
             else:
-                self.viewport.restrict_pan()
+                self.restrict_pan()
         if self.zoom_after_id: self.after_cancel(self.zoom_after_id)
         self.draw_image(quick_zoom_event=self.quick_zoom.get())
         if hasattr(self, "since_last"): print(perf_counter()-self.since_last)
@@ -573,30 +574,24 @@ class Application(tk.Frame):
         if event.state == 258: return
         if self.filename and self._old:
             dx, dy = event.x - self._old.x, event.y - self._old.y
-            self.viewport.translate(dx, dy)
-            if not self.unbound_var.get(): 
-                self.viewport.restrict_pan(
-                    self.canvas.winfo_width(), 
-                    self.canvas.winfo_height(), 
-                    self.img_pointer.width, 
-                    self.img_pointer.height
-                )
-            zoom = self.viewport.scale_key_tuple[0]
+            self.translate(dx, dy)
+            if not self.unbound_var.get(): self.restrict_pan()
+            zoom = self.scale_key[0]
 
-            if self.dragging_and_zooming:
+            if self.dragging_and_zooming or True:
                 self.draw_image(initial_filter=Image.Resampling.NEAREST if self.dragging else None)
             elif (self.img_pointer.width * zoom * self.img_pointer.height * zoom) > 3_000_000:
                 if self.is_gif:
                     self.draw_image(initial_filter=Image.Resampling.NEAREST if self.dragging else None)
                     self._old = event
                     return
-                diff_x = self.viewport.mat_affine[0, 2] - getattr(self, "buffer_ref_tx", 0)
-                diff_y = self.viewport.mat_affine[1, 2] - getattr(self, "buffer_ref_ty", 0)
+                diff_x = self.mat_affine[0, 2] - getattr(self, "buffer_ref_tx", 0)
+                diff_y = self.mat_affine[1, 2] - getattr(self, "buffer_ref_ty", 0)
                 curr_x = getattr(self, "buffer_start_x", 0) + diff_x
                 curr_y = getattr(self, "buffer_start_y", 0) + diff_y
                 if self.image_id: self.canvas.coords(self.image_id, curr_x, curr_y)
             else:
-                if self.image_id: self.canvas.coords(self.image_id, self.viewport.mat_affine[0, 2], self.viewport.mat_affine[1, 2])
+                if self.image_id: self.canvas.coords(self.image_id, self.mat_affine[0, 2], self.mat_affine[1, 2])
         self._old = event
 
     def mouse_release(self, event):
@@ -952,14 +947,41 @@ class Application(tk.Frame):
     
     # mkae gui a class, then have the below be a draw class which just draws to the ready canvas! #################
     # Affine transforms
+    def reset_transform(self):
+        self.mat_affine = np.eye(3)
+
+    def translate(self, ox, oy):
+        m = np.eye(3)
+        m[0, 2], m[1, 2] = ox, oy
+        self.mat_affine = m @ self.mat_affine
+
+        scale_up = np.eye(3)
+        zoom, _ = self.scale_key
+        inv_f = 1.0 / zoom
+        scale_up[0,0] = scale_up[1,1] = inv_f
+        self.combined = self.mat_affine @ scale_up
+
+    def scale(self, s):
+        m = np.eye(3)
+        m[0, 0], m[1, 1] = s, s
+        self.mat_affine = m @ self.mat_affine
+        self.get_scale_key()
+
+    def scale_at(self, s, cx, cy):
+        self.translate(-cx, -cy)
+        self.scale(s)
+        self.translate(cx, cy)
 
     def zoom_fit(self, handle=None):
         if not self.img_pointer: return
         iw, ih = (handle.width, handle.height) if handle else (self.img_pointer.width, self.img_pointer.height)
         cw, ch = self.canvas.winfo_width(), self.canvas.winfo_height()
-        
-        # Let the ViewportState do the math
-        self.viewport.zoom_fit(cw, ch, iw, ih)
+        if iw <= 0 or ih <= 0 or cw <= 0 or ch <= 0: return
+        self.reset_transform()
+        s = min(cw / iw, ch / ih)
+        ox, oy = (cw - iw * s) / 2, (ch - ih * s) / 2
+        self.scale(s)
+        self.translate(ox, oy)
 
     "Display"
     def _set_info(self, filename, ext, is_video=False):
@@ -1327,20 +1349,20 @@ class Application(tk.Frame):
 
         # prefetch values
         cw, ch = self.canvas.winfo_width(), self.canvas.winfo_height()
-        zoom, scale_key = self.viewport.scale_key_tuple
+        zoom, scale_key = self.scale_key
         size = max(1, round(self.img_pointer.width * zoom)), max(1, round(self.img_pointer.height * zoom))    
-        fast_pan_active = (size[0]*size[1]) < 3_000_000
+        fast_pan_active = (size[0]*size[1]) < 3_000_000 and False
 
         if fast_pan_active:
             render_w, render_h = cw, ch
-            buffer_screen_x, buffer_screen_y = self.viewport.mat_affine[0, 2], self.viewport.mat_affine[1, 2]
+            buffer_screen_x, buffer_screen_y = self.mat_affine[0, 2], self.mat_affine[1, 2]
             self.buffer_screen_x, self.buffer_screen_y = buffer_screen_x, buffer_screen_y
         else:
             render_w, render_h = int(cw * buffer_multiplier), int(ch * buffer_multiplier)
             offset_factor = (buffer_multiplier - 1) / 2
             buffer_screen_x, buffer_screen_y = -int(cw * offset_factor), -int(ch * offset_factor)
             self.buffer_screen_x, self.buffer_screen_y = buffer_screen_x, buffer_screen_y
-            self.buffer_ref_tx, self.buffer_ref_ty = self.viewport.mat_affine[0, 2], self.viewport.mat_affine[1, 2]
+            self.buffer_ref_tx, self.buffer_ref_ty = self.mat_affine[0, 2], self.mat_affine[1, 2]
             self.buffer_start_x, self.buffer_start_y = buffer_screen_x, buffer_screen_y
         
         def get_source(zoom=zoom, scale_key=scale_key, size=size): # movements pan/zoom/rotation
@@ -1479,7 +1501,7 @@ class Application(tk.Frame):
             return resized
         
         def get_imagetk(): # static redraws for animation
-            matrix = self.viewport.combined.copy() if self.anti_aliasing.get() and zoom < 1.0 else self.viewport.mat_affine.copy()
+            matrix = self.combined.copy() if self.anti_aliasing.get() and zoom < 1.0 else self.mat_affine.copy()
             if fast_pan_active: ############### why are there two.....
                 matrix[0, 2] = 0
                 matrix[1, 2] = 0
@@ -1521,8 +1543,8 @@ class Application(tk.Frame):
         if special2: return imagetk ########### hacky
         if not imagetk: return
 
-        tx = self.viewport.mat_affine[0, 2] if fast_pan_active else buffer_screen_x
-        ty = self.viewport.mat_affine[1, 2] if fast_pan_active else buffer_screen_y
+        tx = self.mat_affine[0, 2] if fast_pan_active else buffer_screen_x
+        ty = self.mat_affine[1, 2] if fast_pan_active else buffer_screen_y
 
         if self.image_id:
             self.canvas.itemconfig(self.image_id, image=imagetk)
@@ -1601,7 +1623,6 @@ class Application(tk.Frame):
             if do_again:
                 after_id3 = self.after(40, threaded_buffer_gen, 5)
                 self.zoom_after_id = after_id3
-        
         if self.zoom_after_id: 
             self.after_cancel(self.zoom_after_id)
 
@@ -1652,7 +1673,7 @@ class Application(tk.Frame):
             zoom, _, _ = scale_key
             inv_f = 1.0 / zoom
             scale_up[0,0] = scale_up[1,1] = inv_f
-            self.viewport.combined = mat_affine @ scale_up
+            self.combined = mat_affine @ scale_up
             ####
 
             ###
@@ -1702,6 +1723,46 @@ class Application(tk.Frame):
 
         source_dict = get_source()
         return source_dict, scale_key
+
+    "Helpers"
+    def get_scale_key(self):
+        mat = self.mat_affine
+        sx, sy = (mat[0, 0]**2 + mat[1, 0]**2)**0.5, (mat[0, 1]**2 + mat[1, 1]**2)**0.5
+        
+        exact_zoom = min(sx, sy)
+        scale_key = int(round(exact_zoom, 3) * 1000)
+        self.scale_key = exact_zoom, scale_key
+
+    def restrict_pan(self):
+        cw, ch = self.canvas.winfo_width(), self.canvas.winfo_height()
+        iw, ih = self.img_pointer.width, self.img_pointer.height
+
+        tw = iw * self.mat_affine[0, 0]
+        th = ih * self.mat_affine[1, 1]
+
+        tx = self.mat_affine[0, 2]
+        ty = self.mat_affine[1, 2]
+
+        if tw <= cw:
+            tx_min, tx_max = 0, cw - tw
+        else:
+            tx_min, tx_max = cw - tw, 0
+        tx = min(max(tx, tx_min), tx_max)
+
+        if th <= ch:
+            ty_min, ty_max = 0, ch - th
+        else:
+            ty_min, ty_max = ch - th, 0
+        ty = min(max(ty, ty_min), ty_max)
+
+        self.mat_affine[0, 2] = tx
+        self.mat_affine[1, 2] = ty
+
+        scale_up = np.eye(3)
+        zoom, _ = self.scale_key
+        inv_f = 1.0 / zoom
+        scale_up[0,0] = scale_up[1,1] = inv_f
+        self.combined = self.mat_affine @ scale_up
 
 def get_mode(vips_img) -> str:
     "Return the mode needed to convert a PYVIPS.Image to a PIL.Image format via PIL.Image.frombytes()."
@@ -2233,107 +2294,6 @@ class PrefilledInputDialog(simpledialog.Dialog):
             self.result = None
         else:
             self.result = name + self.ext_part
-
-import numpy as np
-
-class ViewportState:
-    """
-    Handles all 2D affine transformations, panning, and zooming math.
-    Completely isolated from Tkinter and image loading libraries.
-    """
-    def __init__(self):
-        self.mat_affine = np.eye(3)
-        self.combined = np.eye(3)
-        
-        # Zoom state variables
-        self.exact_zoom = 1.0
-        self.scale_key_int = 1000
-        self.scale_key_tuple = (1.0, 1000, 1.0) # exact_zoom, scale_key, safe_zoom
-        
-    def reset_transform(self):
-        """Resets the viewport to default."""
-        self.mat_affine = np.eye(3)
-        self._update_scale_key()
-        self._update_combined()
-
-    def translate(self, dx, dy):
-        """Pans the viewport by dx, dy."""
-        m = np.eye(3)
-        m[0, 2], m[1, 2] = dx, dy
-        self.mat_affine = m @ self.mat_affine
-        self._update_combined()
-
-    def scale(self, s):
-        """Scales the viewport uniformly by a factor of s."""
-        m = np.eye(3)
-        m[0, 0], m[1, 1] = s, s
-        self.mat_affine = m @ self.mat_affine
-        self._update_scale_key()
-        self._update_combined()
-
-    def scale_at(self, s, cx, cy):
-        """Zooms in/out focusing on a specific coordinate (cx, cy)."""
-        self.translate(-cx, -cy)
-        self.scale(s)
-        self.translate(cx, cy)
-
-    def zoom_fit(self, canvas_w, canvas_h, image_w, image_h):
-        """Calculates the exact math to fit the image inside the canvas."""
-        if image_w <= 0 or image_h <= 0 or canvas_w <= 0 or canvas_h <= 0:
-            return
-            
-        self.reset_transform()
-        s = min(canvas_w / image_w, canvas_h / image_h)
-        ox = (canvas_w - image_w * s) / 2
-        oy = (canvas_h - image_h * s) / 2
-        
-        self.scale(s)
-        self.translate(ox, oy)
-
-    def restrict_pan(self, canvas_w, canvas_h, image_w, image_h):
-        """Prevents panning out of bounds."""
-        tw = image_w * self.mat_affine[0, 0]
-        th = image_h * self.mat_affine[1, 1]
-
-        tx = self.mat_affine[0, 2]
-        ty = self.mat_affine[1, 2]
-
-        # X bounds
-        if tw <= canvas_w:
-            tx_min, tx_max = 0, canvas_w - tw
-        else:
-            tx_min, tx_max = canvas_w - tw, 0
-        tx = min(max(tx, tx_min), tx_max)
-
-        # Y bounds
-        if th <= canvas_h:
-            ty_min, ty_max = 0, canvas_h - th
-        else:
-            ty_min, ty_max = canvas_h - th, 0
-        ty = min(max(ty, ty_min), ty_max)
-
-        # Apply restricted translation
-        self.mat_affine[0, 2] = tx
-        self.mat_affine[1, 2] = ty
-        
-        self._update_combined()
-
-    def _update_scale_key(self):
-        """Internal helper to recalculate zoom caching keys."""
-        mat = self.mat_affine
-        sx = (mat[0, 0]**2 + mat[1, 0]**2)**0.5
-        sy = (mat[0, 1]**2 + mat[1, 1]**2)**0.5
-        
-        self.exact_zoom = min(sx, sy)
-        self.scale_key_int = int(round(self.exact_zoom, 3) * 1000)
-        self.scale_key_tuple = (self.exact_zoom, self.scale_key_int)
-
-    def _update_combined(self):
-        """Internal helper to calculate the combined transformation matrix."""
-        scale_up = np.eye(3)
-        inv_f = 1.0 / self.exact_zoom if self.exact_zoom > 0 else 1.0
-        scale_up[0, 0] = scale_up[1, 1] = inv_f
-        self.combined = self.mat_affine @ scale_up
 
 class Timer:
     "Timer for benchmarking"

@@ -336,16 +336,55 @@ class GUIManager(tk.Tk):
         middlepane_frame = tk.Frame(toppane, name="middlepane", bg=self.d_theme["viewer_bg"], width = self.middlepane_width)
 
         font_style = ("Consolas", 11)
-        help_text = ("--- NAVIGATION & SELECTION -----\n"f"{'Left-Click, Hotkey':<22} Mark\n"f"{'Arrows':<22} Navigate Images\n\n""--- FOLDERS & ASSIGNING --------------\n"f"{'Left-Click, Hotkey':<22} Assign to Folder\n"f"{'Right-Click':<22} Expand / Collapse\n"f"{'Shift + L-Click':<22} View Assigned\n"f"{'Shift + R-Click':<22} Open in Explorer\n"f"{'Mid-Click + Key':<22} Reassign Hotkey\n"f"{'Caps + Scroll':<22} Navigate Destinations\n\n""--- VIEWER CONTROLS ------\n"f"{'L-Click (Drag)':<22} Pan\n"f"{'Scroll':<22} Zoom\n"f"{'Shift + Scroll':<22} Rotate\n"f"{'R-Click':<22} Open Options\n\n""--- FINAL ACTIONS -------------------\n"f"{'Move All':<22} Transfer Files.\n\n""--- OTHER --------------------------------------------------\n""The grey dividers can be Moved. Each Section can be Resized.\n""Current highlighted item will be Assigned if nothing else is Marked.")
+        # Configuration for column widths
+        L_WIDTH = 25
+        R_WIDTH = 20
+        total_w = L_WIDTH + R_WIDTH
 
+        def fmt(label, action):
+            # Pads label to the left and action to the right to fill the total width
+            return f"{label:<{L_WIDTH}}{action:>{R_WIDTH}}\n"
+
+        help_text = (
+            f"{'--- NAVIGATION & SELECTION ---':^{total_w}}\n"
+            f"{fmt('Left-Click, Hotkey', 'Mark')}"
+            f"{fmt('Arrows', 'Navigate Images')}"
+            "\n"
+            f"{'--- FOLDERS & ASSIGNING ---':^{total_w}}\n"
+            f"{fmt('Left-Click, Hotkey', 'Assign')}"
+            f"{fmt('Right-Click', 'Expand/Collapse')}"
+            f"{fmt('Shift + L-Click', 'View Assigned')}"
+            f"{fmt('Shift + R-Click', 'Open Explorer')}"
+            f"{fmt('Mid-Click + Key', 'Reassign')}"
+            f"{fmt('Caps + Scroll', 'Nav Destination')}"
+            "\n"
+            f"{'--- VIEWER CONTROLS ---':^{total_w}}\n"
+            f"{fmt('L-Click (Drag)', 'Pan')}"
+            f"{fmt('Scroll', 'Zoom')}"
+            f"{fmt('Shift + Scroll', 'Rotate')}"
+            f"{fmt('R-Click', 'Options')}"
+            "\n"
+            f"{'--- FINAL ACTIONS ---':^{total_w}}\n"
+            f"{fmt('Move All', 'Transfer files')}"
+            "\n"
+            f"{'--- OTHER ---':^{total_w}}\n"
+            "Grey dividers can be Moved/Resized.\n"
+            "Highlighted item assigned if none marked."
+        )
+
+        # When displaying in your UI:
+        # anchor='center', justify='center'
+        print(help_text)
         canvas = tk.Canvas(middlepane_frame, bg=self.d_theme["viewer_bg"],highlightthickness=0,width=self.middlepane_width,height=600)
         canvas.place(relx=0.5, rely=0.5, anchor="center")
         self.middlepane_canvas = canvas
         canvas.bind("<Button-1>", lambda e: self.focus())
 
         ascii_art = """"""
-        self.ascii_art_id = canvas.create_text(self.middlepane_width, 300, text=ascii_art,fill="grey",font=("Consolas", 4),justify="center")
-        self.help_text_id = canvas.create_text(self.middlepane_width//2, 300, text=help_text,fill="white",font=font_style, anchor="center", justify="left")
+        ascii_art2 = """"""
+        self.ascii_art_id = canvas.create_text(self.middlepane_width//2, 300, text=ascii_art,fill="#525252",font=("Consolas", 12),justify="left", anchor="center")
+        self.ascii_art_id2 = canvas.create_text(self.middlepane_width//2, 0, text=ascii_art2,fill="#525252",font=("Consolas", 6),justify="left", anchor="center")
+        self.help_text_id = canvas.create_text(self.middlepane_width//2, 300, text=help_text,fill="white",font=font_style, anchor="center", justify="center")
         canvas.pack(fill="both", expand=True)
 
         def redraw(event):
@@ -353,13 +392,12 @@ class GUIManager(tk.Tk):
             h = event.height
             
             # Position both in the center of the current canvas area
-            canvas.coords(self.help_text_id, w // 2, h // 2)
-            canvas.coords(self.ascii_art_id, (w // 2) + 100, h // 2)
-            
-            # CRITICAL: If the text is larger than the canvas, 
-            # this creates a scrollable area so it never gets "cut off"
-            canvas.config(scrollregion=canvas.bbox("all"))
+            canvas.coords(self.help_text_id, w // 2, h // 2-100)
+            canvas.coords(self.ascii_art_id, w // 2+25, 850)
+            canvas.coords(self.ascii_art_id2, w // 2+150, 110)
 
+            #canvas.config(scrollregion=canvas.bbox("all"))
+        
         canvas.bind("<Configure>", redraw)
         self.middle_label = canvas
         leftui.grid_propagate(False)
@@ -471,7 +509,7 @@ class GUIManager(tk.Tk):
 
         frame.columnconfigure(0, weight=8)
         frame.columnconfigure(1, weight=1)
-        
+
         view_menu.grid(row=0, column=0, sticky = "EW")
         clear_all_b.grid(row=0, column=1, sticky="EW")
 
