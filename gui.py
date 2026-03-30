@@ -28,7 +28,7 @@ class Bindhandler:
     def undo(self, event):
         if isinstance(event.widget, tk.Entry): return
         if self.fileManager.assigned and self.gui.current_view.get() in ("Unassigned",) :
-            last = self.fileManager.assigned.pop()
+            last = self.fileManager.assigned.pop(0)
             self.gui.displayimage(last)
             self.gui.imagegrid.insert_first(last, last.pos) # should add to ALL grids.
             last.color, last.dest = None, ""
