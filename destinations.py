@@ -469,10 +469,10 @@ class FolderExplorer(ttk.Frame):
         self.a.geometry(self.parent.destpane_geometry)
         self.a.bind("<Button-3>", lambda e: close_window(e))
         self.a.protocol("WM_DELETE_WINDOW", close_window)
-        self.a.transient(self.parent.gui)
+        self.a.transient(self.parent)
 
         from imagegrid import ImageGrid
-        self.destw = ImageGrid(self.a, paguirent=self.parent, thumb_size=self.parent.thumbnailsize, center=False, destination=btn.folder_path, bg=self.parent.d_theme["grid_background_colour"],
+        self.destw = ImageGrid(self.a, gui=self.parent, thumb_size=self.parent.thumbnailsize, center=False, destination=btn.folder_path, bg=self.parent.d_theme["grid_background_colour"],
                                 theme=self.parent.d_theme)
 
         self.destw.add([obj for obj in reversed(self.parent.fileManager.assigned) if os.path.normpath(obj.dest) == os.path.normpath(btn.folder_path)])

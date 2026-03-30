@@ -158,7 +158,7 @@ class SortImages:
             from destinations import FolderExplorer
             from viewer import Application
             from imagegrid import ImageGrid
-            self.gui.imagegrid.thumbs = ImageGrid.ThumbManager(self)
+            ImageGrid.thumbs = ImageGrid.ThumbManager(self)
             
             self.update_info()
             self.val_thumb_cache(self.data_dir)
