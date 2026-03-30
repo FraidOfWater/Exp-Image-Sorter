@@ -1171,6 +1171,8 @@ class Application(tk.Frame):
             cached = self.cache.get(filename)
             if cached: # if cached
                 self._on_async_ready(filename, self.current_load_token, cached, caller="cached")
+                #if not cached.get("full_res"):
+                #    token = self.loader.request_load(filename, token, caller="full_res")
             
             else:
                 token = self.loader.request_load(filename, token, caller="fit")
@@ -1197,7 +1199,7 @@ class Application(tk.Frame):
     def _set_animation(self, filename):
         self.zoom_fit()
         self.a = False
-
+        
         is_animated = True if self.img_pointer.get_n_pages() > 1 else False
 
         if is_animated:
@@ -1237,7 +1239,7 @@ class Application(tk.Frame):
                     self._imagetk_cache.set_maxsize(i)
 
         except EOFError:
-            if i == 1:
+            if i == 1: # perhaps redundant, pyvips already checks n_pages.
                 self.after(0, fallback)
                 print("Error in _preload_frames (eoferror), falling back as a static image.")
     
@@ -1320,7 +1322,8 @@ class Application(tk.Frame):
                 self.draw_image(initial_fit) # calculates the current zoom key and retrieves from cache
 
                 if self.do_caching.get():
-                    self.cache[path] = data
+                    self.cache[path]["img"] = data["img"]
+                    self.cache[path]["scale_key"] = data["scale_key"]
                 
             case "full_res":
                 self.full_res = data["full_res"]

@@ -850,121 +850,123 @@ class ImageGrid(tk.Frame):
         Insert new image squares at the top of the grid.
         """
         if not new_images: return
-        if type(new_images) == list: new_images = new_images[0]
-        obj = new_images
 
-        objs_w_no_thumbs = [obj] if not obj.thumb else []
+        objs_w_no_thumbs = [x for x in new_images if not x.thumb]
+        added = []
+        for obj in new_images:
+            thumb_w, thumb_h = self.thumb_size
+            sqr_w, sqr_h = self.sqr_size
+            sqr_padx, sqr_pady = self.sqr_padding
+            grid_padx, grid_pady = self.grid_padding
+            btn_size = self.btn_size
 
-        thumb_w, thumb_h = self.thumb_size
-        sqr_w, sqr_h = self.sqr_size
-        sqr_padx, sqr_pady = self.sqr_padding
-        grid_padx, grid_pady = self.grid_padding
-        btn_size = self.btn_size
+            canvas_w = self.canvas.winfo_width()
+            cols = max(1, canvas_w // sqr_w)
+            self.cols = cols
 
-        canvas_w = self.canvas.winfo_width()
-        cols = max(1, canvas_w // sqr_w)
-        self.cols = cols
+            w = self.theme.get("square_border_size")
+            text_c = self.theme.get("square_text_colour")
 
-        w = self.theme.get("square_border_size")
-        text_c = self.theme.get("square_text_colour")
+            btn_img = self.btn_thumbs.get("default", None)
+            if btn_img == None:
+                from PIL import Image, ImageTk
+                import os
+                bg_color = self.theme.get("grid_background_colour")
+                def process_button_img(path, bg_hex):
+                    img = Image.open(path).convert("RGBA")
+                    background = Image.new("RGBA", img.size, bg_hex)
+                    combined = Image.alpha_composite(background, img)
+                    return ImageTk.PhotoImage(combined)
 
-        btn_img = self.btn_thumbs.get("default", None)
-        if btn_img == None:
-            from PIL import Image, ImageTk
-            import os
-            bg_color = self.theme.get("grid_background_colour")
-            def process_button_img(path, bg_hex):
-                img = Image.open(path).convert("RGBA")
-                background = Image.new("RGBA", img.size, bg_hex)
-                combined = Image.alpha_composite(background, img)
-                return ImageTk.PhotoImage(combined)
+                self.btn_thumbs = {"default": process_button_img(os.path.join(self.assets_dir, "button.png"), bg_color),"pressed": process_button_img(os.path.join(self.assets_dir, "button_pressed.png"), bg_color)}
+                btn_img = self.btn_thumbs["default"]
 
-            self.btn_thumbs = {"default": process_button_img(os.path.join(self.assets_dir, "button.png"), bg_color),"pressed": process_button_img(os.path.join(self.assets_dir, "button_pressed.png"), bg_color)}
-            btn_img = self.btn_thumbs["default"]
+            btn_offset_x = w
+            btn_offset_y = w * 2
+            text_offset_x = btn_offset_x + btn_img.width() + 2
+            text_offset_y = btn_offset_y + 1
 
-        btn_offset_x = w
-        btn_offset_y = w * 2
-        text_offset_x = btn_offset_x + btn_img.width() + 2
-        text_offset_y = btn_offset_y + 1
+            if obj.thumb == None:
+                default_bg = "purple"
+                grid_background_color = "purple"
+            elif obj.dest != "":
+                default_bg = obj.color
+                grid_background_color = self.theme.get("grid_background_colour")
+            else:
+                default_bg = self.theme.get("square_default")
+                grid_background_color = self.theme.get("grid_background_colour")
 
-        if obj.thumb == None:
-            default_bg = "purple"
-            grid_background_color = "purple"
-        elif obj.dest != "":
-            default_bg = obj.color
-            grid_background_color = self.theme.get("grid_background_colour")
-        else:
-            default_bg = self.theme.get("square_default")
-            grid_background_color = self.theme.get("grid_background_colour")
+            row = pos // cols
+            col = pos % cols
 
-        row = pos // cols
-        col = pos % cols
+            current_col = (0 // cols) * (sqr_w + sqr_padx) + grid_padx
+            current_row = (0 % cols) * (sqr_h + sqr_pady + btn_size) + grid_pady
 
-        current_col = (0 // cols) * (sqr_w + sqr_padx) + grid_padx
-        current_row = (0 % cols) * (sqr_h + sqr_pady + btn_size) + grid_pady
+            x_center = current_col + thumb_w // 2 + (w + 1) // 2
+            y_center = current_row + thumb_h // 2 + (w + 1) // 2
 
-        x_center = current_col + thumb_w // 2 + (w + 1) // 2
-        y_center = current_row + thumb_h // 2 + (w + 1) // 2
+            tag = f"img_{self.id_index}"
+            self.id_index += 1
 
-        tag = f"img_{self.id_index}"
-        self.id_index += 1
+            rect = self.canvas.create_rectangle(
+                current_col, current_row,
+                current_col + sqr_w, current_row + sqr_h,
+                width=w, outline=default_bg, fill=default_bg,
+                tags=tag
+            )
 
-        rect = self.canvas.create_rectangle(
-            current_col, current_row,
-            current_col + sqr_w, current_row + sqr_h,
-            width=w, outline=default_bg, fill=default_bg,
-            tags=tag
-        )
+            img = self.canvas.create_image(
+                x_center, y_center,
+                image=obj.thumb, anchor="center",
+                tags=tag
+            )
 
-        img = self.canvas.create_image(
-            x_center, y_center,
-            image=obj.thumb, anchor="center",
-            tags=tag
-        )
+            txt_rect = self.canvas.create_rectangle(
+                current_col, current_row + sqr_w,
+                current_col + sqr_w, current_row + sqr_h + btn_size,
+                width=w, outline=grid_background_color, fill=grid_background_color,
+                tags=tag
+            )
 
-        txt_rect = self.canvas.create_rectangle(
-            current_col, current_row + sqr_w,
-            current_col + sqr_w, current_row + sqr_h + btn_size,
-            width=w, outline=grid_background_color, fill=grid_background_color,
-            tags=tag
-        )
+            but = self.canvas.create_image(
+                current_col + btn_offset_x,
+                current_row + thumb_h + btn_offset_y,
+                image=btn_img, anchor="nw",
+                tags=tag
+            )
 
-        but = self.canvas.create_image(
-            current_col + btn_offset_x,
-            current_row + thumb_h + btn_offset_y,
-            image=btn_img, anchor="nw",
-            tags=tag
-        )
+            label = self.canvas.create_text(
+                current_col + text_offset_x,
+                current_row + thumb_h + text_offset_y,
+                text=obj.truncated_filename,
+                anchor="nw",
+                fill=text_c,
+                tags=tag
+            )
 
-        label = self.canvas.create_text(
-            current_col + text_offset_x,
-            current_row + thumb_h + text_offset_y,
-            text=obj.truncated_filename,
-            anchor="nw",
-            fill=text_c,
-            tags=tag
-        )
+            item_ids = {
+                "rect": rect, "img": img, "label": label,
+                "but": but, "txt_rect": txt_rect
+            }
+            entry = dummy(obj, item_ids, tag, row, col, x_center, y_center, self.canvas, self.image_items, self.make_selection)
+            if not self.destination:
+                obj.frame = entry
+            else:
+                obj.destframe = entry
 
-        item_ids = {
-            "rect": rect, "img": img, "label": label,
-            "but": but, "txt_rect": txt_rect
-        }
-        entry = dummy(obj, item_ids, tag, row, col, x_center, y_center, self.canvas, self.image_items, self.make_selection)
-        if not self.destination:
-            obj.frame = entry
-        else:
-            obj.destframe = entry
+            self.item_to_entry[rect] = entry
+            self.item_to_entry[txt_rect] = entry
 
-        self.item_to_entry[rect] = entry
-        self.item_to_entry[txt_rect] = entry
+            added.append(entry)
 
-        self.image_items.insert(pos, entry)
+        self.image_items = self.image_items[:pos] + added[::-1] + self.image_items[pos:]
+        print(self.image_items)
 
         if objs_w_no_thumbs:
             self.thumbs.generate(objs_w_no_thumbs)
 
         self.reflow_from_index(pos)
-        self.make_selection(self.image_items[pos])
+        self.make_selection(self.image_items[self.current_selection or 0])
 
     def add(self, new_images): # adds squares
         "Add images to the end of the self.image_items list."
@@ -1133,7 +1135,7 @@ class ImageGrid(tk.Frame):
             self.thumbs.generate(objs_w_no_thumbs)
         self._update_scrollregion()
 
-    def remove(self, sublist, unload=True): # removes squares
+    def remove(self, sublist, unload=True, we_insert_after=False, re_render=False): # removes squares
         "Remove these items from canvas, internal lists, remove obj reference,"
         "stop their animations, remove their thumbnail if not used elsewhere,"
         "and initiate a canvas reflow event."
@@ -1149,9 +1151,10 @@ class ImageGrid(tk.Frame):
             if self.current_selection is not None:
                 i = -1 if self.current_selection >= len(self.image_items) else self.current_selection
                 selected_entry = self.image_items[i]
-                self.make_selection(selected_entry)
-                if self.gui.show_next.get():
-                    self.gui.displayimage(selected_entry.file)
+                if we_insert_after:
+                    pass
+                else:
+                    self.make_selection(selected_entry)
         else:
             self.current_selection = None
             self.current_selection_entry = None
@@ -1185,41 +1188,64 @@ class ImageGrid(tk.Frame):
         destw = self.gui.folder_explorer.destw
 
         if self.destination: # Dest
-            is_here = os.path.dirname(dest) == self.destination
-            if is_here:
-                if dest == self.destination:
-                    dest.remove(sublist)
-                    dest.insert_first(sublist) # insert first?
+            # origin is false, so it origianted from grid. it can only be in destgrid if assigned is on. we need to know if they are in dest to know whether to remove them. chekc their dest values
+            destination_is_grid = self.destination == dest["path"]
+            #origin true means we only need to remove or insert first depnding on if the path is going to self.destination.
+            # if false, we could be getting from multiple destinations
+            if origin:
+                going_out_of_dest = self.destination != dest["path"]
+                if going_out_of_dest:
+                    self.remove(sublist)
+                    if self.current_selection_entry:
+                        self.gui.displayimage(self.current_selection_entry.file)
                 else:
-                    dest.remove(sublist)
-                if origin:
-                    imagegrid.move(sublist, dest, origin=False) # always a "reassign". Must be in assigned by nature.
-            elif not origin:
-                if destw and dest == self.destination: # from moved, assigned or unassigned, always when origin = False
-                    dest.insert_first(sublist)
-                else:
-                    pass
+                    self.remove(sublist, we_insert_after=True)
+                    self.insert_first(sublist)
+                    if self.current_selection_entry:
+                        self.gui.displayimage(self.current_selection_entry.file)
+                imagegrid.move(sublist, dest, origin=False) # always a "reassign". Must be in assigned by nature.
+            else:
+                image_files = set([x.file for x in self.image_items])
+                for x in sublist: # from assigned, multiple destinations, have to handle like this.
+                    in_dest_grid = x in image_files
+                    if in_dest_grid:
+                        if destination_is_grid:
+                            self.remove([x], we_insert_after=True)
+                            self.insert_first([x])
+                        else:
+                            self.remove([x])
+                    elif destination_is_grid:
+                        self.insert_first([x])
+
+                            
         else: # Main grid
             if view == "assigned": # this should work for things coming from dest no problem.
-                imagegrid.remove(sublist)
+                imagegrid.remove(sublist, we_insert_after=True)
                 imagegrid.insert_first(sublist)
                 if origin:
+                    if self.current_selection_entry:
+                        self.gui.displayimage(self.current_selection_entry.file)
                     for x in sublist:
                         fm.assigned.remove(x)
                     fm.assigned = sublist + fm.assigned
-                    dest.move(sublist, dest, origin=False) # this tells dest, move x to dest, dest looks up if it has x. (specifically, just looks at the path.)
+                    if destw:
+                        destw.move(sublist, dest, origin=False) # this tells dest, move x to dest, dest looks up if it has x. (specifically, just looks at the path.)
             elif origin and view == "unassigned" : # we can ignore all calls from dest. but not to dest
                 imagegrid.remove(sublist)
+                if self.current_selection_entry:
+                    self.gui.displayimage(self.current_selection_entry.file)
                 fm.assigned = sublist + fm.assigned
-                if destw and destw.destination == dest:
+                if destw and destw.destination == dest["path"]:
                     destw.move(sublist, dest, origin=False) # dest only needs to know if its dest is actually  the same
                 else: pass # dest doesnt need to know
             elif origin and view == "moved":
                 imagegrid.remove(sublist)
+                if self.current_selection_entry:
+                    self.gui.displayimage(self.current_selection_entry.file)
                 for x in sublist:
                     fm.moved.remove(x)
                 fm.assigned = sublist + fm.assigned
-                if destw.destination == dest:
+                if destw.destination == dest["path"]:
                     destw.move(sublist, dest, origin=False)
                 else: pass # doesnt need to know
 
@@ -1257,6 +1283,7 @@ class ImageGrid(tk.Frame):
 
     # Actions
     def _on_canvas_click(self, event):
+        self.gui.bindhandler.window_focused = "DEST" if self.destination else "GRID"
         x = self.canvas.canvasx(event.x)
         y = self.canvas.canvasy(event.y)
         overlapping = self.canvas.find_overlapping(x, y, x, y)
@@ -1297,7 +1324,6 @@ class ImageGrid(tk.Frame):
         self.canvas.itemconfig(entry.ids["rect"], outline=self.theme.get("square_selected"), fill=self.theme.get("square_selected"))
         self.current_selection = self.image_items.index(entry)
         self.current_selection_entry = entry
-        self.fileManager.gui.bindhandler.window_focused = "DEST" if self.destination else "GRID"
 
     def navigate(self, keysym, reverse=False):
         cols = self.cols
@@ -1434,6 +1460,7 @@ class ImageGrid(tk.Frame):
     
     def get_items_adjacent_to_selection(self):
         current, items, cols = self.current_selection, self.image_items, self.cols
+        if not current: return []
         n = 2 # Preload distance
         adjacent_indexes = []
         seen = set()

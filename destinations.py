@@ -458,7 +458,7 @@ class FolderExplorer(ttk.Frame):
             self.destw = None
             self.a.destroy()
             self.a = None
-            self.parent.bindhandler.window_focused == "GRID"
+            self.parent.bindhandler.window_focused = "GRID"
         if self.a != None:
             close_window()
 
@@ -631,7 +631,7 @@ class FolderExplorer(ttk.Frame):
         self.color_cache[folder_path] = default_c
         btn = tk.Button(frame, text=btn_text, bg=default_c, anchor="w", relief=RELIEF)
         btn.config(font=("Courier", 12), fg="black")
-        grab = tk.Label(frame,text="≡",cursor="fleur",width=2,bg="#444",fg="white")
+        grab = tk.Label(frame,text="≡",cursor="fleur",width=2,bg=darkened_c or "#444",fg="white")
         grab.pack(side="left", fill="y", padx=(0, 0))
         grab.bind("<ButtonPress-1>", lambda e, btn=btn: self.start_drag(e, btn))
         grab.bind("<B1-Motion>", self.drag_motion)
