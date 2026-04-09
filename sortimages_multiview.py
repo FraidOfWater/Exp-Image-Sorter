@@ -3,10 +3,23 @@ from time import perf_counter
 import os, json, shutil, tkinter as tk, ctypes, argparse
 import threading, multiprocessing as mp
 from gui import GUIManager
-vipsbin = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vips-dev-8.18", "bin")
-os.environ['PATH'] = os.pathsep.join((vipsbin, os.environ['PATH']))
-os.add_dll_directory(vipsbin)
-if os.path.isdir(vipsbin): os.add_dll_directory(vipsbin)
+
+vipsbin = None
+def pyvips_is_detected():
+    global vipsbin
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    for x in os.listdir(script_dir):
+        if "vips" in x:
+            vipsbin = os.path.join(script_dir, x, "bin")
+            break
+    return True if vipsbin else False
+
+if pyvips_is_detected():
+    os.environ['PATH'] = os.pathsep.join((vipsbin, os.environ['PATH']))
+    use_pyvips = True
+else:
+    print(f"Libvips not found in {vipsbin}.\nDownload libvips windows binaries (64, ALL or WEB). https://github.com/libvips/build-win64-mxe/releases/tag/v8.18.0\nFalling back to PIL.")
+    use_pyvips = False
 
 # get rid of menu bar, VLC style, PURPLE theme, Anim debug colors, font change to dest buttons, UNDO IN DESTW
 # should get rid of opencv and use something else. Cuts the filesize to half lol!
@@ -153,6 +166,8 @@ class SortImages:
             import concurrent.futures
             import numpy
             import PIL
+            PIL.Image.MAX_IMAGE_PIXELS = None
+            PIL.ImageFile.LOAD_TRUNCATED_IMAGES = True
             import pyvips
             
             from destinations import FolderExplorer
@@ -193,6 +208,7 @@ class SortImages:
             return
 
         from PIL import Image
+        
         with Image.open(testable.path) as im:
             width, height = im.size
         if max(width, height) != self.gui.thumbnailsize:
