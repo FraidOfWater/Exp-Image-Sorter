@@ -41,8 +41,8 @@ How do I compile from source?
             Copy VLC files into the internal folder. (You don't need these if vlc is installed somewhere on the system)
             Copy themes.json into the internal folder.
 
-      To get the script working on your own:
-            Run install.bat
+      To run the Script:
+            install dependencies found in requirements.py
             Include vips windows binaries.
             Install VLC 64-bit on your system or include the VLC files.
 
