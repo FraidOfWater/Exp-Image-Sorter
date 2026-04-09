@@ -359,6 +359,8 @@ class SortImages:
                 gui.winfo_toplevel().title(title)
 
                 successfull.append(obj)
+        if self.gui.current_view.get().lower() == "assigned":
+            gui.imagegrid.remove(successfull)
 
     def setDestination(self, dest, caller=None): # could move to imagegrid, where the assigned list originates from.
         f = self.gui.focus_get()
@@ -865,7 +867,7 @@ class SortImages:
         def extract_features_pillow(obj): # this could actually load and generate the thumbnail proper.
             try:
                 # Load and convert to HSV using Pillow
-                img = gen_thumb(obj, self.gui.thumbnailsize, self.data_dir).convert('HSV')
+                img = gen_thumb(obj, self.gui.thumbnailsize, self.data_dir, user="histogram").convert('HSV')
                 img_arr = np.array(img)
                 
                 # Calculate 3D Histogram: 8 bins per channel
@@ -976,7 +978,7 @@ class SortImages:
             with ThreadPoolExecutor(
                 max_workers=max(1, self.threads - 1), thread_name_prefix="mobilenet_thumbs"
             ) as executor:
-                futures = {executor.submit(self.gui.imagegrid.thumbs.gen_thumb, obj, size=TARGET_SIZE, cache_dir=None, user="mobilenet", mode="letterbox"): i
+                futures = {executor.submit(self.gui.imagegrid.thumbs.gen_thumb, obj, size=TARGET_SIZE, cache_dir=None, user="mobilenet"): i
                         for i, obj in enumerate(imagefiles)}
 
                 for f in as_completed(futures):

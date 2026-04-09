@@ -235,7 +235,7 @@ class ImageGrid(tk.Frame):
 
         thumb_ext = {"png", "jpg", "jpeg", "bmp", "pcx", "tiff", "psd", "jfif", "gif", "webp", "avif"}
         anim_ext = {"gif", "webp", "webm", "mp4", "mkv", "m4v", "mov"}
-        video_ext = {"webm", "mp4", "mkv", "m4v", "mov"}
+        pyav_formats = {"webm", "mp4", "mkv", "m4v", "mov"}
         thumb_pool = None
         frame_pool = None
         def __init__(self, fileManager):
@@ -342,7 +342,7 @@ class ImageGrid(tk.Frame):
                 gui.after(0, lambda imgs=thumbs_left, frames=frames_left: gui.frame_gen_queue_var.set(f"Ingen: {imgs}/{frames}"))
 
             if not self.frame_queue.empty() and self.thumb_queue.unfinished_tasks == 0:
-                print(perf_counter()-self.start)
+                #print(perf_counter()-self.start)
                 self._frame_worker()
 
         def _frame_worker(self):
@@ -391,7 +391,7 @@ class ImageGrid(tk.Frame):
                 for f in instances:
                     f.change_color(color)
             with self._left_lock:
-                print(perf_counter()-self.start)
+                #print(perf_counter()-self.start)
                 self.left_f = max(0, self.left_f - 1)
                 thumbs_left = self.left
                 frames_left = self.left_f
@@ -399,20 +399,6 @@ class ImageGrid(tk.Frame):
                 instances = [f for f in (obj.frame, obj.destframe) if f]
                 if instances:
                     self.gui.after(0, lambda instances=instances, color=color: change_color(instances, color))
-
-        def flush_all(self):
-            self.stop_event.set()
-
-            if self.thumb_after_id:
-                self.gui.after_cancel(self.thumb_after_id)
-            if self.frame_after_id:
-                self.gui.after_cancel(self.frame_after_id)
-            self._thumb_worker_running = False
-            self._frame_worker_running = False
-
-            for q in (self.thumb_queue, self.frame_queue):
-                with q.mutex:
-                    q.queue.clear()
 
         def generate(self, imgfiles):
             self.start = perf_counter()
@@ -441,23 +427,162 @@ class ImageGrid(tk.Frame):
             if obj.frame: self.gui.imagegrid.canvas.itemconfig(obj.frame.ids["label"], text=obj.truncated_filename)
             if obj.destframe: self.gui.folder_explorer.destw.canvas.itemconfig(obj.destframe.ids["label"], text=obj.truncated_filename)
 
-        def gen_thumb(self, obj, size, cache_dir, user="default", mode="as_is"): # session just calls this for displayedlist  
-            def load_thumb(thumb):
-                "Loads thumb to canvas"
-                def run(thumb):
-                    if self.stop_event.is_set(): return
-                    self.gen_name(obj)
-                    instances = [f for f in (obj.frame, obj.destframe) if f]
-                    if instances:
-                        obj.thumb = thumb
-                        for f in instances:
-                            f.change_color() # defaults to grid bg
-                            f.canvas.itemconfig(f.img_id, image=thumb)
-                    #print(perf_counter()-self.start)
+        def gen_via_av(self, obj, path, mode, size, user):
+            container = None
+            pix_fmt = 'rgba' if obj.ext == "gif" else 'rgb24'
+            max_size = 256
+            try:
+                container = ImageGrid.ThumbManager.av.open(obj.path, metadata_errors='ignore') # do we need replace?
+                stream = container.streams.video[0]
+                stream.thread_count = 0
 
-                gui.after_idle(run, thumb)
+                for frame in container.decode(stream):
+                    w, h = stream.width, stream.height
+                    scale = max_size / max(w, h)
+                    match mode:
+                        case "Keep Aspect Ratio" | "Pad to Dimensions":
+                            new_w, new_h = int(w * scale), int(h * scale)
+                        case "Stretch to Dimensions":
+                            new_w, new_h = size, size
+                        case "Crop to Dimensions":
+                            scale = size / min(w, h)
+                            new_w, new_h = int(w * scale), int(h * scale)
 
-            interp = ImageGrid.ThumbManager.av.video.reformatter.Interpolation.AREA
+                    resized_frame = frame.reformat(width=new_w, height=new_h, interpolation=ImageGrid.ThumbManager.av.video.reformatter.Interpolation.AREA, format=pix_fmt)
+                    pil_img = resized_frame.to_image()
+                    
+                    if mode == "Pad to Dimensions":
+                        new_im = ImageGrid.ThumbManager.Image.new("RGB", (size, size), (114, 114, 114)) # might not respect transparency for gif. (Fallback)
+                        w, h = pil_img.size
+                        left, top = (size - w) // 2, (size - h) // 2
+                        new_im.paste(pil_img, (left, top))
+                        pil_img = new_im
+                    
+                    if mode == "Crop to Dimensions":
+                        curr_w, curr_h = pil_img.size
+                        left = (curr_w - size) // 2
+                        top = (curr_h - size) // 2
+                        pil_img = pil_img.crop((left, top, left + size, top + size))
+
+                    if self.fileManager.THUMB_FORMAT[1:] == "jpeg" and pil_img.mode != "RGB": pil_img = pil_img.convert("RGB")
+                    elif pil_img.mode not in ("RGB", "RGBA"): pil_img = pil_img.convert("RGBA")
+                    if path:
+                        pil_img.save(path, format=self.fileManager.THUMB_FORMAT[1:], quality=100, lossless=False)
+                    if user == "default":
+                        obj.thumbnail = path
+                        thumb = ImageGrid.ThumbManager.ImageTk.PhotoImage(pil_img)
+                        self.load_thumb(obj, thumb)
+                    elif user == "classify":
+                        return pil_img, obj # for classify
+                    elif user == "mobilenet":
+                        return ImageGrid.ThumbManager.numpy.array(pil_img, dtype=ImageGrid.ThumbManager.numpy.uint8), obj # for mobilenet
+                
+                    return True
+            except Exception as e:
+                print(f"PyAV thumbnail error for {os.path.basename(obj.path)}: {e}")
+                return False
+            finally:
+                if container:
+                    container.close()
+
+        def gen_via_pyvips(self, obj, path, mode, size, user):
+            try:
+                vips_img = ImageGrid.ThumbManager.pyvips.Image.new_from_file(obj.path)
+
+                match mode:
+                    case "Keep Aspect Ratio":
+                        vips_img = ImageGrid.ThumbManager.pyvips.Image.thumbnail(obj.path, size)
+                    case "Stretch to Dimensions":
+                        vips_img = ImageGrid.ThumbManager.pyvips.Image.new_from_file(obj.path, access="sequential")
+                        vips_img = vips_img.resize(size / vips_img.width, vscale=size / vips_img.height)
+                    case "Pad to Dimensions":
+                        vips_img = ImageGrid.ThumbManager.pyvips.Image.thumbnail(obj.path, size)
+                        bg = [114, 114, 114, 255] if vips_img.hasalpha() else [114, 114, 114]
+                        vips_img = vips_img.embed((size - vips_img.width) // 2, 
+                                                (size - vips_img.height) // 2, 
+                                                size, size, 
+                                                extend="background", background=bg)
+                    case "Crop to Dimensions":
+                        vips_img = ImageGrid.ThumbManager.pyvips.Image.thumbnail(obj.path, size, crop="centre")
+
+                pformat = str(vips_img.interpretation).lower()
+                match pformat:
+                    case "srgb": pformat = "RGBA" if vips_img.bands == 4 else "RGB"
+                    case "b-w": pformat = "LA" if vips_img.bands == 2 else "L"
+                    case "rgb16" | "grey16": pformat = "I;16"
+
+                pil_img = ImageGrid.ThumbManager.Image.frombytes(pformat, (vips_img.width, vips_img.height), vips_img.write_to_memory(), "raw")
+                if self.fileManager.THUMB_FORMAT[1:] == "jpeg" and pil_img.mode != "RGB": pil_img = pil_img.convert("RGB")
+                elif pil_img.mode not in ("RGB", "RGBA"): pil_img = pil_img.convert("RGBA")
+                if path:
+                    pil_img.save(path, format=self.fileManager.THUMB_FORMAT[1:], quality=100, lossless=False)
+                if user == "default":
+                    obj.thumbnail = path
+                    thumb = ImageGrid.ThumbManager.ImageTk.PhotoImage(pil_img)
+                    self.load_thumb(obj, thumb)
+                elif user == "classify":
+                    return pil_img, obj # for classify
+                elif user == "mobilenet":
+                    return ImageGrid.ThumbManager.numpy.array(pil_img, dtype=ImageGrid.ThumbManager.numpy.uint8), obj # for mobilenet
+                return True
+            except Exception as e:
+                print(f"Pyvips couldn't create thumbnail: {obj.name} : Error: {e}")
+                return False
+
+        def gen_via_pil(self, obj, path, mode, size, user):
+            try:
+                with ImageGrid.ThumbManager.Image.open(obj.path) as pil_img:
+                    if pil_img.mode not in ("RGB", "RGBA"): pil_img = pil_img.convert("RGBA" if self.fileManager.THUMB_FORMAT[1:] != "jpeg" else "RGB")
+                    match mode:
+                        case "Keep Aspect Ratio": pil_img.thumbnail((size, size), resample=ImageGrid.ThumbManager.Image.Resampling.LANCZOS)
+                        case "Stretch to Dimensions": pil_img = pil_img.resize((size, size))
+                        case "Pad to Dimensions":
+                            pil_img.thumbnail((size, size))
+                            w, h = pil_img.size
+                            new_im = ImageGrid.ThumbManager.Image.new("RGB", (size, size), (114, 114, 114))
+                            left = (size - w) // 2
+                            top = (size - h) // 2
+                            new_im.paste(pil_img, (left, top), pil_img)
+                            pil_img = new_im
+                        case "Crop to Dimensions":
+                            w, h = pil_img.size
+                            side = min(w, h)
+                            left = (w - side) // 2
+                            top = (h - side) // 2
+                            pil_img = pil_img.crop((left, top, left + side, top + side))
+                            pil_img = pil_img.resize((size, size), ImageGrid.ThumbManager.Image.Resampling.LANCZOS)
+
+                    if path:
+                        pil_img.save(path, format=self.fileManager.THUMB_FORMAT[1:], quality=100, lossless=False)
+                    if user == "default":
+                        obj.thumbnail = path
+                        thumb = ImageGrid.ThumbManager.ImageTk.PhotoImage(pil_img)
+                        self.load_thumb(obj, thumb)
+                    elif user == "classify":
+                        return pil_img, obj # for classify
+                    elif user == "mobilenet":
+                        return ImageGrid.ThumbManager.numpy.array(pil_img, dtype=ImageGrid.ThumbManager.numpy.uint8), obj # for mobilenet
+                    return True
+            except Exception as e:
+                print(f"Pillows couldn't create thumbnail, either: {obj.name} : Error: {e}")
+                return False
+
+        def load_thumb(self, obj, thumb):
+            "Loads thumb to canvas"
+            def run(thumb):
+                if self.stop_event.is_set(): return
+                self.gen_name(obj)
+                instances = [f for f in (obj.frame, obj.destframe) if f]
+                if instances:
+                    obj.thumb = thumb
+                    for f in instances:
+                        f.change_color() # defaults to grid bg
+                        f.canvas.itemconfig(f.img_id, image=thumb)
+                #print(perf_counter()-self.start)
+
+            self.fileManager.gui.after_idle(run, thumb)
+
+        def gen_thumb(self, obj, size, cache_dir, user="default"): # session just calls this for displayedlist  
             gui = self.fileManager.gui
             THUMB_FORMAT = self.fileManager.THUMB_FORMAT
 
@@ -465,116 +590,51 @@ class ImageGrid(tk.Frame):
             if user=="default" and not (obj.frame or obj.destframe): return
             elif user == "mobilenet" and obj.embed is not None and obj.color_embed is not None:
                 return
-            else:
-                if not obj.id: obj.gen_id()
+
+            if not obj.id: obj.gen_id()
 
             if user == "default" and obj.thumb:
-                load_thumb(obj.thumb)
+                self.load_thumb(obj, obj.thumb)
                 return
 
-            pil_img = None
-            failed = False
-
+            thumbnail_path = None
             if cache_dir:
                 thumbnail_path = os.path.join(cache_dir, f"{obj.id}{THUMB_FORMAT}")
                 
             if cache_dir and os.path.exists(thumbnail_path): # default and train will have cache_dir
                 try:
-                    if user != "default": return
+                    if user != "default": return # meaning if train cache, skip, mobilenet wont reach here.
                     thumb = None
                     with ImageGrid.ThumbManager.Image.open(thumbnail_path) as pil_img: # pil is faster here.
                         obj.thumbnail = thumbnail_path
                         thumb = ImageGrid.ThumbManager.ImageTk.PhotoImage(pil_img)
-                    load_thumb(thumb)
+                    self.load_thumb(obj, thumb)
                     return
                 except Exception as e:
                     print(f"Pillows couldn't load thumbnail from cache: {obj.name} : Error: {e}.")
-                    failed = True
-            # if no found, we should generate it.
-            vips_used = False
+                    
+            mode = "Pad To Dimensions" if user == "mobilenet" else "Keep Aspect Ratio"
+            if obj.ext in self.pyav_formats:
+                success = self.gen_via_av(obj, thumbnail_path, mode=mode, size=size, user=user)
+            
+            elif obj.ext == "gif": # gif likes pil
+                success = self.gen_via_pil(obj, thumbnail_path, mode=mode, size=size, user=user)
+                if not success: success = self.gen_via_pyvips(obj, thumbnail_path, mode=mode, size=size, user=user)
+                if not success: success = self.gen_via_av(obj, thumbnail_path, mode=mode, size=size, user=user)
 
-            av_formats = {"webm", "mp4", "mkv", "m4v", "mov", "gif"}
-            if obj.ext in av_formats: #Webm, mp4
-                pix_fmt = 'rgba' if any(f in obj.ext for f in ["webp", "gif"]) else 'rgb24'
-                container = None
-                try:
-                    container = ImageGrid.ThumbManager.av.open(obj.path)
-                    stream = container.streams.video[0]
-                    w, h = stream.width, stream.height
-                    max_size = 256
-                    scale = max_size / max(w, h)
-                    new_w = int(w * scale)
-                    new_h = int(h * scale)
-
-                    for frame in container.decode(stream):
-                        resized_frame = frame.reformat(width=new_w, height=new_h, interpolation=interp, format=pix_fmt)
-                        pil_img = resized_frame.to_image()
-                        pil_img.save(thumbnail_path, format=THUMB_FORMAT[1:], quality=100)
-                        obj.thumbnail = thumbnail_path
-                        thumb = ImageGrid.ThumbManager.ImageTk.PhotoImage(pil_img)
-                        load_thumb(thumb)                            
-                        break
-                    return
-                except Exception as e:
-                    print(f"PyAV thumbnail error for {obj.name}: {e}")
-                    failed = True
-                finally:
-                    if container:
-                        container.close()
-            else:
-                if mode == "as_is":
-                    try:
-                        vips_img = ImageGrid.ThumbManager.pyvips.Image.thumbnail(obj.path, size)
-                        buffer = vips_img.write_to_memory()
-                        pil_format = self.get_mode(vips_img)
-                        pil_img =  ImageGrid.ThumbManager.Image.frombytes(pil_format, (vips_img.width, vips_img.height), buffer, "raw")
-                        vips_used = True
-                    except Exception as e: # Pillow fallback
-                        print(f"Pyvips couldn't create thumbnail: {obj.name} : Error: {e}.")
-                        failed = True
-                if not vips_used or failed:
-                    try:
-                        with ImageGrid.ThumbManager.Image.open(obj.path) as pil_img:
-                            pil_img.thumbnail((size, size))
-                    except Exception as e:
-                        print(f"Pillows couldn't create thumbnail, either: {obj.name} : Error: {e}")
-                        failed = True
-            if failed and user=="default":
+            else: # webp likes pyvips
+                success = self.gen_via_pyvips(obj, thumbnail_path, mode=mode, size=size, user=user)
+                if not success: self.gen_via_pil(obj, thumbnail_path, mode=mode, size=size, user=user) # fallback
+        
+            if not success and user=="default":
                 def run(obj):
                     if self.stop_event.is_set(): return
                     self.gen_name(obj)
                 gui.after_idle(run, obj)
-            if not pil_img:
-                return
-
-            # resize according to mode
-            if mode == "as_is" and not vips_used:
-                pil_img.thumbnail((size, size))
-            elif mode == "letterbox":
-                pil_img.thumbnail((size, size))
-                w, h = pil_img.size
-                new_im = ImageGrid.ThumbManager.Image.new("RGB", (size, size), (114, 114, 114))
-                left = (size - w) // 2
-                top = (size - h) // 2
-                new_im.paste(pil_img, (left, top))
-                pil_img = new_im
-
-            format = "RGBA" if user == "default" else "RGB"
-            if pil_img.mode != format: pil_img = pil_img.convert(format)
-
-            # save it to cache if we can
-            if cache_dir: # default and train
-                pil_img.save(thumbnail_path, format=THUMB_FORMAT[1:], quality=100)
-                thumb = None
-            if user == "default": # for default, save path to imgfile and gen imgtk for it.
-                obj.thumbnail = thumbnail_path
-                thumb = ImageGrid.ThumbManager.ImageTk.PhotoImage(pil_img)
-                load_thumb(thumb)
-
-            if user == "classify":
-                return pil_img, obj # for classify
-            elif user == "mobilenet":
-                return ImageGrid.ThumbManager.numpy.array(pil_img, dtype=ImageGrid.ThumbManager.numpy.uint8), obj # for mobilenet
+            if user == "classify" and success:
+                return success # for classify
+            elif user == "mobilenet" and success:
+                return success
 
         def gen_frames(self, obj):
             # some kind of limits here for both methods, like a time 15 seconds max or 20.
@@ -584,7 +644,7 @@ class ImageGrid(tk.Frame):
             def gui_enable_animation(o=obj, frametime=None):
                 animate.add_animation(o, frametime)
             obj.frames.clear()
-            if obj.ext in self.video_ext:
+            if obj.ext in self.pyav_formats:
                 def pick_sampling_rate(duration: float, native_fps: float,min_fps: float = 12.0, max_frames: int = 500, mode: Literal["stretch", "limit"] = "stretch"): # st
                     if duration == 0.0:  return native_fps if native_fps != 0.0 else min_fps
                     cap_rate = max_frames / duration # highest fps if we dont crop duration, but respect max_frames.
@@ -662,7 +722,10 @@ class ImageGrid(tk.Frame):
                             if (self.stop_event.is_set() and not (obj.frame or obj.destframe)) or not (obj.frame or obj.destframe): break
                             try:
                                 img.seek(i)
-                                duration, frame = (img.info.get('duration', 100) or 100, img.copy().convert("RGBA"))
+                                duration = img.info.get('duration', 100)
+                                if img.mode not in ("RGBA", "RGB"): frame = img.convert("RGB")
+                                else: frame = img.copy()
+
                                 frame.thumbnail((size, size))
                                 obj.frames.append((ImageGrid.ThumbManager.ImageTk.PhotoImage(frame), duration))
                                 i += 1
@@ -673,6 +736,8 @@ class ImageGrid(tk.Frame):
                                 break
                 def gen_using_vips():
                     import pyvips
+                    full_image = None
+                    image = None
                     try:
                         # Load the full animation pipeline (tax paid here)
                         full_image = pyvips.Image.gifload(obj.path, n=-1)
@@ -723,6 +788,9 @@ class ImageGrid(tk.Frame):
                         print("gen frames vips error:", e)
                         obj.clear_frames()
                         gen_using_pil()
+                    finally:
+                        del full_image
+                        del image
                 
                 with self.gif_semaphore: #? works or no
                     gen_using_vips() # falls back to pil.
@@ -735,6 +803,8 @@ class ImageGrid(tk.Frame):
             match vips_format:
                 case "srgb":
                     pil_format = "RGB" if vips_img.bands == 3 else "RGBA"
+                case "b-w":
+                    pil_format = "LA" if vips_img.bands == 2 else "L"
                 case "b-w": pil_format = "L"
                 case "rgb16": pil_format = "I;16"
                 case "grey16": pil_format = "I;16"
@@ -960,7 +1030,6 @@ class ImageGrid(tk.Frame):
             added.append(entry)
 
         self.image_items = self.image_items[:pos] + added[::-1] + self.image_items[pos:]
-        print(self.image_items)
 
         if objs_w_no_thumbs:
             self.thumbs.generate(objs_w_no_thumbs)
@@ -1325,7 +1394,7 @@ class ImageGrid(tk.Frame):
         self.current_selection = self.image_items.index(entry)
         self.current_selection_entry = entry
 
-    def navigate(self, keysym, reverse=False):
+    def navigate(self, keysym, reverse=False, controller=False):
         cols = self.cols
         rows = int((len(self.image_items) + cols - 1) / cols)
         first_visible_row = round(self.canvas.yview()[0] * rows)
@@ -1336,6 +1405,8 @@ class ImageGrid(tk.Frame):
             new_selection = self.image_items[index]
             self.make_selection(new_selection)
             self.current_selection = index
+            if controller and self.current_selection_entry:
+                self.gui.displayimage(self.current_selection_entry.file)
             return
         else:
             index = self.current_selection
@@ -1353,7 +1424,7 @@ class ImageGrid(tk.Frame):
                 index -= cols
                 if index < 0: return
                 scroll_dir = "Up" if not reverse else "Down"
-            else:
+            elif keysym == "Down":
                 index += cols
                 if index >= len(self.image_items): return
                 scroll_dir = "Up" if reverse else "Down"
@@ -1376,6 +1447,8 @@ class ImageGrid(tk.Frame):
         else:
             target_scroll = (new_row) / rows
             self.canvas.yview_moveto(target_scroll)
+        if controller and self.current_selection_entry:
+            self.gui.displayimage(self.current_selection_entry.file)
 
     def _on_mousewheel(self, event, direction=None):
         sqr_w, sqr_h = self.sqr_size
@@ -1603,7 +1676,6 @@ class ImageGrid(tk.Frame):
         if entry in self.selected: self.unmark_entry(entry)
         else: self.mark_entry(entry)
     
-
 class debug_imgfile:
     def __init__(self, imgtk, filename):
         self.thumb = imgtk

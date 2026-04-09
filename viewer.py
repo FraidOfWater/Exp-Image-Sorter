@@ -24,6 +24,9 @@ import pyvips
 # Separate CurrentImage from RENDERER.
 # Rework cleanup logic, just delete the current object etc.
 
+# fast pan has been disabled again. Just not stable enough
+
+# pyvips transform requires us to change all PIL to pyvips. So in zoom cache wed store the pyvips image instead. wed need to convert to pil every time though.
 class Application(tk.Frame):
     BUTTON_MODIFIER_CTRL = 1
     BUTTON_MODIFIER_CTRL_LEFT_CLICK = 257
@@ -562,7 +565,7 @@ class Application(tk.Frame):
                 self.restrict_pan()
         if self.zoom_after_id: self.after_cancel(self.zoom_after_id)
         self.draw_image(quick_zoom_event=self.quick_zoom.get())
-        if hasattr(self, "since_last"): print(perf_counter()-self.since_last)
+        #if hasattr(self, "since_last"): print(perf_counter()-self.since_last)
         self.since_last = perf_counter()
 
     def mouse_move_left(self, event):
@@ -1047,17 +1050,16 @@ class Application(tk.Frame):
             thumbpath = filename
 
         if self.ext in ("gif", "webp"): # is animation
-            """if thumbpath:
-                self._set_thumbnail(thumbpath=thumbpath)"""
-
-            self._set_animation(filename)
-        else: # is picture
-            token = None
-            doing_thumb = False
-            if self.thumbnail_var.get() != "No thumb":
-                doing_thumb = True
-                token = self._set_thumbnail(thumbpath=thumbpath)
-
+            is_animated = True if self.img_pointer.get_n_pages() > 1 else False
+            if is_animated:
+                self._set_animation(filename)
+                return
+        token = None
+        doing_thumb = False
+        if self.thumbnail_var.get() != "No thumb":
+            doing_thumb = True
+            token = self._set_thumbnail(thumbpath=thumbpath)
+        else:
             self._set_picture(filename, token, doing_thumb)
 
     def reset(self, filename):
@@ -1160,6 +1162,7 @@ class Application(tk.Frame):
 
     "Static Images"
     def _set_thumbnail(self, thumbpath=None):
+        self.a = False
         if thumbpath: token = self.loader.request_load(thumbpath, caller="cached_thumb")
         else: token = self.loader.request_load(thumbpath, caller="gen_thumb")
         return token
@@ -1199,17 +1202,11 @@ class Application(tk.Frame):
     def _set_animation(self, filename):
         self.zoom_fit()
         self.a = False
-        
-        is_animated = True if self.img_pointer.get_n_pages() > 1 else False
+        self.is_gif = True
+        self.open_thread = Thread(target=self._preload_frames, args=(self.filename, self.id), name="(Thread) Viewer frame preload", daemon=True)
+        self.open_thread.start()
+        self.timer1 = perf_counter()
 
-        if is_animated:
-            self.is_gif = True
-            self.open_thread = Thread(target=self._preload_frames, args=(self.filename, self.id), name="(Thread) Viewer frame preload", daemon=True)
-            self.open_thread.start()
-            self.timer1 = perf_counter()
-        else:
-            self.loader.request_load(filename, self.current_load_token, caller="fit")
-    
     def _preload_frames(self, filename, id1):
         def fallback():
             self.is_gif = False
@@ -1226,7 +1223,7 @@ class Application(tk.Frame):
                     if id1 != self.id: return
                     
                     handle.seek(i)
-                    duration = handle.info.get('duration', 100) or 100
+                    duration = handle.info.get('duration', 100)
                     if handle.mode not in ("RGBA", "RGB"): frame = handle.convert("RGB")
                     else: frame = handle.copy()
                     i += 1
@@ -1306,11 +1303,13 @@ class Application(tk.Frame):
         match caller:
             case "cached_thumb" | "gen_thumb":
                 initial_fit = data["thumb"]
-                self.zoom_fit()
+                self.zoom_fit(initial_fit)
                 self.draw_image(initial_fit) # draw full res after a delay.
+                self._set_picture(self.filename, token)
 
             case "buffer":
-                initial_fit = data.get("img", data.get("full_res"))
+                initial_fit = data.get("img", data.get("full_res")) # not generating this identically to fit for reasons? should be fit but with initial filter.
+                # have to add buffer to the dict.
                 self.zoom_fit()
                 self.draw_image(initial_fit)
 
@@ -1318,7 +1317,7 @@ class Application(tk.Frame):
                 initial_fit = data["img"] # got the find a way to add this to zoom cache.
                 self._zoom_cache[(self.lazy_index, data["scale_key"])] = initial_fit
                 
-                self.zoom_fit()
+                self.zoom_fit(initial_fit)
                 self.draw_image(initial_fit) # calculates the current zoom key and retrieves from cache
 
                 if self.do_caching.get():
@@ -1456,7 +1455,8 @@ class Application(tk.Frame):
                         vips_img = pyvips.Image.thumbnail_buffer(self.pyvips_buffer or self.img_pointer, size[0], height=size[1]) #LINEAR, #CUBIC, #MITCHELL, #LANCZOS2, #LANCZOS3, #MKS2013, #MKS2021
                         buff = vips_img.write_to_memory()
                         mode = get_mode(vips_img)
-                        resized = Image.frombytes(mode, (vips_img.width, vips_img.height), buffer, "raw")
+                        resized = Image.frombytes(mode, (vips_img.width, vips_img.height), buff, "raw")
+                        if resized.mode not in ("RGBA", "RGB"): resized = resized.convert("RGB")
                     except Exception as e:
                         print("couldnt zoom via pyvips", e)            
             
@@ -1491,7 +1491,7 @@ class Application(tk.Frame):
                             buffer = vips_img.write_to_memory()
                             mode = get_mode(vips_img)
                             resized = Image.frombytes(mode, (vips_img.width, vips_img.height), buffer, "raw")
-                            if resized.mode not in ("RGBA", "RGB"): resized.convert("RGB")
+                            if resized.mode not in ("RGBA", "RGB"): resized = resized.convert("RGB")
                         except Exception as e:
                             print("Couldnt resize:", e)
                             return
@@ -1526,6 +1526,17 @@ class Application(tk.Frame):
             # we might not have to do scaling at all using transform, except when resizing bigger, and then we can do that by resizing too.
             source = get_source(zoom, scale_key, size)
             if not source: return None, affine_inv
+            
+            """import pyvips
+            a, b, tx, c, d, ty = affine_inv
+            dst = source.affine((a, b, c, d), 
+                    o_x=tx, 
+                    o_y=ty, 
+                    interpolate=pyvips.Interpolate.new("nearest"),
+                    extend="background",
+                    background=self.bg_color)
+            dst = dst.extract_area(0, 0, render_w, render_h)"""
+
             dst = source.transform((render_w, render_h), 
                                                               Image.AFFINE, affine_inv, 
                                                               resample=Image.Resampling.NEAREST, 
@@ -1623,7 +1634,7 @@ class Application(tk.Frame):
             self.canvas.update() # pans during this time are essentially cancelled
 
             self.ready = True
-            if do_again:
+            if do_again and False:
                 after_id3 = self.after(40, threaded_buffer_gen, 5)
                 self.zoom_after_id = after_id3
         if self.zoom_after_id: 
@@ -1770,14 +1781,12 @@ class Application(tk.Frame):
 def get_mode(vips_img) -> str:
     "Return the mode needed to convert a PYVIPS.Image to a PIL.Image format via PIL.Image.frombytes()."
     "Most common formats are srgb, b-w, rgb16 and grey16."
-    vips_format, pil_format = str(vips_img.interpretation).lower(), None
-    match vips_format:
-        case "srgb":
-            pil_format = "RGB" if vips_img.bands == 3 else "RGBA"
-        case "b-w": pil_format = "L"
-        case "rgb16": pil_format = "I;16"
-        case "grey16": pil_format = "I;16"
-    return pil_format
+    pformat = str(vips_img.interpretation).lower()
+    match pformat:
+        case "srgb": pformat = "RGBA" if vips_img.bands == 4 else "RGB"
+        case "b-w": pformat = "LA" if vips_img.bands == 2 else "L"
+        case "rgb16" | "grey16": pformat = "I;16"
+    return pformat
 
 def pyvips_to_pillows_for_thumb(filename: str, mode: str, pre_existing_thumbs: bool) -> Image.Image | None:
     filter = Image.Resampling.NEAREST if mode == "Fast" else Image.Resampling.LANCZOS
@@ -1816,13 +1825,16 @@ def load_full_res(path: str) -> dict:
         buffer = pointer.write_to_memory() # we want to generate thumbnails from THIS
         mode = get_mode(pointer)
         img = Image.frombytes(mode, (pointer.width, pointer.height), buffer, "raw")
+        if img.mode in ("RGBA", "RGB"): pass
+        else: img = img.convert("RGB")
         return {"full_res": img, "pointer": pointer}
     except Exception as e:
         print("Fallback to PIL:", e, path)
         try:
             with Image.open(path) as img:
-                img.load()
-                return {"full_res": img} if img.mode == "RGBA" else img.convert("RGB")
+                if img.mode in ("RGBA", "RGB"): img.load()
+                else: img = img.convert("RGB")
+                return {"full_res": img}
         except Exception as e:
             print("Error (load_full_res):", e, path)
             return {}

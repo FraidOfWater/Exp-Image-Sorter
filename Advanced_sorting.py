@@ -438,7 +438,7 @@ def load_thumbs_parallel(images, thumbsize, gen_thumb):
     objs = [None] * len(images)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="gen_for_model") as executor:
-        futures = {executor.submit(gen_thumb, obj, size=thumbsize, cache_dir=None, user="classify", mode="as_is"): i
+        futures = {executor.submit(gen_thumb, obj, size=thumbsize, cache_dir=None, user="classify"): i
                    for i, obj in enumerate(images)}
         for f in concurrent.futures.as_completed(futures):
             i = futures[f]

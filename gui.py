@@ -10,6 +10,7 @@ class Bindhandler:
         self.window_focused = "GRID"
         from search_overlay import SearchOverlay
         self.search_widget = SearchOverlay(self)
+        self.stop_loop = False
 
     def arrow_key(self, event):
         if isinstance(event.widget, tk.Entry): return
@@ -25,8 +26,8 @@ class Bindhandler:
                     self.gui.displayimage(self.gui.folder_explorer.destw.current_selection_entry.file)
                 else: self.gui.displayimage(self.gui.imagegrid.current_selection_entry.file)
 
-    def undo(self, event):
-        if isinstance(event.widget, tk.Entry): return
+    def undo(self, event=None):
+        if event and isinstance(event.widget, tk.Entry): return
         if self.fileManager.assigned and self.gui.current_view.get() in ("Unassigned",) :
             last = self.fileManager.assigned.pop(0)
             self.gui.displayimage(last)
@@ -100,9 +101,10 @@ class Bindhandler:
             frame = self.gui.Image_frame if self.gui.dock_view.get() else self.gui.second_window_viewer
             frame.menu_reveal_in_file_explorer_clicked()
 
-        checkmark = "✓ " if self.gui.show_next.get() else "  "
+        checkmark = "✓ " if self.gui.show_next.get() else ""
         frame = self.gui.Image_frame if self.gui.dock_view.get() else self.gui.second_window_viewer
-        checkmark_show_ram = "✓ " if frame.show_ram.get() else "  "
+        if not frame: return
+        checkmark_show_ram = "✓ " if frame.show_ram.get() else ""
         options = [("Detach" if is_middle else "Dock", helper)]
 
         if is_middle:
@@ -139,6 +141,186 @@ class Bindhandler:
             canvas.tag_bind(row_tag, "<Leave>", on_leave)
             canvas.tag_bind(row_tag, "<Button-1>", on_delete)
 
+    def ps4controller_loop(self):
+        from time import perf_counter
+        
+        self.r3_timer = perf_counter()
+        def loop():
+            os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
+            import pygame
+            pygame.init()
+
+            # Initialize the first controller found
+            
+            ignore_first = True
+            ignore_first_r = True
+            initialized = False
+            explorer = None
+            imagegrid = None
+            side = "L"
+            self.last_val = None
+            self.last_was_skip = False
+            self.running = True
+            pygame.joystick.init()
+            if pygame.joystick.get_count() != 0:
+                self.controller = pygame.joystick.Joystick(0)
+                self.controller.init()
+                print(f"Detected: {self.controller.get_name()}")
+            else:
+                pygame.joystick.quit()
+                pygame.quit()
+                return
+            while self.running:
+                if self.stop_loop:
+                    self.running = False
+                    break
+                for event in pygame.event.get():
+                    if not initialized:
+                        if hasattr(self.gui, "folder_explorer"):
+                            explorer = self.gui.folder_explorer
+                            imagegrid = self.gui.imagegrid
+                            initialized = True
+                            pygame.time.wait(333)
+                        if event.type == pygame.JOYBUTTONDOWN and event.button == 6: # start button
+                            self.gui.after_idle(self.fileManager.validate)
+                        if initialized:
+                            self.gui.after(0, explorer.caps_lock, None, "L")
+                        continue
+
+                    if event.type == pygame.QUIT:
+                        self.running = False
+                        break
+                    
+                    # Capture Button Presses
+                    if event.type == pygame.JOYBUTTONDOWN:
+                        match event.button:
+                            case 15:
+                                btn, selected_path, _, _, _ = explorer.buttons[explorer.selected_index]
+                                self.gui.after(0, explorer.toggle_folder, selected_path)
+                                self.last_was_skip = False
+                            case 4: # option, move all
+                                self.fileManager.moveall()
+                                self.last_was_skip = False
+                            case 9: #L1, change to navigating dest
+                                btn, selected_path, _, _, _ = explorer.buttons[explorer.selected_index]
+                                color = btn.default_c
+                                self.gui.after(0, self.fileManager.setDestination, {"path": selected_path, "color": color}, event)
+                                self.last_was_skip = False
+                            case 10: #R1, change to navigating grid
+                                btn, selected_path, _, _, _ = explorer.buttons[explorer.selected_index]
+                                color = btn.default_c
+                                self.gui.after(0, self.fileManager.setDestination, {"path": selected_path, "color": color}, event)
+                                self.last_was_skip = False
+                            #    side = "R"
+                            #    if mode: self.gui.after(0, explorer.event_generate, "<Delete>")
+                            #    else:
+                            #        btn, selected_path, _, _, _ = explorer.buttons[explorer.selected_index]
+                            #        color = btn.default_c
+                            #        self.gui.after(0, self.fileManager.setDestination, {"path": selected_path, "color": color}, event)
+
+
+                            case 11: #up
+                                if side == "R":
+                                    self.gui.after(0, imagegrid.navigate, "Up", False, True)
+                                    self.last_was_skip = False
+                                else:
+                                    self.gui.after(0, explorer.nav, "Up")
+                                
+                            case 14: #right
+                                self.gui.after(0, imagegrid.navigate, "Right", False, True)
+                                self.last_was_skip = False
+                            case 12: #down
+                                if side == "R":
+                                    self.gui.after(0, imagegrid.navigate, "Down", False, True)
+                                    self.last_was_skip = False
+                                else:
+                                    self.gui.after(0, explorer.nav, "Down")
+                            case 13: #left
+                                self.gui.after(0, imagegrid.navigate, "Left", False, True)
+                                self.last_was_skip = False
+
+
+                            case 0: #x, assign
+                                btn, selected_path, _, _, _ = explorer.buttons[explorer.selected_index]
+                                color = btn.default_c
+                                self.gui.after(0, self.fileManager.setDestination, {"path": selected_path, "color": color}, event)
+                                self.last_was_skip = False
+                            case 1 | 7: #o L3, undo
+                                if self.last_was_skip:
+                                    self.gui.after(0, imagegrid.navigate, "Left", False, True)
+                                    self.last_was_skip = True
+                                else:
+                                    self.gui.after(0, self.undo)
+                            case 2: #square, Trash
+                                self.gui.after(0, explorer.event_generate, "<Delete>")
+                                self.last_was_skip = False
+
+                                #self.gui.after(0, imagegrid.toggle_entry, imagegrid.current_selection_entry)
+
+                            case 3: #triangle, SKIP
+                                self.last_was_skip = True
+                                self.gui.after(0, imagegrid.navigate, "Right", False, True)
+                        
+                    # Capture Joystick/Trigger Movement
+                    if event.type == pygame.JOYAXISMOTION:
+                        if abs(event.value) > 0.2: # Small deadzone
+                            match event.axis:
+                                case 4: #left
+                                    if ignore_first: 
+                                        ignore_first = False
+                                        continue
+                                    
+                                    if round(event.value, 2) == -1.0:
+                                        self.gui.after(0, explorer.event_generate, "<Delete>")
+                                        self.last_was_skip = False
+                                        """side = "L"
+                                        self.gui.after(0, explorer.caps_lock, None, "L")eeee
+                                        print("Left")"""
+                                case 5: # right
+                                    if ignore_first_r: 
+                                        ignore_first_r = False
+                                        continue
+                                    
+                                    if round(event.value, 2) == -1.0:
+                                        self.gui.after(0, explorer.event_generate, "<Delete>")
+                                        self.last_was_skip = False
+                                        """side = "R"
+                                        self.gui.after(0, imagegrid.navigate, None, False, True)
+                                        print("Right")"""
+                                case 3:
+                                    elapsed = perf_counter()-self.r3_timer
+                                    comparison = round(event.value, 2) == round(self.last_val) if self.last_val else False
+                                    if not comparison and elapsed < 0.250:
+                                        pass
+                                    else:
+                                        self.gui.after(0, explorer.nav, "Up" if event.value < 0.0 else "Down")
+                                        self.r3_timer = perf_counter()
+                                        self.last_val = round(event.value, 2)
+                    if event.type == pygame.JOYDEVICEREMOVED:
+                        print("Hardware disconnected!")
+                        pygame.time.wait(500)
+                        continue
+                        #self.running = False
+                        #break
+
+                    if event.type == pygame.JOYDEVICEADDED:
+                        self.controller = pygame.joystick.Joystick(event.device_index)
+                        self.controller.init() 
+                        print(f"Connected to: {self.controller.get_name()}")
+                #if self.controller is None:
+                #    pygame.joystick.quit()
+
+                pygame.time.wait(10)
+
+            pygame.joystick.quit()
+            pygame.quit()
+
+        import threading
+        thread = threading.Thread(target=loop, daemon=True)
+        thread.start()
+            
+
+
 class GUIManager(tk.Tk):
     fileManager = None
     Image_frame = None
@@ -151,7 +333,7 @@ class GUIManager(tk.Tk):
     def __init__(self, jprefs: dict={}, jthemes: dict={}) -> None:
         super().__init__()
         self.jprefs, self.themes = jprefs, jthemes
-
+        
         paths = jprefs.get("paths", {}) # No prefs file, uses "", etc as default.
         user = jprefs.get("user", {})
         technical = jprefs.get("technical", {})
@@ -206,6 +388,7 @@ class GUIManager(tk.Tk):
 
     def initialize(self):
         self.bindhandler = Bindhandler(self)
+        self.bindhandler.ps4controller_loop()
         style = ttk.Style()
         style.configure('Theme_dividers.TPanedwindow', background=self.d_theme["pane_divider_colour"])
         style.configure("Theme_checkbox.TCheckbutton", background=self.d_theme["main_colour"], foreground=self.d_theme["button_text_colour"], highlightthickness = 0) # Theme for checkbox
@@ -753,6 +936,8 @@ class GUIManager(tk.Tk):
             if self.second_window_viewer: self.second_window_viewer.save_json()
 
         self.fileManager.saveprefs(self)
+        self.bindhandler.stop_loop = True
         self.destroy()
         self.fileManager.purge_cache()
         self.fileManager.move_temp_to_trash()
+        

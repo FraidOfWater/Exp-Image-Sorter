@@ -348,9 +348,9 @@ class FolderExplorer(ttk.Frame):
             self.bind_all("<KeyPress>", key_press)
         return
 
-    def caps_lock(self, event):
+    def caps_lock(self, event, activation_by_controller=False):
         # if outside this widget, allow to activate the scrolling behaviour. If inside, hide the "selection" and let mouse actions do their thing.
-        if event.state == 0 and event.keysym == "Caps_Lock":
+        if activation_by_controller or (event and event.state == 0 and event.keysym == "Caps_Lock"):
             self.focus()
             self.scroll_enabled = True
             self.update_selection(event)
