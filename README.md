@@ -35,10 +35,11 @@ How do I compile from source?
             "Plugins", libvlc.dll, libvlccore.dll.
 
       To compile a standalone version (EXE):
-            Complile using pyinstaller, include imageio hidden metadata. You must have all python modules imported.
-              pyinstaller .\sortimages_multiview.py --copy-metadata=imageio
+            Complile using pyinstaller. You must have all python modules installed.
+              pyinstaller .\sortimages_multiview.py
             Copy vips windows binaries into the internal folder.
             Copy VLC files into the internal folder. (You don't need these if vlc is installed somewhere on the system)
+            Copy themes.json into the internal folder.
 
       To get the script working on your own:
             Run install.bat
