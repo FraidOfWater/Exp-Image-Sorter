@@ -554,7 +554,7 @@ class GUIManager(tk.Tk):
             "\n"
             f"{'--- OTHER ---':^{total_w}}\n"
             "Grey dividers can be Moved/Resized.\n"
-            "Highlighted item assigned if none marked."
+            "You can assign a destination to the currently viewed/highlighted item, or assign many at once by marking items."
         )
 
         # When displaying in your UI:
@@ -565,8 +565,48 @@ class GUIManager(tk.Tk):
         self.middlepane_canvas = canvas
         canvas.bind("<Button-1>", lambda e: self.focus())
 
-        ascii_art = """"""
-        ascii_art2 = """"""
+        ascii_art = """⠀⠀⠀⢀⣀⣤⡔⠒⠒⠶⡦⠤⣀⡀⠀⢀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⢀⠔⠋⢀⡀⠈⠙⠢⡀⠙⡆⠀⠉⠓⡏⠙⣆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⢠⠋⢠⠞⠁⠈⠑⢆⠀⠘⣤⠜⠋⠉⠉⠇⠈⣿⡆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⡏⢀⠃⢀⡤⠚⡟⠙⠻⠾⠁⠀⣀⡀⠀⠀⠀⠃⡷⡄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠁⢸⢠⠎⠀⣸⡶⣦⠀⠀⠀⡸⢹⡟⠳⡄⠀⢸⡇⠹⡄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⢸⡾⠀⢀⣿⣿⠉⡆⠀⠀⡷⣿⣧⣀⣽⡷⠶⢳⠀⢷⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⡇⠘⣇⠀⠿⣿⣿⣿⣿⠀⠀⢡⠻⣿⣽⣿⡇⠀⡼⠀⣼⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⢳⡀⢻⡀⠀⢸⣿⣟⠙⠀⠀⠀⠑⠂⠚⠙⠀⢠⠇⢰⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠱⡈⢳⡀⠈⠙⠣⣄⣀⢤⠴⠁⢀⡠⠖⢀⡎⢠⢣⠃⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠙⢆⠑⣄⠀⠀⢧⠏⠉⠉⡿⠉⠀⢠⠞⡰⢃⠎⢠⣶⢶⣶⠶⣦⣄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠑⢌⣧⠀⠈⢿⣄⢰⠁⠀⣰⢋⠞⢀⠞⠀⡼⠿⢭⠔⢊⣼⠈⢳⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⣤⠄⢘⡇⠀⣈⡻⣿⠀⣰⡡⠃⢀⡎⠀⡸⠁⠀⢰⢗⡿⠁⠀⠀⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⣝⠶⢚⠴⠋⠀⣀⣼⣶⡿⠁⢀⡞⠀⣰⢧⣤⠴⠟⠋⠀⠀⠀⣰⢧⣤⣤⡤⠔⠒⠒⠒⠒⠐⠒⠒⢶⡒⠤⢤⣀⠀⠀⠀⠀
+⠀⠀⠀⠀⠈⠙⣏⠀⣴⠋⠁⢀⣯⠃⠀⡘⠀⠀⣇⣀⠽⠦⡀⠀⠀⠠⢞⠳⢄⡀⠀⠀⠀⠉⠉⠉⠉⠉⠒⠤⡀⠈⠆⠀⠈⠻⡲⣄⠀
+⠀⠀⠀⠀⠀⠀⠀⠉⢷⡀⠀⠘⣿⡀⠀⡇⠀⠀⠻⣄⣀⠀⠀⣀⣠⠤⠖⠃⠀⠀⠀⠈⠉⠉⠉⠉⠑⢦⠀⠀⠘⡄⡸⠀⠀⠀⡇⠈⡆
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠉⠙⠛⢿⣦⣈⣢⣄⣀⣀⣀⣉⡙⠳⡄⠀⠀⠀⠀⠀⠀⣀⣀⣀⣀⣀⠴⢿⠤⢀⣠⣗⣁⣀⡤⠊⠀⠀⡇
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠻⣿⣶⣶⣶⣞⣡⢴⡯⠖⢒⡹⡿⣭⣉⡁⠀⠈⠉⠐⠢⢄⡉⠒⠢⠤⣀⣀⣀⣀⡠⠞⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢼⡀⠘⠧⠤⣴⠇⠀⠈⠉⠒⠒⠦⠤⠤⠬⠭⠶⠶⠤⠖⠚⠉⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠑⠒⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"""
+        ascii_art2 = """⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⠤⡤⢶⠄⠠⠶⠤⢤⣀⡀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⡴⠶⣤⠞⠉⠀⢸⢀⠎⠀⠀⣀⠠⠔⠚⠉⠳⣄⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡼⢁⠀⠘⣦⠀⣀⣄⡎⢀⠔⢋⡀⠤⠀⠐⠒⠒⠚⢳⡀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡇⢠⠀⠀⠈⠀⠀⠀⠉⠛⢶⡉⠀⢀⡤⠒⠒⠒⣄⠀⢱⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡼⢧⠈⠇⠀⠀⠀⠀⠀⠀⠀⠀⠙⠖⠉⢳⠀⠀⠀⠈⡆⠘⡇
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢰⡇⠈⢧⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⡆⠀⠀⢰⠇⢀⡇
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣤⣄⢸⠃⠀⢠⠀⠀⢠⣤⣤⡤⢤⣄⡀⠀⠀⣀⣼⣇⠀⠀⡼⠀⡼⠁
+⠀⠀⠀⠀⠀⠀⠀⣀⠤⠤⠤⠤⠤⢄⣀⣴⢺⡇⢹⣿⣶⠀⠘⡄⠀⠀⠉⠀⠀⠀⠈⠉⠀⠀⢙⠻⡇⠀⡜⠁⣴⠃⠀
+⠀⠀⠀⠀⣠⠖⠉⠀⠀⠀⠀⠀⠀⠀⠈⢻⠀⣇⠘⣿⣿⣇⠀⢱⡀⠀⢀⡀⠀⠀⠀⠀⠀⢰⣤⡾⢡⠎⢀⡼⠁⠀⠀
+⠀⠀⢀⡾⠃⠀⠀⢀⡠⠔⠊⠉⠀⣀⣉⣹⡄⢹⡄⢻⡇⢏⢆⠀⢳⡀⠀⠉⡟⠓⢲⠖⠚⠉⠁⡰⠃⣠⠞⠀⠀⠀⠀
+⠀⠀⣼⠁⠀⠀⡰⠋⠀⠀⢀⡴⠋⠁⡼⣹⡿⡈⡟⠾⢹⠘⡌⢧⠀⠱⡄⠀⡇⠀⢸⠀⠀⠀⡴⠁⣰⠋⠀⠀⠀⠀⠀
+⠀⣼⡇⠀⠀⢰⠁⠀⠀⢀⡮⠀⠀⢸⠡⢏⢱⣭⠿⡤⠈⡇⠸⡀⢣⠀⠘⣶⡇⠀⢸⡀⠀⡸⠀⢰⠇⠀⣀⣤⣄⠀⠀
+⠀⣿⢳⠀⠀⢈⠀⠀⠀⢸⠁⠀⠀⢻⣲⢾⢺⡀⠀⠀⠀⢸⠀⢱⠀⢣⠀⠸⣤⠶⣆⣇⢀⠇⠀⢸⡄⠸⠛⢻⡄⢳⠀
+⠀⣿⠀⢣⠀⠸⡀⠀⠀⢸⡂⠀⠀⣸⡇⠀⠈⢧⡀⠀⠀⠀⢇⠀⡆⠈⡆⠀⣧⡀⠘⢻⣼⠀⠀⠈⠳⣄⡠⠞⢠⠏⠀
+⠀⢻⡄⠀⠱⡀⠱⡀⠀⠀⢧⠀⢺⡁⠃⠀⠀⢀⡝⢲⣦⡤⢾⠀⠀⠀⡇⣸⠸⡇⠀⠀⠹⡦⣄⡀⠀⢀⣀⠴⠃⠀⠀
+⠀⠀⢳⡀⠀⠈⢦⡑⡄⠀⠈⢆⠈⢳⡀⠀⠈⠙⢧⣸⢿⣷⠏⠀⡇⠀⡷⠃⠀⡇⠀⠀⠀⢿⠀⠈⠉⠁⠀⠀⠀⠀⠀
+⠀⠀⠈⢿⣄⠀⠀⠑⡜⣆⠀⠘⣆⠀⢳⠀⠀⠀⠘⣏⢦⣀⢀⣼⡤⠊⠀⠀⢰⣧⡀⠀⠀⣼⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠻⣦⡀⠀⠘⡜⡄⠀⢹⠀⢸⠇⠀⠀⠀⢸⠀⠈⠙⡇⢷⡀⠀⢀⡾⠀⠙⠲⠶⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠙⢻⡀⠀⠃⢱⠀⢸⡆⠘⢦⡀⠀⠀⣼⢤⣀⣠⡇⠈⠻⠶⠋⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⢀⣠⣤⠀⠀⠈⡇⠀⡀⢸⠀⡼⠀⠀⠀⠈⠓⠚⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⣴⠁⡟⠀⠀⢀⡼⠁⢠⠃⣜⡼⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠻⣄⠙⠒⠒⠉⠀⢠⣊⠴⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠉⠓⠒⠚⠋⠉⠀⠀⠀"""
         self.ascii_art_id = canvas.create_text(self.middlepane_width//2, 300, text=ascii_art,fill="#525252",font=("Consolas", 12),justify="left", anchor="center")
         self.ascii_art_id2 = canvas.create_text(self.middlepane_width//2, 0, text=ascii_art2,fill="#525252",font=("Consolas", 6),justify="left", anchor="center")
         self.help_text_id = canvas.create_text(self.middlepane_width//2, 300, text=help_text,fill="white",font=font_style, anchor="center", justify="center")
@@ -713,7 +753,7 @@ class GUIManager(tk.Tk):
         from tkinter import filedialog as tkFileDialog
         match type:
             case "session": path = tkFileDialog.askopenfile(initialdir=os.getcwd(), title="Select Session Data File", filetypes=(("JavaScript Object Notation", "*.json"),))
-            case "src": path = tkFileDialog.askdirectory(initialdir=self.source_entry_field.get(), title="Select Source folder")
+            case "src": path = tkFileDialog.askdirectory(initialdir=os.path.dirname(self.source_entry_field.get()), title="Select Source folder")
             case "dst": path = tkFileDialog.askdirectory(initialdir=self.destination_entry_field.get(), title="Select Destination folder")
         if path == "" or path == None: return
         entry.delete(0, tk.END)

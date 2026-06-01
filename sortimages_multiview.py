@@ -30,6 +30,10 @@ class Imagefile:
     ANIMATION = "ANIMATION"
     IMAGE = "IMAGE"
     VIDEO = "VIDEO"
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    data_dir = os.path.join(script_dir, "data")
+    trash_dir = os.path.join(script_dir, "Trash")
+    
     def __init__(self, name, path, ext) -> None:
         "An Imagefile object stores data about the image to help us manage it in the program"
         "Normal attributes"
@@ -94,6 +98,14 @@ class Imagefile:
         destpath = os.path.join(self.dest, name)
 
         "Check for conflicts: file with same name already in dest." "Refuse to overwrite anything"
+        
+
+        if self.trash_dir == self.dest:
+            from send2trash import send2trash
+            try: send2trash(self.path)
+            except Exception as e: print("Trashing error", e)
+            return True
+
         if os.path.exists(destpath): # path/to/dest/filename
             print(f"File {name[:30]} already exists in destination. No action") # would overwrite with same name otherwise.
             if self.path == destpath:
@@ -123,7 +135,7 @@ class SortImages:
     moved = []
 
     THUMB_FORMAT = ".webp"
-    supported_formats = {"png", "gif", "jpg", "jpeg", "bmp", "pcx", "tiff", "webp", "psd", "jfif", "mp4", "mkv", "mov", "m4v", "webm", "avif"}
+    supported_formats = {"png", "gif", "jpg", "jpeg", "bmp", "pcx", "tiff", "webp", "psd", "jfif", "mp4", "mkv", "mov", "m4v", "webm", "avif", "dds"}
     threads = 3
     
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -143,7 +155,7 @@ class SortImages:
     last_call_time = 0
     last_sort = (None, False)
     concurrent_frames = 0
-    max_concurrent_frames = 10000
+    max_concurrent_frames = 0
     first_run = True
 
     def __init__(self, gui) -> None:
@@ -151,6 +163,7 @@ class SortImages:
         self.gui = gui
         technical = gui.jprefs.get("technical", {})
         self.THUMB_FORMAT = technical.get("THUMB_FORMAT", self.THUMB_FORMAT)
+        self.max_concurrent_frames = int(technical.get("max_concurrent_frames", 2000))
         
         gui.fileManager = self
         self.gui.initialize()       # Let GUI initialize fully now with loaded values.
@@ -309,7 +322,7 @@ class SortImages:
             colors[x.dest] = x.color
             assigned.append((x.path, x.dest))
 
-        save = {"destination": self.gui.destination_folder, "source": self.gui.source_folder, "colors": colors, "assigned": assigned, "moved": self.moved}
+        save = {"destination": self.gui.destination_folder, "source": self.gui.source_folder, "colors": colors, "assigned": assigned, "moved": [x.path for x in self.moved]}
 
         try:
             with open(savelocation, "w+") as json_file:

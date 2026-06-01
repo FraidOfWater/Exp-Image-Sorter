@@ -5,28 +5,29 @@ from collections import OrderedDict
 from threading import Thread, Lock, Event
 from tkinter import ttk, simpledialog
 
+import sys
+import socket
+PORT = 54321
+
 Image.MAX_IMAGE_PIXELS = 346724322
 vipsbin = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vips-dev-8.18", "bin")
 os.environ['PATH'] = os.pathsep.join((vipsbin, os.environ['PATH']))
 os.add_dll_directory(vipsbin)
 import pyvips
 
-# 3. Do PYVIPS overhaul. All pil nearset/bilinear/lanczos will be replaced with
-# PYVIPS alternatives, and we add the PIL methods as fallback.
-# Do the transform with PYVIPS, not PIL. 
-# Gif will remain as is because of PIL's immediate seek behaviour, whereas PYVIPS wants to load the whole file.
+# Initial FIT: Pyvips thumbnail, Preloading, Caching.
+# Zooming: PIL, Caching (preload in the positive zoom direction?)
+# Gif: PIL, Caching
+# Panning: PIL. We should do "fast pan logic" too.
+
+# Clean up the class. 
+# Each image should be its own object we can easily discard.
+# The Class's config should we able to be modified from any instance of the class's objects.
+# Viewport class, GUI class.
 
 # 4. Reactivate fast pan logic. Add button for fast pan ON/OFF, because very large images suffer from it.
-# We need to compare old zoom behaviour with new.
-
-# 5. Separate RENDERER from GUI. Separate CONFIG from GUI and RENDERER.
-# The shared config is updated by any instance of GUI. set_vals deprecated.
-# Separate CurrentImage from RENDERER.
-# Rework cleanup logic, just delete the current object etc.
-
 # fast pan has been disabled again. Just not stable enough
 
-# pyvips transform requires us to change all PIL to pyvips. So in zoom cache wed store the pyvips image instead. wed need to convert to pil every time though.
 class Application(tk.Frame):
     BUTTON_MODIFIER_CTRL = 1
     BUTTON_MODIFIER_CTRL_LEFT_CLICK = 257
@@ -81,8 +82,13 @@ class Application(tk.Frame):
             if gui: # NOT standalone per-say.
                 master = tk.Toplevel()
                 self.app2 = master.master.fileManager.gui.bindhandler.search_widget
+                master.protocol("WM_DELETE_WINDOW", lambda: (self.set_image(None), self.master.attributes("-alpha", 0.0),  self.canvas.update(), self.master.withdraw()))
+
             else:
                 master = tk.Tk()
+                # Start the socket server for inter-process communication
+                self._start_socket_server()
+                master.protocol("WM_DELETE_WINDOW", self.window_close)
                 master.bind('<KeyPress-Left>', lambda e: self.key_press(-1))
                 master.bind('<KeyPress-Down>', lambda e: self.key_press(-1))
                 master.bind('<KeyPress-Right>', lambda e: self.key_press(1))
@@ -99,7 +105,6 @@ class Application(tk.Frame):
             master.bind("<Button-1>", helper)
             master.geometry(savedata.get("geometry", None) or "800x600")
             master.title(self.title)
-            master.protocol("WM_DELETE_WINDOW", lambda: (self.set_image(None), self.master.attributes("-alpha", 0.0),  self.canvas.update(), self.master.withdraw()))
         else: # Gui embedded
             self.app2 = master.master.master.fileManager.gui.bindhandler.search_widget
             self.app2.root.gui.bind("<Control-s>", lambda e: self.toggle_statusbar(True))
@@ -180,6 +185,7 @@ class Application(tk.Frame):
         self.config(bg=self.colors["canvas"])
         self.master.configure(bg=self.colors["canvas"])
         self.img_pointer = None
+        self.pyvips_buffer = None
         self._last_draw_time = 0.0
         self.image_id = None
         self.drag_buffer = None
@@ -228,6 +234,39 @@ class Application(tk.Frame):
         self.create_status_bar()
         self.create_canvas()
         self.bind_mouse_events()
+
+    def _start_socket_server(self):
+        """Start a socket server to handle file paths from other instances"""
+        def server_loop():
+            try:
+                server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                server.bind(('localhost', PORT))
+                server.listen(1)
+                server.settimeout(1.0)
+                self._socket_server = server
+                self._socket_server_running = True
+                while self._socket_server_running:
+                    try:
+                        conn, _ = server.accept()
+                        data = conn.recv(1024).decode()
+                        if data:
+                            self.master.after(0, lambda path=data: self.set_image(path))
+                        conn.close()
+                    except socket.timeout:
+                        continue
+                    except OSError:
+                        break
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+            finally:
+                self._socket_server_running = False
+                self._socket_server = None
+
+        self._socket_server_thread = Thread(target=server_loop, daemon=True)
+        self._socket_server_thread.start()
 
     def create_menu(self):
         menu_bar = tk.Menu(self.master)
@@ -347,7 +386,6 @@ class Application(tk.Frame):
                     source_dict, scale_key = self.get_first_zoom_level(self.filename, self.drag_quality)
                     initial_fit = source_dict.get("img")
                     self.full_res = source_dict.get("full_res") or self.full_res
-                    self.img_pointer = source_dict.get("pointer") or self.img_pointer
                     self.draw_image(initial_fit, initial_filter=self.drag_quality)
                     
                 id1 = self.after(0, quick)
@@ -679,7 +717,7 @@ class Application(tk.Frame):
 
         self.filenames = []
         temp = filedialog.askopenfilenames(
-            filetypes=[("Image files", "*.png *.jpg *.jpeg *.bmp *.pcx *.tiff *.psd *.jfif *.gif *.webp *.webm *.mp4 *.mkv *.mov *.m4v *.avif")]
+            filetypes=[("Image files", "*.png *.jpg *.jpeg *.bmp *.pcx *.tiff *.psd *.jfif *.gif *.webp *.webm *.mp4 *.mkv *.mov *.m4v *.avif *.dds")]
         )
         if isinstance(temp, tuple): self.filenames = list(temp)
         if not self.filenames:
@@ -876,6 +914,20 @@ class Application(tk.Frame):
             self.vlc_frame = None
             del self.old
 
+        if self._socket_server_running:
+            self._socket_server_running = False
+            try:
+                if self._socket_server:
+                    self._socket_server.close()
+            except Exception:
+                pass
+            self._socket_server = None
+            try:
+                if self._socket_server_thread:
+                    self._socket_server_thread.join(timeout=1.0)
+            except Exception:
+                pass
+
         if self.loader is not None:
             self.loader.stop()
             self.loader = None
@@ -934,7 +986,7 @@ class Application(tk.Frame):
             with open(self.save_path, "w") as f:
                 json.dump(data, f, indent=4)
 
-    def load_json(path):
+    def load_json(self, path):
         if os.path.isfile(path):
             try:
                 with open(path) as f:
@@ -948,7 +1000,6 @@ class Application(tk.Frame):
         rgb_8 = tuple(c >> 8 for c in rgb_16)
         return rgb_8 + (0,)
     
-    # mkae gui a class, then have the below be a draw class which just draws to the ready canvas! #################
     # Affine transforms
     def reset_transform(self):
         self.mat_affine = np.eye(3)
@@ -986,82 +1037,38 @@ class Application(tk.Frame):
         self.scale(s)
         self.translate(ox, oy)
 
+    def restrict_pan(self):
+        cw, ch = self.canvas.winfo_width(), self.canvas.winfo_height()
+        iw, ih = self.img_pointer.width, self.img_pointer.height
+
+        tw = iw * self.mat_affine[0, 0]
+        th = ih * self.mat_affine[1, 1]
+
+        tx = self.mat_affine[0, 2]
+        ty = self.mat_affine[1, 2]
+
+        if tw <= cw:
+            tx_min, tx_max = 0, cw - tw
+        else:
+            tx_min, tx_max = cw - tw, 0
+        tx = min(max(tx, tx_min), tx_max)
+
+        if th <= ch:
+            ty_min, ty_max = 0, ch - th
+        else:
+            ty_min, ty_max = ch - th, 0
+        ty = min(max(ty, ty_min), ty_max)
+
+        self.mat_affine[0, 2] = tx
+        self.mat_affine[1, 2] = ty
+
+        scale_up = np.eye(3)
+        zoom, _ = self.scale_key
+        inv_f = 1.0 / zoom
+        scale_up[0,0] = scale_up[1,1] = inv_f
+        self.combined = self.mat_affine @ scale_up
+
     "Display"
-    def _set_info(self, filename, ext, is_video=False):
-        if self.standalone:
-            self.master.winfo_toplevel().title(f"{self.title} - {os.path.basename(filename)}")
-        else:
-            original = self.gui.title().split(" -", 1)[0]
-            self.gui.title(f"{original} - {os.path.basename(filename)}")
-        size_bytes = os.path.getsize(filename)
-        val = size_bytes
-        unit = "B"
-        if val >= 1000:
-            val /= 1024
-            unit = "KB"
-            if val >= 1000:
-                val /= 1024
-                unit = "MB"
-                if val >= 1000:
-                    val /= 1024
-                    unit = "GB"
-        if unit == "B": text = f"{int(val):^5d} {unit}"
-        else: text = f"{val:^5.1f} {unit}"
-
-        self.label_image_size_var.set(text)
-        self.label_image_format_var.set(f"{ext.upper()}")
-
-        if not is_video:
-            x, y = (self.img_pointer.width, self.img_pointer.height)
-            text = f"{x}x{y}"
-            self.label_image_dimensions_var.set(f"{text:^11}")
-            return (x, y)
-
-    def set_image(self, filename, obj=None, adjacent=[]):
-        self.adjacent = [x for x in adjacent if x.endswith((".png", ".jpg", ".jpeg", ".bmp", ".pcx", ".tiff", ".webp", ".psd", ".jfif", ".avif"))]
-        if self.a: # guards against vlc crashes by rejecting queued tkinter calls. dont remove
-            return
-        self.a = True
-        " Give image path and display it "
-        self.id = object()
-        self.timer.start()
-
-        if not self.reset(filename): return # returns False if we cant clear the canvas or cant set the image. (unsupported format)
-
-        self.filename = filename
-        self.ext = filename.rsplit(".", 1)[1].lower()
-        self.obj = obj
-        thumbpath = None if not obj or self.thumbnail_var.get().lower() == "no" else obj.thumbnail
-        if self.ext in ("mp4", "webm", "mkv", "m4v", "mov"): # is video
-            self.imagetk = None
-            self.canvas.delete("_IMG")
-            id1 = self.after(0, self._set_video)
-            self.draw_queue.append(id1)
-            return
-        try:
-            self.img_pointer = pyvips.Image.new_from_file(filename)
-        except Exception as e:
-            print("Coudldn't load image:", e)
-            return
-        self.x, self.y = self._set_info(self.filename, self.ext)
-        if hasattr(obj, "thumbnail") and not self.thumbnail_var.get().lower() == "no thumb":
-            thumbpath = obj.thumbnail
-        else:
-            thumbpath = filename
-
-        if self.ext in ("gif", "webp"): # is animation
-            is_animated = True if self.img_pointer.get_n_pages() > 1 else False
-            if is_animated:
-                self._set_animation(filename)
-                return
-        token = None
-        doing_thumb = False
-        if self.thumbnail_var.get() != "No thumb":
-            doing_thumb = True
-            token = self._set_thumbnail(thumbpath=thumbpath)
-        else:
-            self._set_picture(filename, token, doing_thumb)
-
     def reset(self, filename):
         def close_vlc():
             if self.vlc_frame != None:
@@ -1101,6 +1108,7 @@ class Application(tk.Frame):
         self.frames.clear()
         self.dont_garbage_collect = None
         self.img_pointer = None
+        self.pyvips_buffer = None
         self.full_res = None
         self.last_known_buffer = None
         self._zoom_cache.clear()
@@ -1137,7 +1145,7 @@ class Application(tk.Frame):
             return False
         else:
             ext = filename.rsplit(".", 1)[1].lower()
-            supported_formats = {"png", "gif", "jpg", "jpeg", "bmp", "pcx", "tiff", "webp", "psd", "jfif", "avif", "mp4", "mkv", "m4v", "mov", "webm"}
+            supported_formats = {"png", "gif", "jpg", "jpeg", "bmp", "pcx", "tiff", "webp", "psd", "jfif", "avif", "mp4", "mkv", "m4v", "mov", "webm", "dds"}
             if ext in supported_formats:
                 if ext not in ("mp4", "webm", "mkv", "m4v", "mov"):
                     self.canvas.configure(bg=self.colors["canvas"])
@@ -1160,26 +1168,88 @@ class Application(tk.Frame):
                 self.a = False
                 return False
 
-    "Static Images"
-    def _set_thumbnail(self, thumbpath=None):
-        self.a = False
-        if thumbpath: token = self.loader.request_load(thumbpath, caller="cached_thumb")
-        else: token = self.loader.request_load(thumbpath, caller="gen_thumb")
-        return token
+    def set_image(self, filename, obj=None, adjacent=[]):
+        self.adjacent = [x for x in adjacent if x.endswith((".png", ".jpg", ".jpeg", ".bmp", ".pcx", ".tiff", ".webp", ".psd", ".jfif", ".avif", ".dds"))]
+        if self.a: # guards against vlc crashes by rejecting queued tkinter calls. dont remove
+            return
+        self.a = True
+        " Give image path and display it "
+        self.id = object()
+        self.timer.start()
 
-    def _set_picture(self, filename, token=None, doing_thumb=False):
+        if not self.reset(filename): return # returns False if we cant clear the canvas or cant set the image. (unsupported format)
+
+        self.filename = filename
+        self.ext = filename.rsplit(".", 1)[1].lower()
+        self.obj = obj
+        thumbpath = None if not obj or self.thumbnail_var.get().lower() == "no" else obj.thumbnail
+        if self.ext in ("mp4", "webm", "mkv", "m4v", "mov"): # is video
+            self.imagetk = None
+            self.canvas.delete("_IMG")
+            id1 = self.after(0, self._set_video)
+            self.draw_queue.append(id1)
+            return
+        try:
+            self.img_pointer = pyvips.Image.new_from_file(filename)
+        except Exception as e:
+            print("Coudldn't load image:", e)
+            return
+        self.x, self.y = self._set_info(self.filename, self.ext)
+        if hasattr(obj, "thumbnail") and not self.thumbnail_var.get().lower() == "no thumb":
+            thumbpath = obj.thumbnail
+        else:
+            thumbpath = filename
+
+        if self.ext in ("gif", "webp"): # is animation
+            is_animated = True if self.img_pointer.get_n_pages() > 1 else False
+            if is_animated:
+                self._set_animation(filename, self.id)
+                return
+        thumbpath = thumbpath if self.thumbnail_var.get() != "No thumb" else None
+        self._set_picture(filename, None, thumbpath=thumbpath)
+    
+    def _set_info(self, filename, ext, is_video=False):
+        if self.standalone:
+            self.master.winfo_toplevel().title(f"{self.title} - {os.path.basename(filename)}")
+        else:
+            original = self.gui.title().split(" -", 1)[0]
+            self.gui.title(f"{original} - {os.path.basename(filename)}")
+        size_bytes = os.path.getsize(filename)
+        val = size_bytes
+        unit = "B"
+        if val >= 1000:
+            val /= 1024
+            unit = "KB"
+            if val >= 1000:
+                val /= 1024
+                unit = "MB"
+                if val >= 1000:
+                    val /= 1024
+                    unit = "GB"
+        if unit == "B": text = f"{int(val):^5d} {unit}"
+        else: text = f"{val:^5.1f} {unit}"
+
+        self.label_image_size_var.set(text)
+        self.label_image_format_var.set(f"{ext.upper()}")
+
+        if not is_video:
+            x, y = (self.img_pointer.width, self.img_pointer.height)
+            text = f"{x}x{y}"
+            self.label_image_dimensions_var.set(f"{text:^11}")
+            return (x, y)
+
+    def _set_picture(self, filename, token=None, thumbpath=None):
         "Close the handle and load full copy to memory."
         self.a = False
+        token = token or object()
+        self.current_load_token = token
+
         if self.do_caching.get(): # If cache, we should see if its in there
             cached = self.cache.get(filename)
-            if cached: # if cached
-                self._on_async_ready(filename, self.current_load_token, cached, caller="cached")
-                #if not cached.get("full_res"):
-                #    token = self.loader.request_load(filename, token, caller="full_res")
-            
+            if cached and not thumbpath:
+                self._on_async_ready(filename, token, cached, caller="cached")
             else:
-                token = self.loader.request_load(filename, token, caller="fit")
-                token = self.loader.request_load(filename, token, caller="full_res")
+                self.loader.request_load(filename, token, caller="image", thumbpath=thumbpath)
 
             if self.adjacent:
                 for x in list(self.cache.keys()):
@@ -1191,21 +1261,16 @@ class Application(tk.Frame):
                 if self.adjacent:
                     self.loader.request_load(self.adjacent.copy(), token, caller="load_to_cache")
         else:
-            if self.selected_option1.get() != "No buffer":
-                if type(self.filter) == Image.Resampling and self.drag_quality.name.lower() == self.filter.name.lower(): pass
-                elif type(self.filter) == str and self.filter.lower() == "pyvips": pass
-                else: token = self.loader.request_load(filename, token, caller="buffer")
-            token = self.loader.request_load(filename, token, caller="fit")
-            token = self.loader.request_load(filename, token, caller="full_res")
+            self.loader.request_load(filename, token, caller="image", thumbpath=thumbpath)
+        return token
 
-    "Animation"
-    def _set_animation(self, filename):
+    def _set_animation(self, filename, id):
         self.zoom_fit()
         self.a = False
         self.is_gif = True
-        self.open_thread = Thread(target=self._preload_frames, args=(self.filename, self.id), name="(Thread) Viewer frame preload", daemon=True)
+        self.open_thread = Thread(target=self._preload_frames, args=(filename, id), 
+                                  name="(Thread) Viewer frame preload", daemon=True)
         self.open_thread.start()
-        self.timer1 = perf_counter()
 
     def _preload_frames(self, filename, id1):
         def fallback():
@@ -1231,7 +1296,7 @@ class Application(tk.Frame):
                     if self.filename != filename: return
                     if id1 != self.id: return
                     self.frames.append((frame, duration))
-                    if i-1 == 1: self.after(0, self._update_frame)
+                    if i == 1: self.after(0, self._update_frame)
                     self._zoom_cache.set_maxsize(i)
                     self._imagetk_cache.set_maxsize(i)
 
@@ -1258,7 +1323,6 @@ class Application(tk.Frame):
 
         self.after(0, _step)
 
-    "Video"
     def _set_video(self):
         def close_vlc():
             if self.vlc_frame != None: # forget statusbar and divider
@@ -1287,8 +1351,6 @@ class Application(tk.Frame):
             self.divider.pack(expand=False, fill=tk.X)
             
         self.update() # This single update cleanly renders the final layout
-
-        #self.update()
         self.a = False
         self.old = new
     
@@ -1297,50 +1359,56 @@ class Application(tk.Frame):
         "Unpacks data from ASYNCHLOADER and draws the first render. Quaranteed to have all parameters."
         if token != self.current_load_token: return
         self._zoom_cache.set_maxsize(32)
+        is_current = path == self.filename
         if self.do_caching.get() and not self.cache.get(path):
             self.cache[path] = {}
-            
+        
+        print(caller, data.get("stage"))
         match caller:
-            case "cached_thumb" | "gen_thumb":
-                initial_fit = data["thumb"]
-                self.zoom_fit(initial_fit)
-                self.draw_image(initial_fit) # draw full res after a delay.
-                self._set_picture(self.filename, token)
-
-            case "buffer":
-                initial_fit = data.get("img", data.get("full_res")) # not generating this identically to fit for reasons? should be fit but with initial filter.
-                # have to add buffer to the dict.
-                self.zoom_fit()
-                self.draw_image(initial_fit)
-
-            case "fit":
-                initial_fit = data["img"] # got the find a way to add this to zoom cache.
-                self._zoom_cache[(self.lazy_index, data["scale_key"])] = initial_fit
-                
-                self.zoom_fit(initial_fit)
-                self.draw_image(initial_fit) # calculates the current zoom key and retrieves from cache
-
-                if self.do_caching.get():
-                    self.cache[path]["img"] = data["img"]
-                    self.cache[path]["scale_key"] = data["scale_key"]
-                
-            case "full_res":
-                self.full_res = data["full_res"]
-                self.img_pointer = data.get("pointer", self.img_pointer)
-
-                if self.do_caching.get():
-                    self.cache[path]["full_res"] = self.full_res
-                    self.cache[path]["pointer"] = self.img_pointer
+            case "image":
+                stage = data.get("stage")
+                if stage == "thumb":
+                    if not is_current: return
+                    initial_fit = data["thumb"]
+                    self.zoom_fit(initial_fit)
+                    self.draw_image(initial_fit) # draw full res after a delay.
+                elif stage == "buffer":
+                    if not is_current:
+                        return
+                    self.full_res = data.get("full_res")
+                    initial_fit = data.get("img", data.get("full_res")) # not generating this identically to fit for reasons? should be fit but with initial filter.
+                    if self.full_res is None: self.full_res = initial_fit
+                    self.zoom_fit()
+                    self.draw_image(initial_fit)
+                elif stage == "fit":
+                    if is_current:
+                        self.full_res = data.get("full_res")
+                        initial_fit = data["img"] # got the find a way to add this to zoom cache.
+                        self._zoom_cache[(self.lazy_index, data["scale_key"])] = initial_fit
+                        if not data.get("already_zoom_fitted"):
+                            self.zoom_fit()
+                        self.draw_image(initial_fit) # calculates the current zoom key and retrieves from cache
+                    if self.do_caching.get():
+                        self.cache[path]["img"] = data["img"]
+                        self.cache[path]["scale_key"] = data["scale_key"]
+                elif stage == "full_res":
+                    if is_current:
+                        self.full_res = data["full_res"]
+                    if self.do_caching.get():
+                        self.cache[path]["full_res"] = data.get("full_res")
 
             case "cached": # Cached DATA is the same as fit's + full_res + buffer
-                initial_fit = data["img"]
-                self.full_res = data.get("full_res")
-                self.img_pointer = data.get("pointer", self.img_pointer)
-                self._zoom_cache[(self.lazy_index, data["scale_key"])] = initial_fit
-                self.zoom_fit()
-                self.draw_image(initial_fit)
-
-    "Rendering"
+                if is_current:
+                    initial_fit = data["img"]
+                    self.full_res = data.get("full_res")
+                    self._zoom_cache[(self.lazy_index, data["scale_key"])] = initial_fit
+                    self.zoom_fit()
+                    self.draw_image(initial_fit)
+                elif self.do_caching.get():
+                    self.cache[path]["img"] = data.get("img")
+                    self.cache[path]["scale_key"] = data.get("scale_key")
+                    self.cache[path]["full_res"] = data.get("full_res")
+    
     def draw_image(self, initial_fit=None, drag=False, initial_filter=None, quick_zoom_event=False, buffer_multiplier=1, special2=False):
         start = perf_counter()
         if self.img_pointer == None: ##?
@@ -1372,11 +1440,6 @@ class Application(tk.Frame):
             if initial_fit: # thumbnail or first filter
                 return initial_fit
             
-            # we shouldnt get source if drag, we should do simply scale current or last from cache.
-            # if drag is false, then we can call get_source, this separates these two functions neatyl.
-            # then we'd also split off quick_zoom from this. Well, it would ask getsource for the correct image, but it would ignore cache and generate nearest using a parameter initial filter.
-            # gif is pil images, full_res. we just need to resize these. unfortunately we cant do this in pyvips, unless we have a pyvips object.
-            # note, affine should zoom for us from here? we dont need to resize past full res.
             zoom_key = (self.lazy_index, scale_key)
             resized = None
             if zoom >= 1.0 or not self.anti_aliasing.get(): # if fit is 1.0 or more at start, is it in cache already?
@@ -1401,6 +1464,7 @@ class Application(tk.Frame):
                 cached = cached or self.pil_image.resize(size1, default)
                 self._zoom_cache[zoom_key] = cached
 
+                # separate rescaling of the window?
                 if zoom >= 1.0: # DRAGGING bigger
                     # Scaling up from cached to the original pointer size
                     resized = cached.resize((self.img_pointer.width, self.img_pointer.height), default)
@@ -1410,23 +1474,13 @@ class Application(tk.Frame):
                 elif zoom < 1.0: # DRAGGING smaller
                     resized = cached.resize(size, default)
                     if scale_key < last_zoom_key:
-                        if not self.full_res:
-                            try:
-                                with Image.open(self.filename) as img:
-                                    copy = img.copy()
-                                    if copy.mode != "RGBA": copy = copy.convert("RGBA")
-                                    self.full_res = copy
-                            except Exception as e:
-                                print("draw_image, get_source:", e)
-                                # Fallback to pyvips pointer if file open fails
-                                buffer = self.img_pointer.write_to_memory()
-                                mode = get_mode(self.img_pointer)
-                                resized_full = Image.frombytes(mode, (self.img_pointer.width, self.img_pointer.height), buffer, "raw")
-                                if resized_full.mode != "RGBA": resized_full = resized_full.convert("RGBA")
-                                self.full_res = resized_full
+                        with Image.open(self.filename) as img:
+                            copy = img.copy()
+                            if copy.mode != "RGBA": copy = copy.convert("RGBA")
+                            self.full_res = copy
 
                         # Always pull from full_res when scaling down to maintain quality/stability
-                        resized = self.full_res.resize(size, default)
+                        resized = self.full_res.resize(size, default) # should do pyvips here, thumbnail.
                         new_zoom_key = (self.lazy_index, scale_key)
                         if resized.mode != "RGBA": resized = resized.convert("RGBA")
                         
@@ -1437,29 +1491,13 @@ class Application(tk.Frame):
                         self._zoom_cache.clear()
                         self._zoom_cache[new_zoom_key] = cached
 
-            ################
-            elif quick_zoom_event and self.full_res: # we could do this in pyvips exclusively!!!! # resize is actually the fastest...
-                fail = True
-                try:
-                    resized = self._zoom_cache.__getitem__(zoom_key)
-                    if resized:
-                        correction = size[0] - resized.width
-                    else: correction = 0
-                    resized = self.full_res.resize((size[0]-correction, size[1]), Image.Resampling.NEAREST)
-                    fail = False
-                except Exception as e: 
-                    print("couldnt zoom via PIL", e)
-                    pass
-                if fail:
-                    try:
-                        vips_img = pyvips.Image.thumbnail_buffer(self.pyvips_buffer or self.img_pointer, size[0], height=size[1]) #LINEAR, #CUBIC, #MITCHELL, #LANCZOS2, #LANCZOS3, #MKS2013, #MKS2021
-                        buff = vips_img.write_to_memory()
-                        mode = get_mode(vips_img)
-                        resized = Image.frombytes(mode, (vips_img.width, vips_img.height), buff, "raw")
-                        if resized.mode not in ("RGBA", "RGB"): resized = resized.convert("RGB")
-                    except Exception as e:
-                        print("couldnt zoom via pyvips", e)            
-            
+            elif quick_zoom_event:
+                # load full pil image here?
+                resized = self._zoom_cache.__getitem__(zoom_key)
+                if resized:
+                    correction = size[0] - resized.width
+                else: correction = 0
+                resized = self.full_res.resize((size[0]-correction, size[1]), Image.Resampling.NEAREST)
             else:
                 resized = self._zoom_cache.__getitem__(zoom_key)
                 if resized: 
@@ -1468,37 +1506,19 @@ class Application(tk.Frame):
                 if self.is_gif:
                     f1 = Image.Resampling.LANCZOS if self.filter == "pyvips" else self.filter
                     if quick_zoom_event: f1 = Image.Resampling.NEAREST
-
                     try:
                         resized = self.pil_image.resize(size, f1)
                     except Exception as e:
                         print("Gif resizing error", e)
                 else:
-                    fail = True # would be better to have a fallback that generates from the filesystem, and to have resizing with pyvips so you could do
-                    # first pyvips fails, so flalback to pil. We would always use pyvips if possible, we could change the filter easily.
-                    if self.filter != "pyvips" and self.full_res:
-                        try:
-                            if quick_zoom_event: 
-                                return self.full_res.resize(size, Image.Resampling.NEAREST)
-                            f1 = initial_filter or self.filter if self.filter != "pyvips" else Image.Resampling.NEAREST
-                            resized = self.full_res.resize(size, f1)
-                            fail = False
-                        except Exception as e:
-                            print("Fallback PyVips:", e)
-                    if fail:
-                        try:
-                            vips_img = pyvips.Image.thumbnail_image(self.img_pointer, size[0], height=size[1]) #LINEAR, #CUBIC, #MITCHELL, #LANCZOS2, #LANCZOS3, #MKS2013, #MKS2021
-                            buffer = vips_img.write_to_memory()
-                            mode = get_mode(vips_img)
-                            resized = Image.frombytes(mode, (vips_img.width, vips_img.height), buffer, "raw")
-                            if resized.mode not in ("RGBA", "RGB"): resized = resized.convert("RGB")
-                        except Exception as e:
-                            print("Couldnt resize:", e)
-                            return
-
-                if quick_zoom_event:
-                    return resized
-
+                    if self.filter == "pyvips": # use pyvips only for the final result. Zooming is inefficient in pyvips even with linear filters, but we can use thumbnail only for the final result which should save time if we want good quality.
+                        vips_img = pyvips.Image.thumbnail(self.filename, max(size))
+                        buffer = vips_img.write_to_memory()
+                        mode = get_mode(vips_img)
+                        resized = Image.frombytes(mode, (vips_img.width, vips_img.height), buffer, "raw")
+                    else:
+                        f1 = initial_filter or self.filter if self.filter != "pyvips" else Image.Resampling.NEAREST
+                        resized = self.full_res.resize(size, f1)
                 self._zoom_cache[zoom_key] = resized
             
             return resized
@@ -1521,11 +1541,13 @@ class Application(tk.Frame):
                                  round(affine_inv[3], 3), round(affine_inv[4], 3), int(round(affine_inv[5])))
                 transform_key = (self.lazy_index, scale_key, affine_bucket, cw, ch, self.filter)
                 imagetk = self._imagetk_cache.__getitem__(transform_key)
-                if imagetk: return imagetk, affine_inv
+                if imagetk: 
+                    return imagetk, affine_inv
             
             # we might not have to do scaling at all using transform, except when resizing bigger, and then we can do that by resizing too.
             source = get_source(zoom, scale_key, size)
-            if not source: return None, affine_inv
+            if not source: 
+                return None, affine_inv
             
             """import pyvips
             a, b, tx, c, d, ty = affine_inv
@@ -1554,8 +1576,10 @@ class Application(tk.Frame):
             return imagetk, affine_inv
         
         imagetk, affine_inv = get_imagetk()
-        if special2: return imagetk ########### hacky
-        if not imagetk: return
+        if special2: 
+            return imagetk ########### hacky
+        if not imagetk: 
+            return
 
         tx = self.mat_affine[0, 2] if fast_pan_active else buffer_screen_x
         ty = self.mat_affine[1, 2] if fast_pan_active else buffer_screen_y
@@ -1646,11 +1670,9 @@ class Application(tk.Frame):
         else:
             after_id3 = self.after(40, threaded_buffer_gen, 1, True) # if img actually fits the screen, we shouldnt draw the buffer around it? should cap to the acutal size
 
-
-                
         self.zoom_after_id = after_id3
 
-    def get_first_zoom_level(self, path, initial_filter=None):
+    def get_first_zoom_level(self, path, initial_filter=None, full_res=None):
         "Returns the source image resized to the canvas width and post processed with filters."
         "We get this here and cache it for the main thread."
         # isnt this the same as the one in draw? cant we just use this to get all zoom levels? in theory yes.
@@ -1687,7 +1709,6 @@ class Application(tk.Frame):
             zoom, _, _ = scale_key
             inv_f = 1.0 / zoom
             scale_up[0,0] = scale_up[1,1] = inv_f
-            self.combined = mat_affine @ scale_up
             ####
 
             ###
@@ -1700,11 +1721,12 @@ class Application(tk.Frame):
             return exact_zoom, scale_key
 
         def get_source():
-            if zoom >= 1.0 or not self.anti_aliasing.get(): # if fit is 1.0 or more at start, is it in cache already?¨
+            full_res = None
+            if zoom >= 1.0 or not self.anti_aliasing.get(): # if fit is 1.0 or more at start, is it in cache already?
+                if full_res: return {"img": full_res, "full_res": full_res}
                 full_res_dict = load_full_res(path)
                 full_res = full_res_dict.get("full_res")
-                img_pointer = full_res_dict.get("pointer") # we should mvoe this to the main thread, unsafe!!!
-                return {"img": full_res, "full_res": full_res, "img_pointer": img_pointer}
+                return {"img": full_res, "full_res": full_res}
             else:
                 fail = True
                 if self.filter == "pyvips":
@@ -1718,14 +1740,22 @@ class Application(tk.Frame):
                         print("Fallback:", e)
                 if fail:
                     try:
-                        with Image.open(path) as img:
+                        if full_res: # with some formats like P, only filter that works is "NEAREST", so we have to load the full image to use other filters...
+                            # In these cases the code is forced to load full_res first, then the initial fit. Downstream will recognize if full_res is generated here.
                             f1 = initial_filter if initial_filter is not None else self.filter if self.filter != "pyvips" else Image.Resampling.NEAREST
                             resized = img.resize(size, f1)
+                        else:
+                            with Image.open(path) as img:
+                                if img.mode not in ("RGBA", "RGB"): 
+                                    img = img.convert("RGB")
+                                    full_res = img
+                                f1 = initial_filter if initial_filter is not None else self.filter if self.filter != "pyvips" else Image.Resampling.NEAREST
+                                resized = img.resize(size, f1)
                     except Exception as e:
                         print("Failed to resize", e)
                         return
                 if resized.mode not in ("RGBA", "RGB"): resized = resized.convert("RGB")
-                return {"img": resized}
+                return {"img": resized, "full_res": full_res}
 
         # prefetch values
         handle = pyvips.Image.new_from_file(path)
@@ -1747,36 +1777,35 @@ class Application(tk.Frame):
         scale_key = int(round(exact_zoom, 3) * 1000)
         self.scale_key = exact_zoom, scale_key
 
-    def restrict_pan(self):
-        cw, ch = self.canvas.winfo_width(), self.canvas.winfo_height()
-        iw, ih = self.img_pointer.width, self.img_pointer.height
+    def pyvips_to_pillows_for_thumb(self, filename: str, mode: str, pre_existing_thumbs: bool) -> Image.Image | None:
+        filter = Image.Resampling.NEAREST if mode == "Fast" else Image.Resampling.LANCZOS
+        try:
+            if pre_existing_thumbs: # guaranteed to be rgba
+                thumb = pyvips.Image.new_from_file(filename)
+                if mode == "Fast": res_thumb = thumb
+                else: res_thumb = pyvips.Image.thumbnail(filename, 32)
+                buffer = res_thumb.write_to_memory()
+                pil_format = get_mode(res_thumb)
+                resized = Image.frombytes(pil_format, (res_thumb.width, res_thumb.height), buffer, "raw")
+                
+                if mode != "Fast": resized = resized.resize((thumb.width, thumb.height), filter)
+            else: # does this work?
+                vips_img = pyvips.Image.thumbnail(filename, 256)
+                if mode != "Fast": vips_img = vips_img.gaussblur(2)
+                buffer = vips_img.write_to_memory()
+                pil_format = get_mode(vips_img)
+                resized = Image.frombytes(pil_format, (vips_img.width, vips_img.height), buffer, "raw")
+        except Exception as e:
+            print("Fallback: (thumb)", e, filename)
+            try:
+                with Image.open(filename) as img:
+                    img.thumbnail((256, 256))
+            except Exception as e:
+                print("Failed to generate thumb:", filename, e)
+                return
 
-        tw = iw * self.mat_affine[0, 0]
-        th = ih * self.mat_affine[1, 1]
-
-        tx = self.mat_affine[0, 2]
-        ty = self.mat_affine[1, 2]
-
-        if tw <= cw:
-            tx_min, tx_max = 0, cw - tw
-        else:
-            tx_min, tx_max = cw - tw, 0
-        tx = min(max(tx, tx_min), tx_max)
-
-        if th <= ch:
-            ty_min, ty_max = 0, ch - th
-        else:
-            ty_min, ty_max = ch - th, 0
-        ty = min(max(ty, ty_min), ty_max)
-
-        self.mat_affine[0, 2] = tx
-        self.mat_affine[1, 2] = ty
-
-        scale_up = np.eye(3)
-        zoom, _ = self.scale_key
-        inv_f = 1.0 / zoom
-        scale_up[0,0] = scale_up[1,1] = inv_f
-        self.combined = self.mat_affine @ scale_up
+        if resized.mode not in ("RGBA", "RGB"): resized = resized.convert("RGB")
+        return resized
 
 def get_mode(vips_img) -> str:
     "Return the mode needed to convert a PYVIPS.Image to a PIL.Image format via PIL.Image.frombytes()."
@@ -1788,58 +1817,19 @@ def get_mode(vips_img) -> str:
         case "rgb16" | "grey16": pformat = "I;16"
     return pformat
 
-def pyvips_to_pillows_for_thumb(filename: str, mode: str, pre_existing_thumbs: bool) -> Image.Image | None:
-    filter = Image.Resampling.NEAREST if mode == "Fast" else Image.Resampling.LANCZOS
-    try:
-        if pre_existing_thumbs: # guaranteed to be rgba
-            thumb = pyvips.Image.new_from_file(filename)
-            if mode == "Fast": res_thumb = thumb
-            else: res_thumb = pyvips.Image.thumbnail(filename, 32)
-            buffer = res_thumb.write_to_memory()
-            pil_format = get_mode(res_thumb)
-            resized = Image.frombytes(pil_format, (res_thumb.width, res_thumb.height), buffer, "raw")
-            if mode != "Fast": resized = resized.resize((thumb.width, thumb.height), filter)
-        else: # does this work?
-            vips_img = pyvips.Image.thumbnail(filename, 256)
-            if mode != "Fast": vips_img = vips_img.gaussblur(2)
-            buffer = vips_img.write_to_memory()
-            pil_format = get_mode(vips_img)
-            resized = Image.frombytes(pil_format, (vips_img.width, vips_img.height), buffer, "raw")
-    except Exception as e:
-        print("Fallback: (thumb)", e, filename)
-        try:
-            with Image.open(filename) as img:
-                img.thumbnail((256, 256))
-        except Exception as e:
-            print("Failed to generate thumb:", filename, e)
-            return
-
-    if resized.mode not in ("RGBA", "RGB"): resized = resized.convert("RGB")
-    return resized
-
 def load_full_res(path: str) -> dict:
-    "Return full_res and optionally the loaded in pointer using Vips, or only full_res with PIL as fallback."
+    "Return full_res using Vips where possible, or only full_res with PIL as fallback."
     try:
-        pointer = pyvips.Image.new_from_file(path) # cheap
-        pointer = pointer.copy_memory()
-        buffer = pointer.write_to_memory() # we want to generate thumbnails from THIS
-        mode = get_mode(pointer)
-        img = Image.frombytes(mode, (pointer.width, pointer.height), buffer, "raw")
-        if img.mode in ("RGBA", "RGB"): pass
-        else: img = img.convert("RGB")
-        return {"full_res": img, "pointer": pointer}
+        with Image.open(path) as img:
+            if img.mode in ("RGBA", "RGB"): img.load()
+            else: img = img.convert("RGB")
+            return {"full_res": img}
     except Exception as e:
-        print("Fallback to PIL:", e, path)
-        try:
-            with Image.open(path) as img:
-                if img.mode in ("RGBA", "RGB"): img.load()
-                else: img = img.convert("RGB")
-                return {"full_res": img}
-        except Exception as e:
-            print("Error (load_full_res):", e, path)
-            return {}
+        print("Error (load_full_res):", e, path)
+        return {}
 
 from concurrent.futures import ThreadPoolExecutor
+
 class AsyncImageLoader:
     def __init__(self, viewer):
         self.viewer = viewer
@@ -1847,39 +1837,65 @@ class AsyncImageLoader:
         self.queue = queue.Queue()
         self.executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="AsyncLoader")
     
-    def request_load(self, path, token=None, caller=None):
-        token = token or object()
-        self.viewer.current_load_token = token
-        self.queue.put((path, token, caller))
-        self.executor.submit(self._process_request, path, token, caller)
-        return token
-    
     def stop(self):
         self.executor.shutdown(wait=False)
 
-    def _process_request(self, path, token, caller):   
-        def move_to_main_thread(data, path=path):
+    def request_load(self, path, token=None, caller=None, thumbpath=None):
+        token = token or object()
+        self.viewer.current_load_token = token
+        self.executor.submit(self._process_request, path, token, caller, thumbpath)
+        return token
+
+    def _process_request(self, path, token, caller, thumbpath=None):   
+        def move_to_main_thread(data, path=path, caller_override=None):
             if not data or self.viewer.current_load_token is not token: return # out of scope | Fail
             with self.lock:
-                self.viewer.master.after(0, self.viewer._on_async_ready, path, token, data, caller) # compares tokens automatically
+                self.viewer.master.after(0, self.viewer._on_async_ready, path, token, data, caller_override or caller) # compares tokens automatically
 
         try: # one potential problem is full_res being generated immediately by fit, and full_res caller immediately after is doing empty work. we should calculate the zoom BEFORE its scheduled.
             if self.viewer.current_load_token is not token: return # clear cache until call is reached
             match caller:
-                case "cached_thumb" | "gen_thumb":
-                    quality = self.viewer.thumbnail_var.get()
-                    thumbnail_exists =  bool(caller=="cached_thumb")
-                    img = pyvips_to_pillows_for_thumb(path, quality, thumbnail_exists)
-                    move_to_main_thread({"thumb": img})
+                case "image":
+                    thumb_quality = self.viewer.thumbnail_var.get()
+                    use_thumb = thumbpath is not None and thumb_quality.lower() != "no thumb"
+                    if use_thumb:
+                        thumbnail_exists = bool(thumbpath != self.viewer.filename)
+                        img = self.viewer.pyvips_to_pillows_for_thumb(thumbpath, thumb_quality, thumbnail_exists)
+                        move_to_main_thread({"stage": "thumb", "thumb": img})
+                        if self.viewer.current_load_token is not token:
+                            return
 
-                case "fit" | "buffer": # get_first_zoom should only return the zoomed image! make sure its scope is exactly that.
-                    inital_filter = None if caller=="fit" else self.viewer.drag_quality
-                    source_dict, scale_key = self.viewer.get_first_zoom_level(path, initial_filter=inital_filter)
+                    if self.viewer.do_caching.get() and self.viewer.cache.get(path):
+                        cached = self.viewer.cache.get(path)
+                        move_to_main_thread(cached, caller_override="cached")
+                        return
+
+                    buffer_allowed = self.viewer.selected_option1.get() != "No buffer"
+                    same_filter = self.viewer.filter == self.viewer.drag_quality
+                    filter_is_pyvips = self.viewer.filter == "pyvips"
+
+                    buffer_generated = False
+                    full_res = None
+                    if buffer_allowed and not same_filter and not filter_is_pyvips:
+                        source_dict, scale_key = self.viewer.get_first_zoom_level(path, initial_filter=self.viewer.drag_quality)
+                        source_dict["stage"] = "buffer"
+                        source_dict["scale_key"] = scale_key
+                        move_to_main_thread(source_dict)
+                        if self.viewer.current_load_token is not token:
+                            return
+                        full_res = source_dict.get("full_res")
+                        buffer_generated = True
+
+                    source_dict, scale_key = self.viewer.get_first_zoom_level(path, initial_filter=None, full_res=full_res) # don't reconvert, use old full_res.
+                    source_dict["stage"] = "fit"
+                    source_dict["already_zoom_fitted"] = buffer_generated
                     source_dict["scale_key"] = scale_key
                     move_to_main_thread(source_dict)
+                    if self.viewer.current_load_token is not token or source_dict.get("full_res"): # get_first_zoom_level may generate full_res if PIL.mode == P.
+                        return
 
-                case "full_res": # for currently displayed image!!!
                     full_res_dict = load_full_res(path)
+                    full_res_dict["stage"] = "full_res"
                     move_to_main_thread(full_res_dict)
 
                 case "load_to_cache":
@@ -1887,17 +1903,18 @@ class AsyncImageLoader:
                     for x in adjacent_copy:
                         source_dict, scale_key = self.viewer.get_first_zoom_level(x)
                         if self.viewer.current_load_token is not token: return
+                        source_dict["stage"] = "fit"
+                        source_dict["scale_key"] = scale_key
                         move_to_main_thread(source_dict, x)
 
                     for x in adjacent_copy:
                         full_res_dict = load_full_res(x)
                         if self.viewer.current_load_token is not token: return
+                        full_res_dict["stage"] = "full_res"
                         move_to_main_thread(full_res_dict, x)
 
         except Exception as e: 
             print(f"Async loader processing error: {e}")
-        finally:
-            self.queue.task_done()
    
 class VlcPlayer:
     """Handles VLC video playback and GUI embedding"""
@@ -2321,6 +2338,22 @@ class Timer:
         return (f"{elapsed_time:.1f}")
 
 if __name__ == "__main__":
+    file_path = sys.argv[1] if len(sys.argv) > 1 else None
+    print(sys.argv)
+    
+    # Check for existing instance
+    if file_path:
+        try:
+            client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            client.connect(('localhost', PORT))
+            client.send(file_path.encode())
+            client.close()
+            sys.exit() # Exit this instance, existing one will handle it
+        except ConnectionRefusedError:
+            pass # No instance running, continue to launch new one
+
     app = Application()
-    #app.set_image(path)
+    # Load the initial file if provided
+    if file_path:
+        app.set_image(file_path)
     app.master.mainloop()

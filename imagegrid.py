@@ -1,4 +1,4 @@
-import os, tkinter as tk, threading, queue
+import os, tkinter as tk, threading, queue, ctypes
 from tkinter import simpledialog
 from time import perf_counter
 from typing import Literal
@@ -34,6 +34,7 @@ class dummy:
         self.canvas.itemconfig(self.img_id, image=image)
 
 class ImageGrid(tk.Frame):
+    
     class PrefilledInputDialog(simpledialog.Dialog):
         def __init__(self, parent, title:str, message:str, default_text=""):
             self.message = message
@@ -233,7 +234,7 @@ class ImageGrid(tk.Frame):
                         import traceback
                         traceback.print_exc()
 
-        thumb_ext = {"png", "jpg", "jpeg", "bmp", "pcx", "tiff", "psd", "jfif", "gif", "webp", "avif"}
+        thumb_ext = {"png", "jpg", "jpeg", "bmp", "pcx", "tiff", "psd", "jfif", "gif", "webp", "avif", "dds"}
         anim_ext = {"gif", "webp", "webm", "mp4", "mkv", "m4v", "mov"}
         pyav_formats = {"webm", "mp4", "mkv", "m4v", "mov"}
         thumb_pool = None
@@ -267,6 +268,75 @@ class ImageGrid(tk.Frame):
             self._left_lock = threading.Lock()
             self.left = 0
             self.left_f = 0
+            self.pyvips_lock = threading.Lock()
+            self.hdd_frame_semaphore = threading.Semaphore(1)
+            self.ssd_frame_semaphore = threading.Semaphore(self.frame_workers)
+            self._drive_storage_cache = {}
+
+        def _get_frame_semaphore(self, path):
+            return self.hdd_frame_semaphore if self._is_path_on_hdd(path) else self.ssd_frame_semaphore
+
+        def _is_path_on_hdd(self, path):
+            if os.name != 'nt':
+                return False
+            try:
+                abs_path = os.path.abspath(path)
+                drive = os.path.splitdrive(abs_path)[0].upper()
+                if not drive:
+                    return False
+                if drive in self._drive_storage_cache:
+                    return self._drive_storage_cache[drive]
+
+                root = drive + "\\"
+                kernel32 = ctypes.windll.kernel32
+                GetDriveTypeW = kernel32.GetDriveTypeW
+                GetDriveTypeW.argtypes = [ctypes.c_wchar_p]
+                GetDriveTypeW.restype = ctypes.c_uint
+                if GetDriveTypeW(root) != 3:
+                    self._drive_storage_cache[drive] = False
+                    return False
+
+                GENERIC_READ = 0x80000000
+                FILE_SHARE_READ = 0x00000001
+                FILE_SHARE_WRITE = 0x00000002
+                OPEN_EXISTING = 3
+                path_name = f"\\\\.\\{drive.strip(':')}:"
+                CreateFileW = kernel32.CreateFileW
+                CreateFileW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint, ctypes.c_uint, ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint, ctypes.c_void_p]
+                CreateFileW.restype = ctypes.c_void_p
+                handle = CreateFileW(path_name, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, None, OPEN_EXISTING, 0, None)
+                if handle == ctypes.c_void_p(-1).value or handle is None:
+                    self._drive_storage_cache[drive] = False
+                    return False
+
+                class STORAGE_PROPERTY_QUERY(ctypes.Structure):
+                    _fields_ = [
+                        ("PropertyId", ctypes.c_int),
+                        ("QueryType", ctypes.c_int),
+                        ("AdditionalParameters", ctypes.c_byte * 1),
+                    ]
+
+                class STORAGE_DEVICE_SEEK_PENALTY_DESCRIPTOR(ctypes.Structure):
+                    _fields_ = [
+                        ("Version", ctypes.c_uint),
+                        ("Size", ctypes.c_uint),
+                        ("IncursSeekPenalty", ctypes.c_bool),
+                    ]
+
+                query = STORAGE_PROPERTY_QUERY(7, 0, (ctypes.c_byte * 1)(0))
+                descriptor = STORAGE_DEVICE_SEEK_PENALTY_DESCRIPTOR()
+                returned = ctypes.c_uint(0)
+                IOCTL_STORAGE_QUERY_PROPERTY = (0x2d << 16) | (0 << 14) | (0x0500 << 2) | 0
+                DeviceIoControl = kernel32.DeviceIoControl
+                DeviceIoControl.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_uint, ctypes.POINTER(ctypes.c_uint), ctypes.c_void_p]
+                DeviceIoControl.restype = ctypes.c_int
+                ok = DeviceIoControl(handle, IOCTL_STORAGE_QUERY_PROPERTY, ctypes.byref(query), ctypes.sizeof(query), ctypes.byref(descriptor), ctypes.sizeof(descriptor), ctypes.byref(returned), None)
+                kernel32.CloseHandle(handle)
+                result = bool(ok and descriptor.IncursSeekPenalty)
+                self._drive_storage_cache[drive] = result
+                return result
+            except Exception:
+                return False
 
         def start_background_worker(self):
             if self.stop_event.is_set():
@@ -487,31 +557,32 @@ class ImageGrid(tk.Frame):
 
         def gen_via_pyvips(self, obj, path, mode, size, user):
             try:
-                vips_img = ImageGrid.ThumbManager.pyvips.Image.new_from_file(obj.path)
+                with self.pyvips_lock:
+                    vips_img = ImageGrid.ThumbManager.pyvips.Image.new_from_file(obj.path)
 
-                match mode:
-                    case "Keep Aspect Ratio":
-                        vips_img = ImageGrid.ThumbManager.pyvips.Image.thumbnail(obj.path, size)
-                    case "Stretch to Dimensions":
-                        vips_img = ImageGrid.ThumbManager.pyvips.Image.new_from_file(obj.path, access="sequential")
-                        vips_img = vips_img.resize(size / vips_img.width, vscale=size / vips_img.height)
-                    case "Pad to Dimensions":
-                        vips_img = ImageGrid.ThumbManager.pyvips.Image.thumbnail(obj.path, size)
-                        bg = [114, 114, 114, 255] if vips_img.hasalpha() else [114, 114, 114]
-                        vips_img = vips_img.embed((size - vips_img.width) // 2, 
-                                                (size - vips_img.height) // 2, 
-                                                size, size, 
-                                                extend="background", background=bg)
-                    case "Crop to Dimensions":
-                        vips_img = ImageGrid.ThumbManager.pyvips.Image.thumbnail(obj.path, size, crop="centre")
+                    match mode:
+                        case "Keep Aspect Ratio":
+                            vips_img = ImageGrid.ThumbManager.pyvips.Image.thumbnail(obj.path, size)
+                        case "Stretch to Dimensions":
+                            vips_img = ImageGrid.ThumbManager.pyvips.Image.new_from_file(obj.path, access="sequential")
+                            vips_img = vips_img.resize(size / vips_img.width, vscale=size / vips_img.height)
+                        case "Pad to Dimensions":
+                            vips_img = ImageGrid.ThumbManager.pyvips.Image.thumbnail(obj.path, size)
+                            bg = [114, 114, 114, 255] if vips_img.hasalpha() else [114, 114, 114]
+                            vips_img = vips_img.embed((size - vips_img.width) // 2, 
+                                                    (size - vips_img.height) // 2, 
+                                                    size, size, 
+                                                    extend="background", background=bg)
+                        case "Crop to Dimensions":
+                            vips_img = ImageGrid.ThumbManager.pyvips.Image.thumbnail(obj.path, size, crop="centre")
 
-                pformat = str(vips_img.interpretation).lower()
-                match pformat:
-                    case "srgb": pformat = "RGBA" if vips_img.bands == 4 else "RGB"
-                    case "b-w": pformat = "LA" if vips_img.bands == 2 else "L"
-                    case "rgb16" | "grey16": pformat = "I;16"
+                    pformat = str(vips_img.interpretation).lower()
+                    match pformat:
+                        case "srgb": pformat = "RGBA" if vips_img.bands == 4 else "RGB"
+                        case "b-w": pformat = "LA" if vips_img.bands == 2 else "L"
+                        case "rgb16" | "grey16": pformat = "I;16"
 
-                pil_img = ImageGrid.ThumbManager.Image.frombytes(pformat, (vips_img.width, vips_img.height), vips_img.write_to_memory(), "raw")
+                    pil_img = ImageGrid.ThumbManager.Image.frombytes(pformat, (vips_img.width, vips_img.height), vips_img.write_to_memory(), "raw")
                 if self.fileManager.THUMB_FORMAT[1:] == "jpeg" and pil_img.mode != "RGB": pil_img = pil_img.convert("RGB")
                 elif pil_img.mode not in ("RGB", "RGBA"): pil_img = pil_img.convert("RGBA")
                 if path:
@@ -637,163 +708,172 @@ class ImageGrid(tk.Frame):
                 return success
 
         def gen_frames(self, obj):
-            # some kind of limits here for both methods, like a time 15 seconds max or 20.
+            # Some HDD-friendly throttling: serialize heavy animation/frame extraction
+            # and reduce the number of generated frames for long animations.
             gui = self.gui
             size, animate = gui.thumbnailsize, gui.imagegrid.animate
             if self.stop_event.is_set(): return
             def gui_enable_animation(o=obj, frametime=None):
                 animate.add_animation(o, frametime)
             obj.frames.clear()
-            if obj.ext in self.pyav_formats:
-                def pick_sampling_rate(duration: float, native_fps: float,min_fps: float = 12.0, max_frames: int = 500, mode: Literal["stretch", "limit"] = "stretch"): # st
-                    if duration == 0.0:  return native_fps if native_fps != 0.0 else min_fps
-                    cap_rate = max_frames / duration # highest fps if we dont crop duration, but respect max_frames.
-                    if mode == "stretch": # respect only max_frames.
-                        if native_fps * duration <= max_frames: sampling_fps = native_fps # native fps is used if the frames would be under max_frames.
-                        else: sampling_fps = cap_rate
-                    elif mode == "limit": # respect min_fps.
-                        if native_fps * duration <= max_frames: sampling_fps = native_fps
-                        elif cap_rate >= min_fps: sampling_fps = cap_rate # prefers higher fps before min_fps
-                        else: sampling_fps = min_fps # respects min_fps, but will exceed max_frames
-                    sampling_fps = min(sampling_fps, native_fps) # never exceed the video's own frame-rate
-                    frame_count = min(max_frames, round(duration * sampling_fps))
-                    return sampling_fps, frame_count
-                def get_fps_and_duration(path: str):
-                    with ImageGrid.ThumbManager.av.open(path) as container:
-                        stream = container.streams.video[0]
-                        fps = float(stream.average_rate) if stream.average_rate else 24.0
-                        duration = float(container.duration) / ImageGrid.ThumbManager.av.time_base if container.duration else 0.0
-                        return fps, duration
-                def extract_with_pyav(path: str, timestamps: list, frametime_ms: int):
-                    interp = ImageGrid.ThumbManager.av.video.reformatter.Interpolation.AREA
-                    with ImageGrid.ThumbManager.av.open(path) as container:
-                        video_stream = container.streams.video[0]
-                        w, h = video_stream.width, video_stream.height
-                        max_size = 256
-                        scale = max_size / max(w, h)
-                        new_w = int(w * scale)
-                        new_h = int(h * scale)
-                        video_stream.thread_type = "AUTO"
-                        time_base = float(video_stream.time_base)
-                        target_pts_list = [int(t / time_base) for t in timestamps]
-                        current_target_idx = 0
-                        total_targets = len(target_pts_list)
-                        last_pts = -1
-                        while current_target_idx < total_targets:
-                            if (self.stop_event.is_set() and not (obj.frame or obj.destframe)) or not (obj.frame or obj.destframe): 
-                                break
-                            target_pts = target_pts_list[current_target_idx]
+            frame_limit = 100
+            animation_frame_limit = 1000000
+            frame_sem = self._get_frame_semaphore(obj.path)
+            with frame_sem:
+                if obj.ext in self.pyav_formats:
+                    def pick_sampling_rate(duration: float, native_fps: float, min_fps: float = 12.0, max_frames: int = 500, mode: Literal["stretch", "limit"] = "stretch"):
+                        if duration == 0.0:  return native_fps if native_fps != 0.0 else min_fps
+                        cap_rate = max_frames / duration
+                        if mode == "stretch":
+                            if native_fps * duration <= max_frames: sampling_fps = native_fps
+                            else: sampling_fps = cap_rate
+                        elif mode == "limit":
+                            if native_fps * duration <= max_frames: sampling_fps = native_fps
+                            elif cap_rate >= min_fps: sampling_fps = cap_rate
+                            else: sampling_fps = min_fps
+                        sampling_fps = min(sampling_fps, native_fps)
+                        frame_count = min(max_frames, round(duration * sampling_fps))
+                        return sampling_fps, frame_count
 
-                            if last_pts == -1 or (target_pts - last_pts) > (1.0 / time_base):
-                                container.seek(target_pts, any_frame=False, backward=True, stream=video_stream)
-                            
-                            try:
-                                for frame in container.decode(video_stream):
-                                    if frame.pts >= target_pts:
-                                        resized_frame = frame.reformat(width=new_w, height=new_h, interpolation=interp, format="rgb24")
-                                        pil_img = resized_frame.to_image()
-                                        obj.frames.append(((ImageGrid.ThumbManager.ImageTk.PhotoImage(pil_img)), frametime_ms if sampling_fps == min_fps else frametime_ms))
+                    def get_fps_and_duration(path: str):
+                        with ImageGrid.ThumbManager.av.open(path) as container:
+                            stream = container.streams.video[0]
+                            fps = float(stream.average_rate) if stream.average_rate else 24.0
+                            duration = float(container.duration) / ImageGrid.ThumbManager.av.time_base if container.duration else 0.0
+                            return fps, duration
 
-                                        if len(obj.frames) == 2:
-                                            self.gui.after_idle(gui_enable_animation, obj, frametime_ms if sampling_fps == min_fps else None)
-                                        
-                                        last_pts = frame.pts
-                                        current_target_idx += 1
-                                        break # Move to the next timestamp
-                            except ImageGrid.ThumbManager.av.EOFError:
-                                current_target_idx = total_targets
-                with self.av_semaphore:
-                    try:
-                        min_fps = 24
-                        max_frames = 200
-                        fps, duration = get_fps_and_duration(obj.path)
-                        sampling_fps, n = pick_sampling_rate(duration=duration, native_fps=fps, min_fps=min_fps, max_frames=max_frames, mode="limit")
-                        frametime_ms = int(round(1000.0 / sampling_fps))
-                        timestamps = [(i / sampling_fps) for i in range(n)]
-                        
-                        extract_with_pyav(obj.path, timestamps, frametime_ms)
-                    except Exception as e:
-                        print("error in gen frames (av)", e)
-            elif obj.ext in self.anim_ext:
-                def gen_using_pil():
-                    with ImageGrid.ThumbManager.Image.open(obj.path, "r") as img:
-                        i = 0
-                        while True:
-                            if (self.stop_event.is_set() and not (obj.frame or obj.destframe)) or not (obj.frame or obj.destframe): break
-                            try:
-                                img.seek(i)
-                                duration = img.info.get('duration', 100)
-                                if img.mode not in ("RGBA", "RGB"): frame = img.convert("RGB")
-                                else: frame = img.copy()
+                    def extract_with_pyav(path: str, timestamps: list, frametime_ms: int):
+                        interp = ImageGrid.ThumbManager.av.video.reformatter.Interpolation.AREA
+                        with ImageGrid.ThumbManager.av.open(path) as container:
+                            video_stream = container.streams.video[0]
+                            w, h = video_stream.width, video_stream.height
+                            max_size = 256
+                            scale = max_size / max(w, h)
+                            new_w = int(w * scale)
+                            new_h = int(h * scale)
+                            video_stream.thread_type = "AUTO"
+                            time_base = float(video_stream.time_base)
+                            target_pts_list = [int(t / time_base) for t in timestamps]
+                            current_target_idx = 0
+                            total_targets = len(target_pts_list)
+                            last_pts = -1
+                            while current_target_idx < total_targets:
+                                if (self.stop_event.is_set() and not (obj.frame or obj.destframe)) or not (obj.frame or obj.destframe):
+                                    break
+                                target_pts = target_pts_list[current_target_idx]
 
-                                frame.thumbnail((size, size))
-                                obj.frames.append((ImageGrid.ThumbManager.ImageTk.PhotoImage(frame), duration))
-                                i += 1
-                                if len(obj.frames) == 2: self.gui.after_idle(gui_enable_animation)
-                            except EOFError: break
-                            except Exception as e:
-                                print("gen fraems error:", e)
-                                break
-                def gen_using_vips():
-                    import pyvips
-                    full_image = None
-                    image = None
-                    try:
-                        # Load the full animation pipeline (tax paid here)
-                        full_image = pyvips.Image.gifload(obj.path, n=-1)
-                        # Apply the 'shrink-on-load' thumbnail logic
-                        image = pyvips.Image.thumbnail_image(full_image, size, height=size, size='down')
-                        
-                        frame_h = image.get("page-height")
-                        n_pages = image.get("n-pages")
-                        
-                        # Handle metadata (centiseconds to milliseconds)
+                                if last_pts == -1 or (target_pts - last_pts) > (1.0 / time_base):
+                                    container.seek(target_pts, any_frame=False, backward=True, stream=video_stream)
+
+                                try:
+                                    for frame in container.decode(video_stream):
+                                        if frame.pts >= target_pts:
+                                            resized_frame = frame.reformat(width=new_w, height=new_h, interpolation=interp, format="rgb24")
+                                            pil_img = resized_frame.to_image()
+                                            obj.frames.append(((ImageGrid.ThumbManager.ImageTk.PhotoImage(pil_img)), frametime_ms if sampling_fps == min_fps else frametime_ms))
+
+                                            if len(obj.frames) == 2:
+                                                self.gui.after_idle(gui_enable_animation, obj, frametime_ms if sampling_fps == min_fps else None)
+
+                                            last_pts = frame.pts
+                                            current_target_idx += 1
+                                            break
+                                except ImageGrid.ThumbManager.av.EOFError:
+                                    current_target_idx = total_targets
+
+                    with self.av_semaphore:
                         try:
-                            raw_delays = image.get("delay")
-                            if not isinstance(raw_delays, list):
-                                raw_delays = [raw_delays] * n_pages
-                            # Standardizing: if < 20, assume centiseconds; else assume ms
-                            delays = [d * 10 if d < 20 else d for d in raw_delays]
-                        except:
-                            delays = [100] * n_pages
+                            min_fps = 24
+                            max_frames = frame_limit
+                            fps, duration = get_fps_and_duration(obj.path)
+                            sampling_fps, n = pick_sampling_rate(duration=duration, native_fps=fps, min_fps=min_fps, max_frames=max_frames, mode="limit")
+                            frametime_ms = int(round(1000.0 / sampling_fps))
+                            timestamps = [(i / sampling_fps) for i in range(n)]
 
-                        for i in range(n_pages):
-                            # Control checks matching your PIL logic
-                            if (self.stop_event.is_set() and not (obj.frame or obj.destframe)) or not (obj.frame or obj.destframe):
-                                break
+                            extract_with_pyav(obj.path, timestamps, frametime_ms)
+                        except Exception as e:
+                            print("error in gen frames (av)", e)
+                elif obj.ext in self.anim_ext:
+                    def gen_using_pil():
+                        with ImageGrid.ThumbManager.Image.open(obj.path, "r") as img:
+                            i = 0
+                            while i < animation_frame_limit:
+                                if (self.stop_event.is_set() and not (obj.frame or obj.destframe)) or not (obj.frame or obj.destframe): break
+                                try:
+                                    img.seek(i)
+                                    duration = img.info.get('duration', 100)
+                                    if img.mode not in ("RGBA", "RGB"): frame = img.convert("RGB")
+                                    else: frame = img.copy()
 
-                            # Extract current frame from the vertical strip
-                            vips_frame = image.crop(0, i * frame_h, image.width, frame_h)
-                            
-                            # Ensure RGBA for Tkinter compatibility
-                            if vips_frame.bands == 3:
-                                vips_frame = vips_frame.bandjoin(255)
-                            
-                            # Execute the pipeline and convert to PhotoImage
-                            mem = vips_frame.write_to_memory()
-                            pil_img = ImageGrid.ThumbManager.Image.frombuffer(
-                                'RGBA', (vips_frame.width, vips_frame.height), mem, 'raw', 'RGBA', 0, 1
-                            )
-                            
-                            photo = ImageGrid.ThumbManager.ImageTk.PhotoImage(pil_img)
-                            duration = delays[i]
-                            
-                            obj.frames.append((photo, duration))
-                            
-                            # Trigger the GUI enable on the 2nd frame, exactly like your PIL code
-                            if len(obj.frames) == 2:
-                                self.gui.after_idle(gui_enable_animation)
+                                    frame.thumbnail((size, size))
+                                    obj.frames.append((ImageGrid.ThumbManager.ImageTk.PhotoImage(frame), duration))
+                                    i += 1
+                                    if len(obj.frames) == 2: self.gui.after_idle(gui_enable_animation)
+                                except EOFError: break
+                                except Exception as e:
+                                    print("gen fraems error:", e)
+                                    break
 
-                    except Exception as e:
-                        print("gen frames vips error:", e)
-                        obj.clear_frames()
-                        gen_using_pil()
-                    finally:
-                        del full_image
-                        del image
-                
-                with self.gif_semaphore: #? works or no
-                    gen_using_vips() # falls back to pil.
+                    def gen_using_vips():
+                        import pyvips
+                        full_image = None
+                        image = None
+                        try:
+                            # Load the full animation pipeline (tax paid here)
+                            full_image = pyvips.Image.gifload(obj.path, n=-1)
+                            # Apply the 'shrink-on-load' thumbnail logic
+                            image = pyvips.Image.thumbnail_image(full_image, size, height=size, size='down')
+                            
+                            frame_h = image.get("page-height")
+                            n_pages = min(image.get("n-pages"), animation_frame_limit)
+                            
+                            # Handle metadata (centiseconds to milliseconds)
+                            try:
+                                raw_delays = image.get("delay")
+                                if not isinstance(raw_delays, list):
+                                    raw_delays = [raw_delays] * n_pages
+                                # Standardizing: if < 20, assume centiseconds; else assume ms
+                                delays = [d * 10 if d < 20 else d for d in raw_delays]
+                            except:
+                                delays = [100] * n_pages
+
+                            for i in range(n_pages):
+                                # Control checks matching your PIL logic
+                                if (self.stop_event.is_set() and not (obj.frame or obj.destframe)) or not (obj.frame or obj.destframe):
+                                    break
+
+                                # Extract current frame from the vertical strip
+                                vips_frame = image.crop(0, i * frame_h, image.width, frame_h)
+                                
+                                # Ensure RGBA for Tkinter compatibility
+                                if vips_frame.bands == 3:
+                                    vips_frame = vips_frame.bandjoin(255)
+                                
+                                # Execute the pipeline and convert to PhotoImage
+                                mem = vips_frame.write_to_memory()
+                                pil_img = ImageGrid.ThumbManager.Image.frombuffer(
+                                    'RGBA', (vips_frame.width, vips_frame.height), mem, 'raw', 'RGBA', 0, 1
+                                )
+                                
+                                photo = ImageGrid.ThumbManager.ImageTk.PhotoImage(pil_img)
+                                duration = delays[i]
+                                
+                                obj.frames.append((photo, duration))
+                                
+                                # Trigger the GUI enable on the 2nd frame, exactly like your PIL code
+                                if len(obj.frames) == 2:
+                                    self.gui.after_idle(gui_enable_animation)
+
+                        except Exception as e:
+                            print("gen frames vips error:", e)
+                            obj.clear_frames()
+                            gen_using_pil()
+                        finally:
+                            del full_image
+                            del image
+
+                    with self.gif_semaphore: #? works or no
+                        gen_using_vips() # falls back to pil.
             if len(obj.frames) <= 1: gui.after_idle(obj.clear_frames)
 
         def get_mode(self, vips_img) -> Literal["RGB", "L", "I;16"]:
